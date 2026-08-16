@@ -1,0 +1,43 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# 个人备份与历史快照（含服务器地址等敏感信息）
+/backups/
+
+# 源码备份文件
+*.backup
+*.bak
+*.orig
+
+# 本地工具配置
+/.claude/
+/.zcode/
+
+# 部署相关（含服务器基础设施信息）
+/deploy_server.sh
+/DEPLOY_GUIDE.md
+/server_vip_api.js
+
+# 构建产物
+/app/release/
+*.apk
+*.aab
+
+# 签名与本地密钥（绝不提交）
+keystore.properties
+*.jks
+*.keystore
+
+# 其他
+*.zip
+/node_modules/
+/np-submodule/
+

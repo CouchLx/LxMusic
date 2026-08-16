@@ -1,0 +1,70 @@
+name: Build & Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # 写入本地签名与服务器配置（GitHub Secrets 中配置）
+      - name: Write keystore.properties
+        run: |
+          echo "LX_SERVER_URL=${{ secrets.LX_SERVER_URL }}" > keystore.properties
+          echo "LX_ADMIN_PASSWORD=${{ secrets.LX_ADMIN_PASSWORD }}" >> keystore.properties
+          echo "LX_UPDATE_VERSION_URL=${{ secrets.LX_UPDATE_VERSION_URL }}" >> keystore.properties
+          echo "STORE_FILE=${{ secrets.STORE_FILE }}" >> keystore.properties
+          echo "STORE_PASSWORD=${{ secrets.STORE_PASSWORD }}" >> keystore.properties
+          echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> keystore.properties
+          echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> keystore.properties
+
+      - name: Decode keystore
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > ${{ secrets.STORE_FILE }}
+          fi
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build Release APK
+        run: ./gradlew assembleRelease --no-daemon
+
+      # 生成 version.json（客户端多镜像检查更新用）
+      - name: Generate version.json
+        id: version
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          echo "apk=$APK" >> $GITHUB_OUTPUT
+          APK_NAME=$(basename $APK)
+          echo "apk_name=$APK_NAME" >> $GITHUB_OUTPUT
+          # 从 build.gradle.kts 提取版本信息
+          VERSION_CODE=$(grep -oP 'versionCode\s*=\s*\K[0-9]+' app/build.gradle.kts | head -1)
+          VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
+          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
+          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
+          echo "{\"versionCode\": $VERSION_CODE, \"versionName\": \"$VERSION_NAME\", \"desc\": \"${{ github.event.head_commit.message }}\", \"apkUrl\": \"https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$APK_NAME\"}" > publish/version.json
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.version.outputs.apk }}
+            publish/version.json
+          generate_release_notes: true
+          draft: false

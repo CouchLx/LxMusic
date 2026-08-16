@@ -1,0 +1,69 @@
+<resources>
+    <string name="app_name">Lx music</string>
+
+    <!-- 导航栏 -->
+    <string name="nav_home">首页</string>
+    <string name="nav_discover">发现</string>
+    <string name="nav_mine">我的</string>
+
+    <!-- 页面标题 -->
+    <string name="title_daily_recommend">每日推荐</string>
+    <string name="title_vip_recommend">VIP 专属推荐</string>
+    <string name="title_history_recommend">历史推荐</string>
+    <string name="title_style_recommend">风格推荐</string>
+    <string name="title_local_music">本地音乐</string>
+    <string name="title_default_favorites">默认收藏</string>
+    <string name="title_liked">我喜欢</string>
+    <string name="title_playlist_detail">歌单详情</string>
+    <string name="title_my_favorites">我的收藏</string>
+    <string name="title_manage_playlists">管理歌单</string>
+    <string name="title_settings">设置</string>
+    <string name="title_search">搜索</string>
+    <string name="title_rank">排行榜</string>
+
+    <!-- 设置子页面 -->
+    <string name="settings_display">显示设置</string>
+    <string name="settings_player">播放器设置</string>
+    <string name="settings_general">通用设置</string>
+    <string name="settings_proxy">代理设置</string>
+
+    <!-- 通用操作 -->
+    <string name="action_back">返回</string>
+    <string name="action_locate">定位播放</string>
+    <string name="action_refresh">刷新</string>
+    <string name="action_more">更多</string>
+    <string name="action_confirm">确认</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_play">播放</string>
+    <string name="action_pause">暂停</string>
+    <string name="action_play_all">播放全部</string>
+    <string name="action_play_mode">播放模式</string>
+    <string name="action_previous">上一首</string>
+    <string name="action_next">下一首</string>
+
+    <!-- 本地音乐页 -->
+    <string name="local_songs_title">歌曲</string>
+    <string name="local_shuffle_play">随机播放</string>
+    <string name="local_sort">排序</string>
+    <string name="local_menu">菜单</string>
+    <string name="local_sort_title">排序方式</string>
+    <string name="local_sort_by_title">标题</string>
+    <string name="local_sort_by_artist">艺术家</string>
+    <string name="local_sort_by_album">专辑</string>
+    <string name="local_sort_asc">正序(A-Z)</string>
+    <string name="local_sort_desc">倒序(Z-A)</string>
+    <string name="local_group_title">分组方式</string>
+    <string name="local_group_none">不分组</string>
+    <string name="local_group_artist">按艺术家</string>
+    <string name="local_group_album">按专辑</string>
+    <string name="local_group_folder">按文件夹</string>
+
+    <!-- 抽屉菜单 -->
+    <string name="drawer_songs">单曲</string>
+    <string name="drawer_albums">专辑</string>
+    <string name="drawer_artists">艺术家</string>
+    <string name="drawer_folders">文件夹</string>
+    <string name="drawer_scan">扫描</string>
+    <string name="drawer_settings">设置</string>
+    <string name="drawer_exit">退出</string>
+</resources>
