@@ -40,9 +40,8 @@ object UpdateChecker {
     /** 镜像间隔：同版本 7 天内不重复弹窗 */
     private const val PROMPT_INTERVAL_MS = 7L * 24 * 60 * 60 * 1000
 
-    // TODO: 改成你的 GitHub 用户名和仓库名
-    private const val GITHUB_OWNER = "your-github-username"
-    private const val GITHUB_REPO = "Lxmusic"
+    private const val GITHUB_OWNER = "CouchLx"
+    private const val GITHUB_REPO = "LxMusic"
 
     private val mirrorUrls: List<String> by lazy {
         buildList {
