@@ -58,7 +58,8 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(secretProp("STORE_FILE", "release.jks"))
+            // 相对于项目根目录解析 keystore 路径
+            storeFile = rootProject.file(secretProp("STORE_FILE", "release.jks"))
             storePassword = secretOrNull("STORE_PASSWORD")
             keyAlias = secretOrNull("KEY_ALIAS")
             keyPassword = secretOrNull("KEY_PASSWORD")
