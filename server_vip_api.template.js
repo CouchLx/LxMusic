@@ -124,6 +124,21 @@ function setActivation(code, data) {
 const router = express.Router();
 
 /**
+ * GET /vip/update/app-release.apk
+ * 托管更新 APK（把 APK 放到本文件同目录的 update/ 文件夹即可）
+ * 国内用户从自己服务器下载 APK 比 GitHub 快且稳定
+ */
+router.get('/update/:file', (req, res) => {
+  const file = path.basename(req.params.file); // 防路径穿越
+  const apkPath = path.join(__dirname, 'update', file);
+  if (fs.existsSync(apkPath)) {
+    res.download(apkPath);
+  } else {
+    res.status(404).json({ success: false, message: 'APK 不存在' });
+  }
+});
+
+/**
  * GET /vip/activate
  * 激活设备
  * Query: code, device_id
