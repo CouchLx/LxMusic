@@ -301,9 +301,14 @@ fun AppUpdateDialog(
                                     scope.launch {
                                         isDownloading = true
                                         downloadError = null
-                                        val file = UpdateChecker.downloadApk(
+                                        // 多镜像下载：GitHub 直链 + 国内加速镜像，失败自动切换
+                                        val urls = buildList {
+                                            updateInfo.apkUrl.takeIf { it.isNotBlank() }?.let { add(it) }
+                                            addAll(updateInfo.apkUrls)
+                                        }.distinct()
+                                        val apkUri = UpdateChecker.downloadApk(
                                             context = context,
-                                            url = updateInfo.apkUrl,
+                                            urls = urls,
                                             onProgress = { downloaded, total ->
                                                 downloadedBytes = downloaded
                                                 if (total > 0) {
@@ -313,10 +318,14 @@ fun AppUpdateDialog(
                                             }
                                         )
                                         isDownloading = false
-                                        if (file != null) {
-                                            Toast.makeText(context, "下载完成，正在调起安装...", Toast.LENGTH_SHORT).show()
+                                        if (apkUri != null) {
+                                            Toast.makeText(
+                                                context,
+                                                "下载完成，安装包已保存到手机 Download 文件夹",
+                                                Toast.LENGTH_LONG
+                                            ).show()
                                             onDismiss()
-                                            UpdateChecker.installApk(context, file)
+                                            UpdateChecker.installApk(context, apkUri)
                                         } else {
                                             downloadError = "下载失败，请检查网络或在浏览器中下载"
                                         }

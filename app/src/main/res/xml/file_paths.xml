@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <!-- 应用内更新下载的 APK 存放于 cacheDir -->
+    <!-- 应用内更新下载的 APK 临时存放于 cacheDir -->
     <cache-path name="cache" path="." />
+    <!-- Android 9- 保存更新 APK 到公共 Download 目录（FileProvider 授权用） -->
+    <external-path name="external_download" path="Download/" />
 </paths>
