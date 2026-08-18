@@ -25,9 +25,9 @@ import kotlin.math.min
 /**
  * 播放器全屏动态渐变背景。
  *
- * 使用专辑封面提取的主色构建一个圆锥渐变（sweep gradient），
- * 渐变随 rotationAngle 整体旋转，产生整屏色彩流动的效果。
- * 暂停时 rotationAngle 不变，背景即静止。
+ * 采用多重柔和径向环境光场与轨道流动算法（Organic Ambient Flow），
+ * 彻底消除中心过曝亮点与扇形割裂感，呈现如高级音乐流媒体般的丝滑沉浸感。
+ * 随 playback rotationAngle 平滑微动，暂停时保持静止。
  */
 @Composable
 fun Modifier.dynamicPlayerBackground(
@@ -40,42 +40,89 @@ fun Modifier.dynamicPlayerBackground(
     this.drawBehind {
         if (safeColors.isEmpty()) return@drawBehind
 
-        val center = Offset(size.width / 2f, size.height / 2f)
-        // 超出屏幕绘制，避免旋转时四角露出空白
-        val overscan = size.maxDimension * 1.5f
-        val gradientColors = safeColors + safeColors.first()
+        val c1 = safeColors.getOrElse(0) { Color(0xFF1E1B2E) }
+        val c2 = safeColors.getOrElse(1) { Color(0xFF2D1B36) }
+        val c3 = safeColors.getOrElse(2) { Color(0xFF152238) }
+        val c4 = safeColors.getOrElse(3) { Color(0xFF2A1C24) }
 
-        rotate(rotationAngle, pivot = center) {
-            drawRect(
-                brush = Brush.sweepGradient(
-                    colors = gradientColors,
-                    center = center
-                ),
-                topLeft = Offset(center.x - overscan / 2f, center.y - overscan / 2f),
-                size = androidx.compose.ui.geometry.Size(overscan, overscan)
-            )
-        }
+        val w = size.width
+        val h = size.height
+        val maxDim = max(w, h)
 
-        // 轻度遮罩，保证前台文字可读
+        // 1. 底层平滑全屏多阶深色基底渐变
         drawRect(
             brush = Brush.verticalGradient(
-                colors = listOf(
-                    Color.Black.copy(alpha = 0.08f),
-                    Color.Transparent,
-                    Color.Transparent,
-                    Color.Black.copy(alpha = 0.12f)
-                )
+                colors = listOf(c3, c2, c1),
+                startY = 0f,
+                endY = h
+            )
+        )
+
+        // 弧度计算（随播放平滑旋转驱动多光晕轨道运动）
+        val rad1 = Math.toRadians(rotationAngle.toDouble()).toFloat()
+        val rad2 = Math.toRadians(rotationAngle * 0.72 + 120.0).toFloat()
+        val rad3 = Math.toRadians(rotationAngle * 0.52 + 240.0).toFloat()
+
+        // 2. 动态流动主光晕球（顶部/偏左上方主氛围光）
+        val orb1Center = Offset(
+            x = w * 0.38f + kotlin.math.cos(rad1) * (w * 0.22f),
+            y = h * 0.32f + kotlin.math.sin(rad1) * (h * 0.16f)
+        )
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(c1.copy(alpha = 0.88f), c1.copy(alpha = 0.32f), Color.Transparent),
+                center = orb1Center,
+                radius = maxDim * 0.75f
+            ),
+            center = orb1Center,
+            radius = maxDim * 0.75f
+        )
+
+        // 3. 动态流动次光晕球（右中/偏下方副氛围光）
+        val orb2Center = Offset(
+            x = w * 0.62f + kotlin.math.cos(rad2) * (w * 0.25f),
+            y = h * 0.68f + kotlin.math.sin(rad2) * (h * 0.18f)
+        )
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(c2.copy(alpha = 0.82f), c2.copy(alpha = 0.28f), Color.Transparent),
+                center = orb2Center,
+                radius = maxDim * 0.80f
+            ),
+            center = orb2Center,
+            radius = maxDim * 0.80f
+        )
+
+        // 4. 动态流动点缀光晕球（中下方对角流动光）
+        val orb3Center = Offset(
+            x = w * 0.48f + kotlin.math.sin(rad3) * (w * 0.26f),
+            y = h * 0.82f + kotlin.math.cos(rad3) * (h * 0.14f)
+        )
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(c4.copy(alpha = 0.75f), Color.Transparent),
+                center = orb3Center,
+                radius = maxDim * 0.70f
+            ),
+            center = orb3Center,
+            radius = maxDim * 0.70f
+        )
+
+        // 5. 顶底柔和微暗遮罩，确保歌名、状态栏与底栏控件极致清晰，同时抚平全屏过渡
+        drawRect(
+            brush = Brush.verticalGradient(
+                0.0f to Color.Black.copy(alpha = 0.32f),
+                0.16f to Color.Black.copy(alpha = 0.08f),
+                0.50f to Color.Transparent,
+                0.84f to Color.Black.copy(alpha = 0.12f),
+                1.0f to Color.Black.copy(alpha = 0.38f)
             )
         )
     }
 }
 
 /**
- * 从专辑封面提取主色，生成 4 个**同色系柔和变体**用于渐变背景。
- *
- * 策略：取封面的主导色（vibrant > dominant > muted），
- * 保持其色相，生成饱和度 0.15~0.4、明度 0.78~0.92 的浅色变体，
- * 色相微调 ±8°~15° 形成渐变过渡。
+ * 从专辑封面提取主色，生成 4 个丰富且深邃的高级环境渐变色。
  */
 suspend fun extractAlbumColors(context: Context, imageLoader: ImageLoader, model: Any): List<Color> =
     withContext(Dispatchers.Default) {
@@ -132,29 +179,28 @@ suspend fun extractAlbumSeedHex(context: Context, imageLoader: ImageLoader, mode
     }
 
 /**
- * 从 bitmap 提取主导色相，生成 4 个同色系柔和渐变色。
+ * 从 bitmap 提取封面主色调与氛围色，生成 4 个丰富且深邃的高级渐变色。
  */
 internal fun extractDominantHueVariations(bitmap: Bitmap): List<Color> {
     val palette = Palette.from(bitmap)
-        .maximumColorCount(16)
+        .maximumColorCount(24)
         .clearFilters()
         .generate()
 
-    // 优先取鲜艳色，其次取主导色，最后取柔和色
     val heroSwatch = palette.vibrantSwatch
         ?: palette.dominantSwatch
         ?: palette.mutedSwatch
         ?: palette.darkVibrantSwatch
         ?: palette.lightVibrantSwatch
+        ?: palette.swatches.maxByOrNull { it.population }
         ?: return emptyList()
 
     val hero = Color(heroSwatch.rgb)
     val h = hero.hue()
     val s = hero.saturation()
-    val l = hero.lightness()
 
     // 如果色相无意义（极低饱和度的灰），用封面最大 population 的色
-    if (s < 0.05f) {
+    if (s < 0.06f) {
         val fallback = palette.swatches.maxByOrNull { it.population }
             ?: return emptyList()
         val fb = Color(fallback.rgb)
@@ -165,25 +211,24 @@ internal fun extractDominantHueVariations(bitmap: Bitmap): List<Color> {
 }
 
 /**
- * 根据一个色相和饱和度，生成 4 个**浅色柔和变体**用于背景渐变。
- * 明度固定在 0.80~0.92 之间（浅色系），饱和度限定在 0.12~0.45。
+ * 根据主色相和饱和度，生成 4 个**富有层次感的深邃高级环境色**用于背景流动。
+ * 调整明度在 0.28~0.50 之间，饱和度在 0.35~0.75，避免过曝和泛白，营造沉浸式氛围。
  */
 private fun generateHarmoniousVariations(hue: Float, saturation: Float): List<Color> {
-    val baseS = saturation.coerceIn(0.12f, 0.45f)
+    val baseS = saturation.coerceIn(0.35f, 0.75f)
 
-    // 四个变体：明度略有差异，色相微调
     data class Variant(val hOffset: Float, val sFactor: Float, val l: Float)
 
     val variants = listOf(
-        Variant(hOffset = -8f, sFactor = 0.9f, l = 0.88f),
-        Variant(hOffset = 0f, sFactor = 1.0f, l = 0.92f),
-        Variant(hOffset = 10f, sFactor = 0.85f, l = 0.84f),
-        Variant(hOffset = 5f, sFactor = 0.95f, l = 0.80f)
+        Variant(hOffset = 0f, sFactor = 1.0f, l = 0.42f),      // 主光晕色
+        Variant(hOffset = 28f, sFactor = 0.90f, l = 0.35f),    // 邻近暖/冷调
+        Variant(hOffset = -30f, sFactor = 0.85f, l = 0.28f),   // 深邃基底调
+        Variant(hOffset = 18f, sFactor = 1.05f, l = 0.46f)     // 亮调氛围色
     )
 
     return variants.map { v ->
         val adjustedH = (hue + v.hOffset + 360f) % 360f
-        val adjustedS = (baseS * v.sFactor).coerceIn(0.10f, 0.50f)
+        val adjustedS = (baseS * v.sFactor).coerceIn(0.30f, 0.85f)
         fromHsl(adjustedH, adjustedS, v.l)
     }
 }

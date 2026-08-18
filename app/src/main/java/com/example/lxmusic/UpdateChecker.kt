@@ -9,49 +9,56 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
 
-/** 更新信息（对应发布时生成的 publish/version.json） */
+/**
+ * 完整更新信息数据结构
+ */
 data class UpdateInfo(
-    val versionCode: Int,
+    val versionCode: Int = 0,
     val versionName: String,
-    val desc: String,
-    val apkUrl: String
+    val title: String = "",
+    val desc: String = "",
+    val apkUrl: String = "",
+    val releaseUrl: String = "https://github.com/CouchLx/LxMusic/releases",
+    val assetSize: Long = 0L,
+    val publishedAt: String = ""
 )
 
 /**
  * 应用更新检查器
  *
- * 借鉴 lx-music 的多镜像模式：优先使用构建时注入的自定义更新地址
- * （keystore.properties 的 LX_UPDATE_VERSION_URL），否则依次尝试
- * GitHub raw / jsdelivr / 国内加速镜像读取 publish/version.json。
- *
- * version.json 由 GitHub Actions 在发布时自动生成：
- * { "versionCode": 3, "versionName": "3.7.56", "desc": "...", "apkUrl": "..." }
+ * 优先从 GitHub 官方 Releases API / 国内加速镜像获取最新 Release 发布日志与 APK，
+ * 并支持 publish/version.json 兜底。
  */
 object UpdateChecker {
     private const val TAG = "UpdateChecker"
     private const val PREF_NAME = "update_prefs"
-    private const val KEY_LAST_PROMPT_VERSION = "last_prompt_version"
-    private const val KEY_LAST_PROMPT_TIME = "last_prompt_time"
+    private const val KEY_IGNORED_VERSION = "ignored_version"
 
-    /** 镜像间隔：同版本 7 天内不重复弹窗 */
-    private const val PROMPT_INTERVAL_MS = 7L * 24 * 60 * 60 * 1000
+    const val GITHUB_OWNER = "CouchLx"
+    const val GITHUB_REPO = "LxMusic"
+    const val REPO_URL = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO"
+    const val RELEASES_URL = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases"
 
-    private const val GITHUB_OWNER = "CouchLx"
-    private const val GITHUB_REPO = "LxMusic"
+    /** GitHub Releases API 探测地址列表（含直连与主流镜像代理） */
+    private val releaseApiUrls: List<String> by lazy {
+        listOf(
+            "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest",
+            "https://ghfast.top/https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest",
+            "https://gh-proxy.com/https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"
+        )
+    }
 
-    private val mirrorUrls: List<String> by lazy {
+    /** publish/version.json 兜底探测地址 */
+    private val versionJsonUrls: List<String> by lazy {
         buildList {
-            // 1. 构建注入的自定义地址（自己的服务器，最高优先级）
             BuildConfig.LX_UPDATE_VERSION_URL.takeIf { it.isNotBlank() }?.let { add(it) }
-            // 2. GitHub 官方 raw
             add("https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/master/publish/version.json")
-            // 3. jsdelivr CDN
             add("https://cdn.jsdelivr.net/gh/$GITHUB_OWNER/$GITHUB_REPO@master/publish/version.json")
-            // 4. 国内加速镜像
             add("https://ghfast.top/https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/master/publish/version.json")
             add("https://gh-proxy.com/https://raw.githubusercontent.com/$GITHUB_OWNER/$GITHUB_REPO/master/publish/version.json")
         }
@@ -67,59 +74,150 @@ object UpdateChecker {
     private val downloadClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
             .build()
     }
 
     /**
-     * 检查是否有新版本。逐个镜像尝试，全部失败返回 null（静默，不打扰用户）。
+     * 语义化版本比对：若 remoteVersion > localVersion 返回 true
+     */
+    fun isNewerVersion(remoteVersion: String, localVersion: String): Boolean {
+        val cleanRemote = remoteVersion.trim().removePrefix("v").removePrefix("V").trim()
+        val cleanLocal = localVersion.trim().removePrefix("v").removePrefix("V").trim()
+        if (cleanRemote.isBlank()) return false
+        if (cleanRemote == cleanLocal) return false
+
+        val remoteParts = cleanRemote.split('.').mapNotNull { it.takeWhile { ch -> ch.isDigit() }.toIntOrNull() }
+        val localParts = cleanLocal.split('.').mapNotNull { it.takeWhile { ch -> ch.isDigit() }.toIntOrNull() }
+        val maxLen = maxOf(remoteParts.size, localParts.size)
+
+        for (i in 0 until maxLen) {
+            val r = remoteParts.getOrElse(i) { 0 }
+            val l = localParts.getOrElse(i) { 0 }
+            if (r > l) return true
+            if (r < l) return false
+        }
+        return false
+    }
+
+    /**
+     * 检查版本是否被用户设置为「不再提示」
+     */
+    fun isVersionIgnored(context: Context, versionName: String): Boolean {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        val ignored = prefs.getString(KEY_IGNORED_VERSION, null) ?: return false
+        val cleanIgnored = ignored.trim().removePrefix("v").removePrefix("V")
+        val cleanTarget = versionName.trim().removePrefix("v").removePrefix("V")
+        return cleanIgnored.isNotBlank() && cleanIgnored == cleanTarget
+    }
+
+    /**
+     * 设置某个版本为「不再提示」
+     */
+    fun setVersionIgnored(context: Context, versionName: String) {
+        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_IGNORED_VERSION, versionName).apply()
+    }
+
+    /**
+     * 检查是否有新版本（优先 GitHub Releases API，次选 version.json）
      */
     suspend fun checkForUpdate(): UpdateInfo? = withContext(Dispatchers.IO) {
-        for (url in mirrorUrls) {
+        // 1. 尝试从 GitHub Releases API 解析
+        for (url in releaseApiUrls) {
+            try {
+                val request = Request.Builder()
+                    .url(url)
+                    .header("Accept", "application/vnd.github.v3+json")
+                    .header("User-Agent", "LxMusic-Android-App")
+                    .build()
+                checkClient.newCall(request).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val bodyStr = resp.body?.string().orEmpty()
+                        val json = JSONObject(bodyStr)
+                        val tagName = json.optString("tag_name", "").trim()
+                        val releaseTitle = json.optString("name", "").ifBlank { tagName }
+                        val releaseBody = json.optString("body", "").trim()
+                        val htmlUrl = json.optString("html_url", RELEASES_URL)
+                        val publishedAt = json.optString("published_at", "")
+
+                        // 查找 assets 里的 .apk 文件
+                        var apkDownloadUrl = ""
+                        var assetSize = 0L
+                        val assetsArray = json.optJSONArray("assets") ?: JSONArray()
+                        for (i in 0 until assetsArray.length()) {
+                            val asset = assetsArray.getJSONObject(i)
+                            val name = asset.optString("name", "")
+                            if (name.endsWith(".apk", ignoreCase = true)) {
+                                apkDownloadUrl = asset.optString("browser_download_url", "")
+                                assetSize = asset.optLong("size", 0L)
+                                break
+                            }
+                        }
+
+                        // 如果没有找到直链 APK，兜底使用 release 主页
+                        if (apkDownloadUrl.isBlank()) {
+                            apkDownloadUrl = htmlUrl
+                        }
+
+                        val hasNew = isNewerVersion(tagName, BuildConfig.VERSION_NAME)
+                        if (hasNew) {
+                            return@withContext UpdateInfo(
+                                versionCode = 0,
+                                versionName = tagName.removePrefix("v").removePrefix("V"),
+                                title = releaseTitle,
+                                desc = releaseBody,
+                                apkUrl = apkDownloadUrl,
+                                releaseUrl = htmlUrl,
+                                assetSize = assetSize,
+                                publishedAt = publishedAt
+                            )
+                        } else {
+                            return@withContext null // 已是最新版本
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "GitHub Releases API 探测失败: $url - ${e.message}")
+            }
+        }
+
+        // 2. 兜底尝试 publish/version.json
+        for (url in versionJsonUrls) {
             try {
                 val request = Request.Builder().url(url).build()
                 checkClient.newCall(request).execute().use { resp ->
                     if (resp.isSuccessful) {
                         val json = JSONObject(resp.body?.string().orEmpty())
-                        val info = UpdateInfo(
-                            versionCode = json.getInt("versionCode"),
-                            versionName = json.getString("versionName"),
-                            desc = json.optString("desc", ""),
-                            apkUrl = json.getString("apkUrl")
-                        )
-                        if (info.versionCode > BuildConfig.VERSION_CODE) {
-                            return@withContext info
+                        val vCode = json.optInt("versionCode", 0)
+                        val vName = json.optString("versionName", "")
+                        val desc = json.optString("desc", "")
+                        val apkUrl = json.optString("apkUrl", "")
+
+                        val isNew = (vCode > BuildConfig.VERSION_CODE) || isNewerVersion(vName, BuildConfig.VERSION_NAME)
+                        if (isNew) {
+                            return@withContext UpdateInfo(
+                                versionCode = vCode,
+                                versionName = vName.removePrefix("v").removePrefix("V"),
+                                title = "v$vName",
+                                desc = desc,
+                                apkUrl = apkUrl,
+                                releaseUrl = RELEASES_URL
+                            )
                         }
-                        return@withContext null // 已是最新
+                        return@withContext null
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "镜像不可用: $url - ${e.message}")
+                Log.w(TAG, "version.json 探测失败: $url - ${e.message}")
             }
         }
+
         null
     }
 
     /**
-     * 是否应该弹更新提示：同版本 7 天内只提示一次（避免每次启动都打扰）。
-     */
-    fun shouldPrompt(context: Context, versionCode: Int): Boolean {
-        val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
-        val lastVersion = prefs.getInt(KEY_LAST_PROMPT_VERSION, -1)
-        val lastTime = prefs.getLong(KEY_LAST_PROMPT_TIME, 0)
-        if (lastVersion == versionCode && System.currentTimeMillis() - lastTime < PROMPT_INTERVAL_MS) {
-            return false
-        }
-        prefs.edit()
-            .putInt(KEY_LAST_PROMPT_VERSION, versionCode)
-            .putLong(KEY_LAST_PROMPT_TIME, System.currentTimeMillis())
-            .apply()
-        return true
-    }
-
-    /**
-     * 下载 APK 到缓存目录，带进度回调（IO 线程）。
-     * @return 下载成功的文件，失败返回 null
+     * 下载 APK 到应用缓存目录（带进度与大小统计）
      */
     suspend fun downloadApk(
         context: Context,
@@ -127,17 +225,22 @@ object UpdateChecker {
         onProgress: (downloaded: Long, total: Long) -> Unit
     ): File? = withContext(Dispatchers.IO) {
         try {
-            val request = Request.Builder().url(url).build()
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "LxMusic-Android-App")
+                .build()
             downloadClient.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) {
                     Log.e(TAG, "下载失败: HTTP ${resp.code}")
                     return@withContext null
                 }
                 val total = resp.body?.contentLength() ?: -1L
-                val file = File(context.cacheDir, "lxmusic_update_${System.currentTimeMillis()}.apk")
+                val file = File(context.cacheDir, "lxmusic_update.apk")
+                if (file.exists()) file.delete()
+
                 resp.body?.byteStream()?.use { input ->
                     file.outputStream().use { output ->
-                        val buffer = ByteArray(8192)
+                        val buffer = ByteArray(16384)
                         var downloaded = 0L
                         while (true) {
                             val read = input.read(buffer)
@@ -157,7 +260,7 @@ object UpdateChecker {
     }
 
     /**
-     * 通过系统安装器安装 APK（需要 FileProvider）。
+     * 调用系统包安装器安装 APK
      */
     fun installApk(context: Context, apkFile: File) {
         val uri: Uri = FileProvider.getUriForFile(

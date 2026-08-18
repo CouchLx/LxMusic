@@ -301,7 +301,7 @@ fun RankDetailPage(
                             }
                         }
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text(rank.rankname ?: "排行榜", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text(rank.rankname ?: "排行榜", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = if (totalSongs > 0) "共 $totalSongs 首" else " ",
@@ -390,7 +390,7 @@ fun RankDetailPage(
                                 }
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
-                                    Text(song.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(song.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text(song.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                             }

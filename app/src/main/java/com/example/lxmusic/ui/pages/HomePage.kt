@@ -31,12 +31,16 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -70,6 +74,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.LocalImageLoader
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
@@ -255,6 +260,7 @@ fun HomePage(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 8.dp)
             )
             if (songs.isEmpty()) {
@@ -365,7 +371,7 @@ fun HomePage(
                                             }
                                             Spacer(modifier = Modifier.width(12.dp))
                                             Column {
-                                                Text(song.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Text(song.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                 Text(song.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             }
                                         }
@@ -611,38 +617,120 @@ fun HomePage(
         onClickRefresh?.invoke { performRefresh(isAuto = false, isClick = true) }
     }
 
-    // 推荐卡片数据 - 使用主题色作为默认背景
+    // 每日推荐等列表转 SongInfo 列表（供一键播放使用）
+    val dailySongInfos = remember(feed.dailySongs) {
+        feed.dailySongs.map { song ->
+            SongInfo(
+                title = song.title,
+                artist = song.artist,
+                filePath = "${song.hash}|${song.album_audio_id}",
+                albumArtUri = song.coverUrl,
+                duration = song.durationMs
+            )
+        }
+    }
+    val historySongInfos = remember(feed.historySongs) {
+        feed.historySongs.map { song ->
+            SongInfo(
+                title = song.title,
+                artist = song.artist,
+                filePath = "${song.hash}|${song.album_audio_id}",
+                albumArtUri = song.coverUrl,
+                duration = song.durationMs
+            )
+        }
+    }
+    val styleSongInfos = remember(feed.styleSongs) {
+        feed.styleSongs.map { song ->
+            SongInfo(
+                title = song.title,
+                artist = song.artist,
+                filePath = "${song.hash}|${song.album_audio_id}",
+                albumArtUri = song.coverUrl,
+                duration = song.durationMs
+            )
+        }
+    }
+
+    // 推荐卡片数据模型
     data class RecommendCardData(
-        val title: String,
+        val id: String,
+        val enTitle: String,
+        val zhTag: String,
         val subtitle: String,
         val coverUrl: String,
-        val onClick: () -> Unit
+        val gradientColors: List<Color>,
+        val songs: List<SongInfo>,
+        val onClick: () -> Unit,
+        val onPlay: () -> Unit
     )
 
     val recommendCards = listOf(
         RecommendCardData(
-            title = "每日推荐",
-            subtitle = if (feed.dailySongs.isNotEmpty()) "${feed.dailySongs.size}首歌曲" else if (isLoggedIn) "加载中..." else "登录后查看",
+            id = "daily",
+            enTitle = "Daily\n30",
+            zhTag = "每日30首",
+            subtitle = if (feed.dailySongs.isNotEmpty()) {
+                val first = feed.dailySongs.first()
+                "${first.title} - ${first.artist}"
+            } else if (isLoggedIn) {
+                "加载中..."
+            } else {
+                "登录后查看"
+            },
             coverUrl = feed.dailySongs.firstOrNull()?.coverUrl ?: "",
-            onClick = { if (feed.dailySongs.isNotEmpty()) onDailyClick(feed.dailySongs) }
+            gradientColors = listOf(Color(0xFFF28F9E), Color(0xFFEA7889)),
+            songs = dailySongInfos,
+            onClick = { if (feed.dailySongs.isNotEmpty()) onDailyClick(feed.dailySongs) },
+            onPlay = { if (dailySongInfos.isNotEmpty()) onPlaySong(dailySongInfos, 0) }
         ),
         RecommendCardData(
-            title = "VIP 专属推荐",
-            subtitle = if (feed.vipSongs.isNotEmpty()) "${feed.vipSongs.size}首歌曲" else "加载中...",
+            id = "vip",
+            enTitle = "Fav\nRadar",
+            zhTag = "雷达模式",
+            subtitle = if (feed.vipSongs.isNotEmpty()) {
+                val first = feed.vipSongs.first()
+                "${first.title} - ${first.artist}"
+            } else {
+                "加载中..."
+            },
             coverUrl = feed.vipSongs.firstOrNull()?.albumArtUri ?: "",
-            onClick = { if (feed.vipSongs.isNotEmpty()) onVipClick(feed.vipSongs) }
+            gradientColors = listOf(Color(0xFFE59C63), Color(0xFFD6884A)),
+            songs = feed.vipSongs,
+            onClick = { if (feed.vipSongs.isNotEmpty()) onVipClick(feed.vipSongs) },
+            onPlay = { if (feed.vipSongs.isNotEmpty()) onPlaySong(feed.vipSongs, 0) }
         ),
         RecommendCardData(
-            title = "风格推荐",
-            subtitle = if (feed.styleSongs.isNotEmpty()) "${feed.styleSongs.size}首歌曲" else "加载中...",
+            id = "style",
+            enTitle = "Style\nMix",
+            zhTag = "风格推荐",
+            subtitle = if (feed.styleSongs.isNotEmpty()) {
+                val first = feed.styleSongs.first()
+                "${first.title} - ${first.artist}"
+            } else {
+                "加载中..."
+            },
             coverUrl = feed.styleSongs.firstOrNull()?.coverUrl ?: "",
-            onClick = { if (feed.styleSongs.isNotEmpty()) onStyleClick(feed.styleSongs) }
+            gradientColors = listOf(Color(0xFF7E97E8), Color(0xFF6B86E0)),
+            songs = styleSongInfos,
+            onClick = { if (feed.styleSongs.isNotEmpty()) onStyleClick(feed.styleSongs) },
+            onPlay = { if (styleSongInfos.isNotEmpty()) onPlaySong(styleSongInfos, 0) }
         ),
         RecommendCardData(
-            title = "历史推荐",
-            subtitle = if (feed.historySongs.isNotEmpty()) "${feed.historySongs.size}首歌曲" else "加载中...",
+            id = "history",
+            enTitle = "Memory\nTracks",
+            zhTag = "历史推荐",
+            subtitle = if (feed.historySongs.isNotEmpty()) {
+                val first = feed.historySongs.first()
+                "${first.title} - ${first.artist}"
+            } else {
+                "加载中..."
+            },
             coverUrl = feed.historySongs.firstOrNull()?.coverUrl ?: "",
-            onClick = { if (feed.historySongs.isNotEmpty()) onHistoryClick(feed.historySongs) }
+            gradientColors = listOf(Color(0xFF5AB398), Color(0xFF48A185)),
+            songs = historySongInfos,
+            onClick = { if (feed.historySongs.isNotEmpty()) onHistoryClick(feed.historySongs) },
+            onPlay = { if (historySongInfos.isNotEmpty()) onPlaySong(historySongInfos, 0) }
         )
     )
 
@@ -670,80 +758,142 @@ fun HomePage(
                 .alpha(contentAlpha),
             contentPadding = PaddingValues(bottom = 180.dp)
         ) {
-            // ===== 顶部横向推荐栏 =====
+            // ===== 顶部横向推荐栏（吸附对齐固定显示完整卡片） =====
             item {
+                val recommendListState = rememberLazyListState()
+                val snapFlingBehavior = rememberSnapFlingBehavior(lazyListState = recommendListState)
+
                 LazyRow(
+                    state = recommendListState,
+                    flingBehavior = snapFlingBehavior,
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.padding(top = 12.dp, bottom = 8.dp)
+                    modifier = Modifier.padding(top = 12.dp, bottom = 10.dp)
                 ) {
                     items(
                         count = recommendCards.size,
-                        key = { it }
+                        key = { recommendCards[it].id }
                     ) { index ->
                         val card = recommendCards[index]
-                        val surfaceColor = MaterialTheme.colorScheme.surfaceVariant
-                        val primaryColor = MaterialTheme.colorScheme.primary
+                        val isThisCardPlaying = isPlaying && card.songs.any { it.filePath == currentPlayingPath }
 
-                        Column(
+                        Box(
                             modifier = Modifier
-                                .width(130.dp)
+                                .width(168.dp)
+                                .height(168.dp)
+                                .clip(RoundedCornerShape(22.dp))
+                                .background(Brush.linearGradient(card.gradientColors))
                                 .clickable { card.onClick() }
+                                .padding(14.dp)
                         ) {
-                            Box(
+                            // 顶部：英文大标题与封面图
+                            Row(
                                 modifier = Modifier
-                                    .size(150.dp)
-                                    .clip(RoundedCornerShape(14.dp))
+                                    .fillMaxWidth()
+                                    .align(Alignment.TopStart),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Top
                             ) {
-                                if (card.coverUrl.isNotBlank()) {
-                                    val painter = rememberAsyncImagePainter(
-                                        model = ImageRequest.Builder(LocalContext.current)
-                                            .data(card.coverUrl)
-                                            .memoryCacheKey(card.coverUrl)
-                                            .crossfade(150)
-                                            .size(300)
-                                            .build()
-                                    )
-                                    Image(painter = painter, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                                } else {
-                                    // 使用主题色作为占位背景 - 简洁专业
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(
-                                                Brush.linearGradient(
-                                                    listOf(
-                                                        surfaceColor.copy(alpha = 0.8f),
-                                                        surfaceColor.copy(alpha = 0.4f)
-                                                    )
-                                                )
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        // 不显示图标，只显示简洁的背景
-                                    }
-                                }
+                                Text(
+                                    text = card.enTitle,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 22.sp,
+                                    lineHeight = 24.sp,
+                                    letterSpacing = (-0.3).sp,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(
-                                            Brush.verticalGradient(
-                                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.35f)),
-                                                startY = 150f
-                                            )
+                                        .size(68.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color.Black.copy(alpha = 0.2f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (card.coverUrl.isNotBlank()) {
+                                        val painter = rememberAsyncImagePainter(
+                                            model = ImageRequest.Builder(LocalContext.current)
+                                                .data(card.coverUrl)
+                                                .memoryCacheKey(card.coverUrl)
+                                                .crossfade(150)
+                                                .size(240)
+                                                .build()
                                         )
-                                )
-                                Text(
-                                    text = card.title,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
+                                        Image(
+                                            painter = painter,
+                                            contentDescription = null,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Icon(
+                                            Icons.Default.MusicNote,
+                                            contentDescription = null,
+                                            tint = Color.White.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 底部：中文标签 + 首曲副标题 + 播放按钮
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .align(Alignment.BottomStart),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Bottom
+                            ) {
+                                Column(
                                     modifier = Modifier
-                                        .align(Alignment.BottomStart)
-                                        .padding(10.dp)
-                                )
+                                        .weight(1f)
+                                        .padding(end = 6.dp)
+                                ) {
+                                    Text(
+                                        text = card.zhTag,
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.sp
+                                        ),
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = card.subtitle,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontSize = 11.sp
+                                        ),
+                                        color = Color.White.copy(alpha = 0.85f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                // 播放按钮
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.25f))
+                                        .clickable {
+                                            if (card.songs.isNotEmpty()) {
+                                                card.onPlay()
+                                            } else {
+                                                card.onClick()
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (isThisCardPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        contentDescription = "播放",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                         }
                     }

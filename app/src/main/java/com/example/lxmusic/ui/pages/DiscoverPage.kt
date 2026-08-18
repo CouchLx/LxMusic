@@ -208,6 +208,7 @@ fun RankCard(rank: RankItem, onClick: () -> Unit, modifier: Modifier = Modifier)
                 text = rank.rankname ?: "排行榜",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )

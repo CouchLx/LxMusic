@@ -1,4 +1,4 @@
-﻿package com.example.lxmusic.ui.pages
+package com.example.lxmusic.ui.pages
 
 import android.content.Context
 import android.content.Intent
@@ -23,6 +23,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -47,12 +48,16 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Usb
+import com.example.lxmusic.ui.components.AppUpdateDialog
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -154,26 +159,54 @@ private fun saveThemePresets(prefs: android.content.SharedPreferences, presets: 
 
 // ==================== 设置页面辅助组件 ====================
 
+/**
+ * 设置分组卡片：将一组相关的设置项外层包裹在一个圆角卡片中（类似 iOS / Material 3 Inset Grouped）
+ */
 @Composable
-internal fun SettingsMenuItem(
+internal fun SettingsGroupCard(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            content = content
+        )
+    }
+}
+
+/**
+ * 设置分组卡片内的单个条目行
+ */
+@Composable
+internal fun SettingsGroupItemRow(
     icon: ImageVector,
     title: String,
     subtitle: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    showDivider: Boolean = true
 ) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .padding(horizontal = 18.dp, vertical = 15.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(icon, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -181,6 +214,7 @@ internal fun SettingsMenuItem(
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium
                 )
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
@@ -188,10 +222,17 @@ internal fun SettingsMenuItem(
                 )
             }
             Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                null,
-                Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+        }
+        if (showDivider) {
+            HorizontalDivider(
+                modifier = Modifier.padding(start = 58.dp, end = 16.dp),
+                thickness = 0.6.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
             )
         }
     }
@@ -228,12 +269,16 @@ fun SettingsPage(
     onPlayerBlurChange: (Boolean) -> Unit = {},
     playerDynamicBg: Boolean = true,
     onPlayerDynamicBgChange: (Boolean) -> Unit = {},
-    playerMeshBg: Boolean = false,
-    onPlayerMeshBgChange: (Boolean) -> Unit = {},
     playerRoundAlbum: Boolean = false,
     onPlayerRoundAlbumChange: (Boolean) -> Unit = {},
     playerRotate: Boolean = false,
     onPlayerRotateChange: (Boolean) -> Unit = {},
+    playerVinylStyle: Boolean = false,
+    onPlayerVinylStyleChange: (Boolean) -> Unit = {},
+    playerVinylPointer: Boolean = false,
+    onPlayerVinylPointerChange: (Boolean) -> Unit = {},
+    playerVinylBase: Boolean = false,
+    onPlayerVinylBaseChange: (Boolean) -> Unit = {},
     playerBgEnhance: Boolean = false,
     onPlayerBgEnhanceChange: (Boolean) -> Unit = {},
     playerHyperBg: Boolean = false,
@@ -260,6 +305,8 @@ fun SettingsPage(
     onPlayerTapCoverToLyricsChange: (Boolean) -> Unit = {},
     playerCompactControls: Boolean = false,
     onPlayerCompactControlsChange: (Boolean) -> Unit = {},
+    playerMinimalistControls: Boolean = false,
+    onPlayerMinimalistControlsChange: (Boolean) -> Unit = {},
     playerShowTopFavorite: Boolean = false,
     onPlayerShowTopFavoriteChange: (Boolean) -> Unit = {},
     playbackKeepProgress: Boolean = true,
@@ -356,111 +403,110 @@ fun SettingsPage(
                 null -> {
                     // ==================== 主菜单 ====================
                     Column {
-                        // —— 第一组：主题 / 个性化 / 动效 ——
-                        SettingsMenuItem(
-                            icon = Icons.Default.Palette,
-                            title = "主题设置",
-                            subtitle = "明暗模式、动态取色、液态玻璃、导航栏",
-                            onClick = { onSettingsSubPageChange("display") }
-                        )
+                        // —— 第一组：主题 / 自定义个性化 / 动效 ——
+                        SettingsGroupCard {
+                            SettingsGroupItemRow(
+                                icon = Icons.Default.Palette,
+                                title = "主题设置",
+                                subtitle = "明暗模式、动态取色、液态玻璃、导航栏",
+                                onClick = { onSettingsSubPageChange("display") }
+                            )
+                            SettingsGroupItemRow(
+                                icon = Icons.Default.AutoAwesome,
+                                title = "自定义个性化",
+                                subtitle = "主题模式、主题预设",
+                                onClick = { onSettingsSubPageChange("customize") }
+                            )
+                            SettingsGroupItemRow(
+                                icon = Icons.Default.Bolt,
+                                title = "动效设置",
+                                subtitle = "流体背景、封面模糊、音频律动、歌词模糊",
+                                onClick = { onSettingsSubPageChange("motion") },
+                                showDivider = false
+                            )
+                        }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                        SettingsMenuItem(
-                            icon = Icons.Default.AutoAwesome,
-                            title = "自定义个性化",
-                            subtitle = "主题模式、主题预设",
-                            onClick = { onSettingsSubPageChange("customize") }
-                        )
+                        // —— 第二组：播放器 / 播放 / 通用 / USB独占 ——
+                        SettingsGroupCard {
+                            SettingsGroupItemRow(
+                                icon = Icons.Default.MusicNote,
+                                title = "播放器设置",
+                                subtitle = "背景不透明度、高斯模糊",
+                                onClick = { onSettingsSubPageChange("player") }
+                            )
+                            SettingsGroupItemRow(
+                                icon = Icons.AutoMirrored.Filled.PlaylistPlay,
+                                title = "播放设置",
+                                subtitle = "淡入淡出、响度均衡、下一首交叉淡化",
+                                onClick = { onSettingsSubPageChange("playback") }
+                            )
+                            SettingsGroupItemRow(
+                                icon = Icons.Default.Settings,
+                                title = "通用设置",
+                                subtitle = "播放音质",
+                                onClick = { onSettingsSubPageChange("general") }
+                            )
+                            SettingsGroupItemRow(
+                                icon = Icons.Default.Usb,
+                                title = "USB 独占模式",
+                                subtitle = if (settingsPrefs.getBoolean("usb_exclusive_playback", false)) {
+                                    "已开启 · 原生驱动直连 USB DAC"
+                                } else {
+                                    "已关闭 · 绕过系统混音器输出"
+                                },
+                                onClick = { onSettingsSubPageChange("usb") },
+                                showDivider = false
+                            )
+                        }
 
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                        SettingsMenuItem(
-                            icon = Icons.Default.Bolt,
-                            title = "动效设置",
-                            subtitle = "流体背景、封面模糊、音频律动、歌词模糊",
-                            onClick = { onSettingsSubPageChange("motion") }
-                        )
-
-                        Spacer(modifier = Modifier.height(28.dp))
-
-                        // —— 第二组：播放器 / 通用 ——
-                        SettingsMenuItem(
-                            icon = Icons.Default.MusicNote,
-                            title = "播放器设置",
-                            subtitle = "背景不透明度、高斯模糊",
-                            onClick = { onSettingsSubPageChange("player") }
-                        )
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        SettingsMenuItem(
-                            icon = Icons.AutoMirrored.Filled.PlaylistPlay,
-                            title = "播放设置",
-                            subtitle = "淡入淡出、响度均衡、下一首交叉淡化",
-                            onClick = { onSettingsSubPageChange("playback") }
-                        )
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        SettingsMenuItem(
-                            icon = Icons.Default.Settings,
-                            title = "通用设置",
-                            subtitle = "播放音质",
-                            onClick = { onSettingsSubPageChange("general") }
-                        )
-
-                        Spacer(modifier = Modifier.height(28.dp))
-
-                        // —— USB 独占模式（独立顶级入口） ——
-                        SettingsMenuItem(
-                            icon = Icons.Default.Usb,
-                            title = "USB 独占模式",
-                            subtitle = if (settingsPrefs.getBoolean("usb_exclusive_playback", false)) {
-                                "已开启 · 原生驱动直连 USB DAC"
-                            } else {
-                                "已关闭 · 绕过系统混音器输出"
-                            },
-                            onClick = { onSettingsSubPageChange("usb") }
-                        )
-
-                        Spacer(modifier = Modifier.height(28.dp))
-
-                        // —— 第三组：存储 / 代理 ——
-                        SettingsMenuItem(
-                            icon = Icons.Default.Storage,
-                            title = "存储与缓存",
-                            subtitle = "缓存占用、缓存上限、清除缓存",
-                            onClick = { onSettingsSubPageChange("storage") }
-                        )
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        SettingsMenuItem(
-                            icon = Icons.Default.Cloud,
-                            title = "代理设置",
-                            subtitle = "服务器地址、VIP 账号",
-                            onClick = { onSettingsSubPageChange("proxy") }
-                        )
+                        // —— 第三组：存储 / 代理 / 关于应用 ——
+                        SettingsGroupCard {
+                            SettingsGroupItemRow(
+                                icon = Icons.Default.Storage,
+                                title = "存储与缓存",
+                                subtitle = "缓存占用、缓存上限、清除缓存",
+                                onClick = { onSettingsSubPageChange("storage") }
+                            )
+                            SettingsGroupItemRow(
+                                icon = Icons.Default.Cloud,
+                                title = "代理设置",
+                                subtitle = "服务器地址、VIP 账号",
+                                onClick = { onSettingsSubPageChange("proxy") }
+                            )
+                            SettingsGroupItemRow(
+                                icon = Icons.Default.Info,
+                                title = "关于应用",
+                                subtitle = "版本信息、检查更新、开源仓库",
+                                onClick = { onSettingsSubPageChange("about") },
+                                showDivider = false
+                            )
+                        }
 
                         // 退出登录按钮（仅登录后显示）
                         if (isLoggedIn) {
-                            Spacer(modifier = Modifier.height(24.dp))
+                            Spacer(modifier = Modifier.height(16.dp))
                             val scope = rememberCoroutineScope()
                             var showLogoutDialog by remember { mutableStateOf(false) }
                             
-                            Surface(
-                                onClick = { showLogoutDialog = true },
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = "退出登录",
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.error
-                                )
+                            SettingsGroupCard {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { showLogoutDialog = true }
+                                        .padding(horizontal = 18.dp, vertical = 15.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "退出登录",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
                             }
                             
                             // 退出登录确认对话框
@@ -558,12 +604,16 @@ fun SettingsPage(
                         onPlayerBlurChange = onPlayerBlurChange,
                         playerDynamicBg = playerDynamicBg,
                         onPlayerDynamicBgChange = onPlayerDynamicBgChange,
-                        playerMeshBg = playerMeshBg,
-                        onPlayerMeshBgChange = onPlayerMeshBgChange,
                         playerRoundAlbum = playerRoundAlbum,
                         onPlayerRoundAlbumChange = onPlayerRoundAlbumChange,
                         playerRotate = playerRotate,
                         onPlayerRotateChange = onPlayerRotateChange,
+                        playerVinylStyle = playerVinylStyle,
+                        onPlayerVinylStyleChange = onPlayerVinylStyleChange,
+                        playerVinylPointer = playerVinylPointer,
+                        onPlayerVinylPointerChange = onPlayerVinylPointerChange,
+                        playerVinylBase = playerVinylBase,
+                        onPlayerVinylBaseChange = onPlayerVinylBaseChange,
                         playerBgEnhance = playerBgEnhance,
                         onPlayerBgEnhanceChange = onPlayerBgEnhanceChange,
                         playerWaveformSlider = playerWaveformSlider,
@@ -578,8 +628,8 @@ fun SettingsPage(
                         onPlayerTapCoverToLyricsChange = onPlayerTapCoverToLyricsChange,
                         playerCompactControls = playerCompactControls,
                         onPlayerCompactControlsChange = onPlayerCompactControlsChange,
-                        playerShowTopFavorite = playerShowTopFavorite,
-                        onPlayerShowTopFavoriteChange = onPlayerShowTopFavoriteChange
+                        playerMinimalistControls = playerMinimalistControls,
+                        onPlayerMinimalistControlsChange = onPlayerMinimalistControlsChange
                     )
                 }
 
@@ -601,8 +651,6 @@ fun SettingsPage(
                         onPlayerLyricBlurAmountChange = onPlayerLyricBlurAmountChange,
                         playerDynamicBg = playerDynamicBg,
                         onPlayerDynamicBgChange = onPlayerDynamicBgChange,
-                        playerMeshBg = playerMeshBg,
-                        onPlayerMeshBgChange = onPlayerMeshBgChange,
                         playerBgEnhance = playerBgEnhance,
                         onPlayerBgEnhanceChange = onPlayerBgEnhanceChange
                     )
@@ -665,6 +713,10 @@ fun SettingsPage(
 
                 "proxy" -> {
                     SettingsProxyContent()
+                }
+
+                "about" -> {
+                    SettingsAboutContent()
                 }
             }
         }
@@ -1378,7 +1430,7 @@ internal fun SettingsGeneralContent(
         AlertDialog(
             onDismissRequest = { showQualityDialog = false },
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = { Text("选择播放音质", color = Color(0xFF1A1A1A)) },
+            title = { Text("选择播放音质", color = MaterialTheme.colorScheme.onSurface) },
             text = {
                 Column {
                     qualityOptions.forEach { (value, label) ->
@@ -1726,13 +1778,6 @@ internal fun SettingsProxyContent() {
     var refreshResult by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    // 更新检查状态
-    var isCheckingUpdate by remember { mutableStateOf(false) }
-    var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
-    var isDownloading by remember { mutableStateOf(false) }
-    var downloadProgress by remember { mutableStateOf(0f) }
-    var downloadError by remember { mutableStateOf<String?>(null) }
-
     Text(
         text = "VIP 服务",
         style = MaterialTheme.typography.titleMedium,
@@ -1971,158 +2016,337 @@ internal fun SettingsProxyContent() {
         )
     }
 
-    Spacer(modifier = Modifier.height(24.dp))
+    } // Column
+}
 
-    // --- 关于（版本号 + 检查更新） ---
-    Text(
-        text = "关于",
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold
-    )
-    Spacer(modifier = Modifier.height(8.dp))
+// ==================== 关于应用子页面 ====================
 
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // 版本信息
-            Row(verticalAlignment = Alignment.CenterVertically) {
+@Composable
+internal fun SettingsAboutContent() {
+    val context = LocalContext.current
+    val settingsPrefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
+    val scope = rememberCoroutineScope()
+
+    var autoCheckUpdate by remember {
+        mutableStateOf(settingsPrefs.getBoolean("auto_check_update_dialog", true))
+    }
+    var isCheckingUpdate by remember { mutableStateOf(false) }
+    var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
+
+    Column {
+        // --- 应用信息 Header 徽章卡片 ---
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 24.dp, horizontal = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(68.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.MusicNote,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 Text(
-                    text = "版本号",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f)
+                    text = "LxMusic",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
                 Text(
-                    text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                    text = "v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
                     style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "高品质全功能优雅 Android 音乐播放器",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Spacer(modifier = Modifier.height(12.dp))
-            // 检查更新按钮
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // --- 版本与更新设置 ---
+        Text(
+            text = "版本与更新",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        SettingsGroupCard {
+            // 开关：检测到新版本时显示弹窗更新
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        val newValue = !autoCheckUpdate
+                        autoCheckUpdate = newValue
+                        settingsPrefs.edit().putBoolean("auto_check_update_dialog", newValue).apply()
+                    }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "检查新版本",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f)
-                )
-                if (isCheckingUpdate) {
-                    IOLoadingIndicator(
-                        modifier = Modifier.size(20.dp),
-                        dotSize = 5.dp,
-                        spacing = 3.dp
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "检测到新版本时显示弹窗更新",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
-                } else {
-                    TextButton(onClick = {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "应用启动时自动检测 GitHub 最新版本并弹窗提示更新",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Switch(
+                    checked = autoCheckUpdate,
+                    onCheckedChange = {
+                        autoCheckUpdate = it
+                        settingsPrefs.edit().putBoolean("auto_check_update_dialog", it).apply()
+                    }
+                )
+            }
+
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                thickness = 0.5.dp
+            )
+
+            // 检查新版本操作
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = !isCheckingUpdate) {
                         scope.launch {
                             isCheckingUpdate = true
                             val info = UpdateChecker.checkForUpdate()
                             isCheckingUpdate = false
                             if (info == null) {
-                                Toast.makeText(context, "已是最新版本", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "已是最新版本 (v${BuildConfig.VERSION_NAME})", Toast.LENGTH_SHORT).show()
                             } else {
                                 updateInfo = info
                             }
                         }
-                    }) { Text("检查更新") }
-                }
-            }
-            Text(
-                text = "更新说明以 GitHub Releases 发布页为准",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-
-    // 发现新版本对话框
-    updateInfo?.let { info ->
-        AlertDialog(
-            onDismissRequest = { updateInfo = null; downloadError = null },
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = { Text("发现新版本 v${info.versionName}") },
-            text = {
-                Column {
+                    }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = info.desc.ifBlank { "有新版本可用，是否立即更新？" },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "检查新版本",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "当前版本 v${BuildConfig.VERSION_NAME}",
+                        text = "当前版本：v${BuildConfig.VERSION_NAME}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (isDownloading) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        LinearProgressIndicator(
-                            progress = { downloadProgress },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "正在下载 ${(downloadProgress * 100).toInt()}%",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    downloadError?.let {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = it,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error
-                        )
-                    }
                 }
-            },
-            confirmButton = {
-                if (isDownloading) {
-                    TextButton(onClick = { updateInfo = null; downloadError = null }) { Text("取消") }
+
+                if (isCheckingUpdate) {
+                    IOLoadingIndicator(
+                        modifier = Modifier.size(24.dp),
+                        dotSize = 5.dp,
+                        spacing = 3.dp
+                    )
                 } else {
-                    TextButton(
-                        onClick = {
-                            scope.launch {
-                                isDownloading = true
-                                downloadError = null
-                                val file = UpdateChecker.downloadApk(
-                                    context,
-                                    info.apkUrl,
-                                    onProgress = { downloaded, total ->
-                                        if (total > 0) {
-                                            downloadProgress = downloaded.toFloat() / total
-                                        }
-                                    }
-                                )
-                                isDownloading = false
-                                if (file != null) {
-                                    updateInfo = null
-                                    Toast.makeText(context, "下载完成，正在安装...", Toast.LENGTH_SHORT).show()
-                                    UpdateChecker.installApk(context, file)
-                                } else {
-                                    downloadError = "下载失败，请检查网络后重试"
-                                }
-                            }
+                    Icon(
+                        imageVector = Icons.Default.SystemUpdate,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                thickness = 0.5.dp
+            )
+
+            // GitHub Releases 发布页
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(UpdateChecker.RELEASES_URL))
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "无法打开浏览器", Toast.LENGTH_SHORT).show()
                         }
-                    ) { Text("立即更新") }
+                    }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "GitHub Releases 发布页",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "查看所有历史版本发布说明与更新日志",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-            },
-            dismissButton = {
-                if (!isDownloading) {
-                    TextButton(onClick = { updateInfo = null; downloadError = null }) { Text("稍后") }
+                Icon(
+                    imageVector = Icons.Default.OpenInBrowser,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // --- 开源与项目信息 ---
+        Text(
+            text = "开源与信息",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        SettingsGroupCard {
+            // 开源仓库
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(UpdateChecker.REPO_URL))
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "无法打开浏览器", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "开源项目主页",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = UpdateChecker.REPO_URL,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
+                Icon(
+                    imageVector = Icons.Default.OpenInBrowser,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                thickness = 0.5.dp
+            )
+
+            // 作者信息
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "开发者",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = UpdateChecker.GITHUB_OWNER,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                thickness = 0.5.dp
+            )
+
+            // 开源协议
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "开源协议",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = "Apache-2.0 License",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+
+    // 发现新版本弹窗
+    updateInfo?.let { info ->
+        AppUpdateDialog(
+            updateInfo = info,
+            onDismiss = { updateInfo = null },
+            onIgnoreVersion = {
+                UpdateChecker.setVersionIgnored(context, info.versionName)
+                Toast.makeText(context, "已忽略 v${info.versionName} 版本提示", Toast.LENGTH_SHORT).show()
             }
         )
     }
-    } // Column
 }
 
 // ==================== 播放器设置子页面 ====================
@@ -2135,12 +2359,16 @@ fun SettingsPlayerContent(
     onPlayerBlurChange: (Boolean) -> Unit,
     playerDynamicBg: Boolean,
     onPlayerDynamicBgChange: (Boolean) -> Unit,
-    playerMeshBg: Boolean,
-    onPlayerMeshBgChange: (Boolean) -> Unit,
     playerRoundAlbum: Boolean,
     onPlayerRoundAlbumChange: (Boolean) -> Unit,
     playerRotate: Boolean,
     onPlayerRotateChange: (Boolean) -> Unit,
+    playerVinylStyle: Boolean = false,
+    onPlayerVinylStyleChange: (Boolean) -> Unit = {},
+    playerVinylPointer: Boolean = false,
+    onPlayerVinylPointerChange: (Boolean) -> Unit = {},
+    playerVinylBase: Boolean = false,
+    onPlayerVinylBaseChange: (Boolean) -> Unit = {},
     playerBgEnhance: Boolean,
     onPlayerBgEnhanceChange: (Boolean) -> Unit,
     playerWaveformSlider: Boolean,
@@ -2155,8 +2383,8 @@ fun SettingsPlayerContent(
     onPlayerTapCoverToLyricsChange: (Boolean) -> Unit,
     playerCompactControls: Boolean,
     onPlayerCompactControlsChange: (Boolean) -> Unit,
-    playerShowTopFavorite: Boolean,
-    onPlayerShowTopFavoriteChange: (Boolean) -> Unit
+    playerMinimalistControls: Boolean = false,
+    onPlayerMinimalistControlsChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
 
@@ -2180,33 +2408,8 @@ fun SettingsPlayerContent(
                 checked = playerDynamicBg,
                 onCheckedChange = { enabled ->
                     onPlayerDynamicBgChange(enabled)
-                    // 与「应用背景图片」「动态背景2」「封面模糊背景」互斥
+                    // 与「应用背景图片」「封面模糊背景」互斥
                     if (enabled) {
-                        if (playerBgEnhance) onPlayerBgEnhanceChange(false)
-                        if (playerMeshBg) onPlayerMeshBgChange(false)
-                        if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
-                    }
-                }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 动态背景2（Mesh 渐变）
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "动态背景2（Mesh 渐变）",
-                subtitle = "Apple 风格网格渐变，随专辑颜色流动，播放时动效更明显",
-                checked = playerMeshBg,
-                onCheckedChange = { enabled ->
-                    onPlayerMeshBgChange(enabled)
-                    // 与「动态渐变背景」「应用背景图片」「封面模糊背景」互斥
-                    if (enabled) {
-                        if (playerDynamicBg) onPlayerDynamicBgChange(false)
                         if (playerBgEnhance) onPlayerBgEnhanceChange(false)
                         if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
                     }
@@ -2307,7 +2510,15 @@ fun SettingsPlayerContent(
                 title = "圆形专辑封面",
                 subtitle = "将专辑封面显示为圆形",
                 checked = playerRoundAlbum,
-                onCheckedChange = onPlayerRoundAlbumChange
+                onCheckedChange = { enabled ->
+                    onPlayerRoundAlbumChange(enabled)
+                    if (!enabled) {
+                        if (playerRotate) onPlayerRotateChange(false)
+                        if (playerVinylStyle) onPlayerVinylStyleChange(false)
+                        if (playerVinylPointer) onPlayerVinylPointerChange(false)
+                        if (playerVinylBase) onPlayerVinylBaseChange(false)
+                    }
+                }
             )
         }
 
@@ -2342,14 +2553,64 @@ fun SettingsPlayerContent(
                 checked = playerBgEnhance,
                 onCheckedChange = { enabled ->
                     onPlayerBgEnhanceChange(enabled)
-                    // 与「动态渐变背景」「动态背景2」「封面模糊背景」互斥
+                    // 与「动态渐变背景」「封面模糊背景」互斥
                     if (enabled) {
                         if (playerDynamicBg) onPlayerDynamicBgChange(false)
-                        if (playerMeshBg) onPlayerMeshBgChange(false)
                         if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
                     }
                 }
             )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = "唱片样式",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 唱片样式卡片组（三个选项常驻显示，自由搭配）
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                // 主选项：黑胶唱片
+                PlayerSettingSwitchRow(
+                    title = "黑胶唱片",
+                    subtitle = "以黑胶唱片盘与拟真音轨展示专辑封面",
+                    checked = playerVinylStyle,
+                    onCheckedChange = onPlayerVinylStyleChange,
+                    enabled = playerRoundAlbum
+                )
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                )
+                // 选项一：仅指针
+                PlayerSettingSwitchRow(
+                    title = "仅指针",
+                    subtitle = "显示金属唱臂、配重块与动态唱针",
+                    checked = playerVinylPointer,
+                    onCheckedChange = onPlayerVinylPointerChange,
+                    enabled = playerRoundAlbum
+                )
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                )
+                // 选项二：底板
+                PlayerSettingSwitchRow(
+                    title = "底板",
+                    subtitle = "显示白玉唱机底座卡片与右下角徽标",
+                    checked = playerVinylBase,
+                    onCheckedChange = onPlayerVinylBaseChange,
+                    enabled = playerRoundAlbum
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -2432,17 +2693,17 @@ fun SettingsPlayerContent(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // 顶栏收藏按钮
+        // 简约风控件
         Surface(
             shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             modifier = Modifier.fillMaxWidth()
         ) {
             PlayerSettingSwitchRow(
-                title = "顶栏收藏按钮",
-                subtitle = "仅歌词卡生效：隐藏顶栏音质标签，替换为收藏（喜欢）按钮",
-                checked = playerShowTopFavorite,
-                onCheckedChange = onPlayerShowTopFavoriteChange
+                title = "简约风控件",
+                subtitle = "采用胶囊形扁平进度条与极简实心播放控制按钮",
+                checked = playerMinimalistControls,
+                onCheckedChange = onPlayerMinimalistControlsChange
             )
         }
     }
@@ -2507,8 +2768,6 @@ fun SettingsMotionContent(
     onPlayerLyricBlurAmountChange: (Float) -> Unit,
     playerDynamicBg: Boolean,
     onPlayerDynamicBgChange: (Boolean) -> Unit,
-    playerMeshBg: Boolean,
-    onPlayerMeshBgChange: (Boolean) -> Unit,
     playerBgEnhance: Boolean,
     onPlayerBgEnhanceChange: (Boolean) -> Unit
 ) {
@@ -2538,10 +2797,9 @@ fun SettingsMotionContent(
                 enabled = Build.VERSION.SDK_INT >= 33,
                 onCheckedChange = { enabled ->
                     onPlayerHyperBgChange(enabled)
-                    // 与「动态渐变背景」「动态背景2」「应用背景图片」「封面模糊背景」互斥
+                    // 与「动态渐变背景」「应用背景图片」「封面模糊背景」互斥
                     if (enabled) {
                         if (playerDynamicBg) onPlayerDynamicBgChange(false)
-                        if (playerMeshBg) onPlayerMeshBgChange(false)
                         if (playerBgEnhance) onPlayerBgEnhanceChange(false)
                         if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
                     }
@@ -2568,10 +2826,9 @@ fun SettingsMotionContent(
                 enabled = Build.VERSION.SDK_INT >= 31,
                 onCheckedChange = { enabled ->
                     onPlayerCoverBlurBgChange(enabled)
-                    // 与「动态渐变背景」「动态背景2」「应用背景图片」「流体动态背景」互斥
+                    // 与「动态渐变背景」「应用背景图片」「流体动态背景」互斥
                     if (enabled) {
                         if (playerDynamicBg) onPlayerDynamicBgChange(false)
-                        if (playerMeshBg) onPlayerMeshBgChange(false)
                         if (playerBgEnhance) onPlayerBgEnhanceChange(false)
                         if (playerHyperBg) onPlayerHyperBgChange(false)
                     }

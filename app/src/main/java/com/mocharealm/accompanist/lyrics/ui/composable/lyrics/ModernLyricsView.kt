@@ -39,7 +39,7 @@ fun ModernLyricsView(
         textMotion = TextMotion.Animated
     ),
     textColor: Color = Color.White,
-    blendMode: BlendMode = BlendMode.Plus,
+    blendMode: BlendMode = BlendMode.SrcOver,
     useBlurEffect: Boolean = true,
     showTranslation: Boolean = true,
     showPhonetic: Boolean = true,

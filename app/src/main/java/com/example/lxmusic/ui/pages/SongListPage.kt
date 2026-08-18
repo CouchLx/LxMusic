@@ -145,7 +145,7 @@ fun SongListPage(
                             }
                         }
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "共 ${songs.size} 首",

@@ -3,10 +3,24 @@
 package com.example.lxmusic.ui.pages
 
 import android.content.Context
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +38,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -69,6 +84,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -80,6 +96,9 @@ import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.example.lxmusic.HotSearchItem
 import com.example.lxmusic.KuGouApi
+import com.example.lxmusic.SearchAlbumItem
+import com.example.lxmusic.SearchAuthorItem
+import com.example.lxmusic.SearchMvItem
 import com.example.lxmusic.SearchPlaylistItem
 import com.example.lxmusic.SearchSuggestItem
 import com.example.lxmusic.ui.components.SongContextMenuActions
@@ -88,6 +107,7 @@ import com.example.lxmusic.ui.components.IOLoadingIndicator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SearchTopBar(
@@ -95,58 +115,79 @@ fun SearchTopBar(
     onSearch: (String) -> Unit,
     externalQuery: String = ""
 ) {
-    var textFieldValue by remember { mutableStateOf(TextFieldValue("")) }
-    var isEditing by remember { mutableStateOf(true) }
+    var textFieldValue by remember { mutableStateOf(TextFieldValue(externalQuery, selection = TextRange(externalQuery.length))) }
+    var isFocused by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
-    val scope = rememberCoroutineScope()
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     // 搜索建议
     var suggestList by remember { mutableStateOf<List<SearchSuggestItem>>(emptyList()) }
     var showSuggestions by remember { mutableStateOf(false) }
-    var isSelectingSuggestion by remember { mutableStateOf(false) }
-    var isExternalUpdate by remember { mutableStateOf(false) }
+    var isUserInput by remember { mutableStateOf(false) }
 
-    // 同步外部搜索词
-    LaunchedEffect(externalQuery) {
-        if (externalQuery.isNotBlank() && externalQuery != textFieldValue.text) {
-            isExternalUpdate = true
-            textFieldValue = TextFieldValue(externalQuery)
-            isEditing = false
+    // 提交搜索：安全收起键盘、清空并隐藏推荐词
+    fun submitSearch(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isNotBlank()) {
+            isUserInput = false
             showSuggestions = false
             suggestList = emptyList()
+            textFieldValue = TextFieldValue(trimmed, selection = TextRange(trimmed.length))
+            focusManager.clearFocus(force = true)
+            keyboardController?.hide()
+            onSearch(trimmed)
         }
     }
 
-    // 自动弹出键盘（首次进入）
-    LaunchedEffect(Unit) {
-        delay(200)
-        try { focusRequester.requestFocus() } catch (_: Exception) {}
+    // 外部传入搜索词变化时同步
+    LaunchedEffect(externalQuery) {
+        if (externalQuery != textFieldValue.text) {
+            isUserInput = false
+            textFieldValue = TextFieldValue(externalQuery, selection = TextRange(externalQuery.length))
+            showSuggestions = false
+            suggestList = emptyList()
+            if (externalQuery.isNotBlank()) {
+                focusManager.clearFocus(force = true)
+                keyboardController?.hide()
+            }
+        }
     }
 
-    // 重新进入编辑状态时聚焦并全选
-    LaunchedEffect(isEditing) {
-        if (isEditing) {
-            delay(100)
-            textFieldValue = TextFieldValue(
-                text = textFieldValue.text,
-                selection = TextRange(0, textFieldValue.text.length)
-            )
+    // 首次进入且无搜索词时自动弹起软键盘聚焦
+    LaunchedEffect(Unit) {
+        if (externalQuery.isBlank()) {
+            delay(150)
             try { focusRequester.requestFocus() } catch (_: Exception) {}
         }
     }
 
-    // 搜索建议（防抖）
-    LaunchedEffect(textFieldValue.text) {
-        if (isExternalUpdate) { isExternalUpdate = false; return@LaunchedEffect }
-        if (isSelectingSuggestion) { isSelectingSuggestion = false; return@LaunchedEffect }
-        if (textFieldValue.text.isBlank()) { suggestList = emptyList(); showSuggestions = false; return@LaunchedEffect }
-        delay(300)
+    // 搜索建议防抖请求：仅在获得焦点且用户正在主动打字时触发
+    LaunchedEffect(textFieldValue.text, isFocused) {
+        if (!isFocused || !isUserInput) {
+            showSuggestions = false
+            suggestList = emptyList()
+            return@LaunchedEffect
+        }
+        val query = textFieldValue.text.trim()
+        if (query.isBlank()) {
+            suggestList = emptyList()
+            showSuggestions = false
+            return@LaunchedEffect
+        }
+        delay(250)
+        if (!isFocused || !isUserInput) return@LaunchedEffect
         try {
-            val resp = KuGouApi.service.getSearchSuggest(textFieldValue.text)
-            suggestList = resp.data?.flatMap { it.RecordDatas ?: emptyList() } ?: emptyList()
-            showSuggestions = suggestList.isNotEmpty()
-        } catch (_: Exception) { suggestList = emptyList() }
+            val resp = KuGouApi.service.getSearchSuggest(query)
+            if (isFocused && isUserInput) {
+                val list = resp.data?.flatMap { it.RecordDatas ?: emptyList() } ?: emptyList()
+                suggestList = list
+                showSuggestions = isFocused && list.isNotEmpty()
+            }
+        } catch (_: Exception) {
+            suggestList = emptyList()
+            showSuggestions = false
+        }
     }
 
     Column {
@@ -157,12 +198,7 @@ fun SearchTopBar(
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(36.dp)
-                        .clickable {
-                            if (!isEditing) {
-                                isEditing = true
-                            }
-                        }
+                        .height(38.dp)
                 ) {
                     Row(
                         modifier = Modifier
@@ -177,58 +213,63 @@ fun SearchTopBar(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        if (isEditing) {
-                            BasicTextField(
-                                value = textFieldValue,
-                                onValueChange = { textFieldValue = it },
-                                modifier = Modifier.weight(1f).focusRequester(focusRequester),
-                                singleLine = true,
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 14.sp
-                                ),
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                                keyboardActions = KeyboardActions(onSearch = {
-                                    if (textFieldValue.text.isNotBlank()) {
-                                        onSearch(textFieldValue.text)
-                                        isEditing = false
+                        BasicTextField(
+                            value = textFieldValue,
+                            onValueChange = {
+                                isUserInput = true
+                                textFieldValue = it
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .focusRequester(focusRequester)
+                                .onFocusChanged { focusState ->
+                                    isFocused = focusState.isFocused
+                                    if (!focusState.isFocused) {
                                         showSuggestions = false
-                                        focusManager.clearFocus()
+                                        suggestList = emptyList()
                                     }
-                                }),
-                                decorationBox = { innerTextField ->
-                                    Box {
-                                        if (textFieldValue.text.isEmpty()) {
-                                            Text(
-                                                "搜索歌曲、歌手",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontSize = 14.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                        innerTextField()
+                                },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontSize = 14.sp
+                            ),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = {
+                                submitSearch(textFieldValue.text)
+                            }),
+                            decorationBox = { innerTextField ->
+                                Box(contentAlignment = Alignment.CenterStart) {
+                                    if (textFieldValue.text.isEmpty()) {
+                                        Text(
+                                            "搜索歌曲、歌手、歌单",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontSize = 14.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
-                                }
-                            )
-                            if (textFieldValue.text.isNotEmpty()) {
-                                IconButton(onClick = {
-                                    textFieldValue = TextFieldValue("")
-                                    showSuggestions = false
-                                }, modifier = Modifier.size(18.dp).padding(0.dp)) {
-                                    Icon(Icons.Default.Clear, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    innerTextField()
                                 }
                             }
-                        } else {
-                            // 锁定状态：显示纯文本
-                            Text(
-                                text = textFieldValue.text,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontSize = 14.sp,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
+                        )
+                        if (textFieldValue.text.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    isUserInput = false
+                                    textFieldValue = TextFieldValue("")
+                                    showSuggestions = false
+                                    suggestList = emptyList()
+                                    try { focusRequester.requestFocus() } catch (_: Exception) {}
+                                },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Clear,
+                                    contentDescription = "清空",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
@@ -239,14 +280,8 @@ fun SearchTopBar(
                 }
             },
             actions = {
-                // 搜索按钮
                 TextButton(onClick = {
-                    if (textFieldValue.text.isNotBlank()) {
-                        onSearch(textFieldValue.text)
-                        isEditing = false
-                        showSuggestions = false
-                        focusManager.clearFocus()
-                    }
+                    submitSearch(textFieldValue.text)
                 }) {
                     Text("搜索", fontSize = 14.sp)
                 }
@@ -254,35 +289,53 @@ fun SearchTopBar(
             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
         )
 
-        // 搜索建议下拉列表
-        if (showSuggestions && suggestList.isNotEmpty()) {
+        // 搜索建议下拉浮层
+        AnimatedVisibility(
+            visible = showSuggestions && suggestList.isNotEmpty() && isFocused,
+            enter = expandVertically(tween(200)) + fadeIn(tween(200)),
+            exit = shrinkVertically(tween(150)) + fadeOut(tween(150))
+        ) {
             Surface(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 4.dp
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 6.dp,
+                shadowElevation = 8.dp
             ) {
-                Column {
+                Column(modifier = Modifier.padding(vertical = 4.dp)) {
                     suggestList.take(8).forEach { suggest ->
-                        suggest.HintInfo?.let { hint ->
+                        val hint = suggest.HintInfo
+                        if (!hint.isNullOrBlank()) {
                             Surface(
                                 onClick = {
-                                    isSelectingSuggestion = true
-                                    textFieldValue = TextFieldValue(hint)
-                                    onSearch(hint)
-                                    showSuggestions = false
-                                    isEditing = false
-                                    focusManager.clearFocus()
+                                    submitSearch(hint)
                                 },
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth(),
+                                color = Color.Transparent
                             ) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 11.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Default.Search, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Icon(
+                                        Icons.Default.Search,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                     Spacer(modifier = Modifier.width(12.dp))
-                                    Text(hint, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        text = hint,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
                                 }
                             }
                         }
@@ -297,10 +350,12 @@ fun SearchTopBar(
 @Composable
 fun SearchPage(
     initialQuery: String = "",
+    initialSelectedType: String = "song",
     onBack: () -> Unit,
     onPlaySong: (List<SongInfo>, Int) -> Unit,
-    onPlaylistClick: (Long, String) -> Unit = { _, _ -> },
+    onPlaylistClick: (SearchPlaylistItem) -> Unit = {},
     onQueryChange: (String) -> Unit = {},
+    onSelectedTypeChange: (String) -> Unit = {},
     currentPlayingPath: String? = null,
     isPlaying: Boolean = false,
     onAddToQueueNext: (SongInfo) -> Unit = {},
@@ -308,20 +363,20 @@ fun SearchPage(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     var searchResults by remember { mutableStateOf<List<SongInfo>>(emptyList()) }
     var isSearching by remember { mutableStateOf(false) }
-    var hasSearched by remember { mutableStateOf(false) }
+    var hasSearched by remember { mutableStateOf(initialQuery.isNotBlank()) }
     var currentPage by remember { mutableIntStateOf(1) }
     var totalResults by remember { mutableIntStateOf(0) }
     var isLoadingMore by remember { mutableStateOf(false) }
     var noMoreData by remember { mutableStateOf(false) }
     var currentQuery by remember { mutableStateOf("") }
-    var selectedType by remember { mutableStateOf("song") }
+    var selectedType by remember { mutableStateOf(initialSelectedType) }
     var inputText by remember { mutableStateOf(initialQuery) }
 
-    // 热搜和建议
+    // 热搜
     var hotSearchList by remember { mutableStateOf<List<HotSearchItem>>(emptyList()) }
-    var suggestList by remember { mutableStateOf<List<SearchSuggestItem>>(emptyList()) }
     var defaultKeyword by remember { mutableStateOf("") }
 
     // 搜索历史
@@ -373,65 +428,102 @@ fun SearchPage(
         } catch (_: Exception) {}
     }
 
-    // 搜索建议（防抖）- 输入时显示
-    LaunchedEffect(inputText) {
-        if (inputText.isBlank()) { suggestList = emptyList(); return@LaunchedEffect }
-        delay(300)
-        try {
-            val resp = KuGouApi.service.getSearchSuggest(inputText)
-            suggestList = resp.data?.flatMap { it.RecordDatas ?: emptyList() } ?: emptyList()
-        } catch (_: Exception) { suggestList = emptyList() }
-    }
-
     // 歌单搜索结果
     var playlistResults by remember { mutableStateOf<List<SearchPlaylistItem>>(emptyList()) }
+
+    // 歌手/专辑/MV 搜索结果
+    var authorResults by remember { mutableStateOf<List<SearchAuthorItem>>(emptyList()) }
+    var albumResults by remember { mutableStateOf<List<SearchAlbumItem>>(emptyList()) }
+    var mvResults by remember { mutableStateOf<List<SearchMvItem>>(emptyList()) }
 
     // 搜索函数
     fun doSearch(keywords: String, type: String = selectedType) {
         if (keywords.isBlank()) return
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
         isSearching = true
         hasSearched = true
         currentQuery = keywords
         inputText = keywords
         currentPage = 1
         noMoreData = false
-        onQueryChange(keywords) // 同步到标题栏搜索框
+        onQueryChange(keywords)
         scope.launch(Dispatchers.IO) {
             try {
-                if (type == "special") {
-                    // 歌单搜索
-                    val resp = KuGouApi.service.searchPlaylist(keywords, page = 1, pageSize = 30)
-                    playlistResults = resp.data?.lists ?: emptyList()
-                    searchResults = emptyList()
-                    totalResults = resp.data?.total ?: 0
-                    android.util.Log.d("LxMusic", "歌单搜索: total=${resp.data?.total}, listSize=${playlistResults.size}")
-                    if (playlistResults.size < 30) noMoreData = true
-                    if (playlistResults.isNotEmpty()) saveHistory(keywords)
-                } else {
-                    // 单曲搜索
-                    val resp = KuGouApi.service.search(keywords, page = 1, pageSize = 30, type = type)
-                    android.util.Log.d("LxMusic", "搜索: type=$type, status=${resp.status}, total=${resp.data?.total}, listSize=${resp.data?.lists?.size}")
-                    val songs = resp.data?.lists?.map { song ->
-                        SongInfo(
-                            title = song.title,
-                            artist = song.artist,
-                            filePath = "${song.hash}|${song.album_audio_id}",
-                            albumArtUri = song.coverUrl,
-                            duration = song.Duration.toLong() * 1000,
-                            albumId = song.AlbumID?.toLongOrNull() ?: 0
-                        )
-                    } ?: emptyList()
-                    searchResults = songs
-                    playlistResults = emptyList()
-                    totalResults = resp.data?.total ?: 0
-                    if (songs.size < 30) noMoreData = true
-                    if (songs.isNotEmpty()) saveHistory(keywords)
-                }
-            } catch (_: Exception) {
+                // 清空所有结果
                 searchResults = emptyList()
                 playlistResults = emptyList()
+                authorResults = emptyList()
+                albumResults = emptyList()
+                mvResults = emptyList()
+
+                when (type) {
+                    "special" -> {
+                        val resp = KuGouApi.service.searchPlaylist(keywords, page = 1, pageSize = 30)
+                        playlistResults = resp.data?.lists ?: emptyList()
+                        totalResults = resp.data?.total ?: 0
+                        android.util.Log.d("LxMusic", "歌单搜索: total=${resp.data?.total}, listSize=${playlistResults.size}")
+                        if (playlistResults.size < 30) noMoreData = true
+                        if (playlistResults.isNotEmpty()) saveHistory(keywords)
+                    }
+                    "author" -> {
+                        val resp = KuGouApi.service.searchAuthor(keywords, page = 1, pageSize = 30)
+                        authorResults = resp.data?.lists ?: emptyList()
+                        totalResults = resp.data?.total ?: 0
+                        android.util.Log.d("LxMusic", "歌手搜索: total=${resp.data?.total}, listSize=${authorResults.size}")
+                        if (authorResults.size < 30) noMoreData = true
+                        if (authorResults.isNotEmpty()) saveHistory(keywords)
+                    }
+                    "album" -> {
+                        val resp = KuGouApi.service.searchAlbum(keywords, page = 1, pageSize = 30)
+                        albumResults = resp.data?.lists ?: emptyList()
+                        totalResults = resp.data?.total ?: 0
+                        android.util.Log.d("LxMusic", "专辑搜索: total=${resp.data?.total}, listSize=${albumResults.size}")
+                        if (albumResults.size < 30) noMoreData = true
+                        if (albumResults.isNotEmpty()) saveHistory(keywords)
+                    }
+                    "mv" -> {
+                        val resp = KuGouApi.service.searchMv(keywords, page = 1, pageSize = 30)
+                        mvResults = resp.data?.lists ?: emptyList()
+                        totalResults = resp.data?.total ?: 0
+                        android.util.Log.d("LxMusic", "MV搜索: total=${resp.data?.total}, listSize=${mvResults.size}")
+                        if (mvResults.size < 30) noMoreData = true
+                        if (mvResults.isNotEmpty()) saveHistory(keywords)
+                    }
+                    else -> {
+                        // 单曲搜索 (song, author, album, mv 等通用 fallback)
+                        val resp = KuGouApi.service.search(keywords, page = 1, pageSize = 30, type = type)
+                        android.util.Log.d("LxMusic", "搜索: type=$type, status=${resp.status}, total=${resp.data?.total}, listSize=${resp.data?.lists?.size}")
+                        val songs = resp.data?.lists?.map { song ->
+                            SongInfo(
+                                title = song.title,
+                                artist = song.artist,
+                                filePath = "${song.hash}|${song.album_audio_id}",
+                                albumArtUri = song.coverUrl,
+                                duration = song.Duration.toLong() * 1000,
+                                albumId = song.AlbumID?.toLongOrNull() ?: 0
+                            )
+                        } ?: emptyList()
+                        searchResults = songs
+                        totalResults = resp.data?.total ?: 0
+                        if (songs.size < 30) noMoreData = true
+                        if (songs.isNotEmpty()) saveHistory(keywords)
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("LxMusic", "搜索失败: type=$type", e)
+                searchResults = emptyList()
+                playlistResults = emptyList()
+                authorResults = emptyList()
+                albumResults = emptyList()
+                mvResults = emptyList()
+            } finally {
+                isSearching = false
+                withContext(Dispatchers.Main) {
+                    focusManager.clearFocus(force = true)
+                    keyboardController?.hide()
+                }
             }
-            isSearching = false
         }
     }
 
@@ -442,35 +534,104 @@ fun SearchPage(
         val nextPage = currentPage + 1
         scope.launch(Dispatchers.IO) {
             try {
-                val resp = KuGouApi.service.search(currentQuery, page = nextPage, pageSize = 30, type = selectedType)
-                val songs = resp.data?.lists?.map { song ->
-                    SongInfo(
-                        title = song.title,
-                        artist = song.artist,
-                        filePath = "${song.hash}|${song.album_audio_id}",
-                        albumArtUri = song.coverUrl,
-                        duration = song.Duration.toLong(),
-                        albumId = song.AlbumID?.toLongOrNull() ?: 0
-                    )
-                } ?: emptyList()
-                if (songs.isNotEmpty()) {
-                    searchResults = searchResults + songs
-                    currentPage = nextPage
+                when (selectedType) {
+                    "special" -> {
+                        val resp = KuGouApi.service.searchPlaylist(currentQuery, page = nextPage, pageSize = 30)
+                        val more = resp.data?.lists ?: emptyList()
+                        if (more.isNotEmpty()) { playlistResults = playlistResults + more; currentPage = nextPage }
+                        if (more.size < 30) noMoreData = true
+                    }
+                    "author" -> {
+                        val resp = KuGouApi.service.searchAuthor(currentQuery, page = nextPage, pageSize = 30)
+                        val more = resp.data?.lists ?: emptyList()
+                        if (more.isNotEmpty()) { authorResults = authorResults + more; currentPage = nextPage }
+                        if (more.size < 30) noMoreData = true
+                    }
+                    "album" -> {
+                        val resp = KuGouApi.service.searchAlbum(currentQuery, page = nextPage, pageSize = 30)
+                        val more = resp.data?.lists ?: emptyList()
+                        if (more.isNotEmpty()) { albumResults = albumResults + more; currentPage = nextPage }
+                        if (more.size < 30) noMoreData = true
+                    }
+                    "mv" -> {
+                        val resp = KuGouApi.service.searchMv(currentQuery, page = nextPage, pageSize = 30)
+                        val more = resp.data?.lists ?: emptyList()
+                        if (more.isNotEmpty()) { mvResults = mvResults + more; currentPage = nextPage }
+                        if (more.size < 30) noMoreData = true
+                    }
+                    else -> {
+                        val resp = KuGouApi.service.search(currentQuery, page = nextPage, pageSize = 30, type = selectedType)
+                        val songs = resp.data?.lists?.map { song ->
+                            SongInfo(
+                                title = song.title, artist = song.artist,
+                                filePath = "${song.hash}|${song.album_audio_id}",
+                                albumArtUri = song.coverUrl, duration = song.Duration.toLong(),
+                                albumId = song.AlbumID?.toLongOrNull() ?: 0
+                            )
+                        } ?: emptyList()
+                        if (songs.isNotEmpty()) { searchResults = searchResults + songs; currentPage = nextPage }
+                        if (songs.size < 30) noMoreData = true
+                    }
                 }
-                if (songs.size < 30) noMoreData = true
             } catch (_: Exception) {}
             isLoadingMore = false
         }
     }
 
+    LaunchedEffect(initialSelectedType) {
+        selectedType = initialSelectedType
+    }
+
     // 接收标题栏传来的搜索词
     LaunchedEffect(initialQuery) {
-        if (initialQuery.isNotBlank()) doSearch(initialQuery)
+        if (initialQuery.isNotBlank()) {
+            doSearch(initialQuery, selectedType)
+        } else {
+            hasSearched = false
+            currentQuery = ""
+            selectedType = "song"
+            onSelectedTypeChange("song")
+            searchResults = emptyList()
+            playlistResults = emptyList()
+            authorResults = emptyList()
+            albumResults = emptyList()
+            mvResults = emptyList()
+        }
+    }
+
+    // 点击歌手/专辑/MV 时：用名称搜歌并直接播放
+    fun playByName(name: String) {
+        if (name.isBlank()) return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val resp = KuGouApi.service.search(name, page = 1, pageSize = 30, type = "song")
+                val songs = resp.data?.lists?.map { song ->
+                    SongInfo(
+                        title = song.title, artist = song.artist,
+                        filePath = "${song.hash}|${song.album_audio_id}",
+                        albumArtUri = song.coverUrl,
+                        duration = song.Duration.toLong() * 1000,
+                        albumId = song.AlbumID?.toLongOrNull() ?: 0
+                    )
+                } ?: emptyList()
+                if (songs.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        onPlaySong(songs, 0)
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("LxMusic", "播放失败: name=$name", e)
+            }
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // 搜索类型 Tab（搜索后显示）
-        if (hasSearched) {
+        // 搜索类型 Tab（搜索后显示，平滑展开/收起）
+        AnimatedVisibility(
+            visible = hasSearched,
+            enter = expandVertically(tween(250, easing = FastOutSlowInEasing)) + fadeIn(tween(250)),
+            exit = shrinkVertically(tween(200, easing = FastOutSlowInEasing)) + fadeOut(tween(180))
+        ) {
             val types = listOf("song" to "单曲", "special" to "歌单", "author" to "歌手", "album" to "专辑", "mv" to "MV")
             ScrollableTabRow(
                 selectedTabIndex = types.indexOfFirst { it.first == selectedType }.coerceAtLeast(0),
@@ -482,7 +643,10 @@ fun SearchPage(
                     Tab(
                         selected = selectedType == type,
                         onClick = {
+                            focusManager.clearFocus(force = true)
+                            keyboardController?.hide()
                             selectedType = type
+                            onSelectedTypeChange(type)
                             if (currentQuery.isNotBlank()) doSearch(currentQuery, type)
                         },
                         text = { Text(label, fontSize = 13.sp) }
@@ -497,7 +661,10 @@ fun SearchPage(
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
-            ) { focusManager.clearFocus() }
+            ) {
+                focusManager.clearFocus(force = true)
+                keyboardController?.hide()
+            }
         ) {
             when {
                 isSearching -> {
@@ -508,14 +675,33 @@ fun SearchPage(
                         )
                     }
                 }
-                hasSearched && searchResults.isEmpty() && playlistResults.isEmpty() -> {
+                hasSearched && searchResults.isEmpty() && playlistResults.isEmpty() && authorResults.isEmpty() && albumResults.isEmpty() && mvResults.isEmpty() -> {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("未找到相关结果", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 hasSearched && playlistResults.isNotEmpty() -> {
                     // 歌单搜索结果
+                    val playlistListState = rememberLazyListState()
+                    val shouldLoadMore by remember {
+                        derivedStateOf {
+                            val last = playlistListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                            last >= playlistListState.layoutInfo.totalItemsCount - 3 && !isLoadingMore && !noMoreData
+                        }
+                    }
+                    LaunchedEffect(shouldLoadMore) {
+                        if (shouldLoadMore) loadMore()
+                    }
+                    // 滚动时收起键盘
+                    LaunchedEffect(playlistListState.isScrollInProgress) {
+                        if (playlistListState.isScrollInProgress) {
+                            focusManager.clearFocus(force = true)
+                            keyboardController?.hide()
+                        }
+                    }
+
                     LazyColumn(
+                        state = playlistListState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 100.dp)
                     ) {
@@ -529,10 +715,10 @@ fun SearchPage(
                         }
                         items(playlistResults) { playlist ->
                             Surface(
-                                onClick = { onPlaylistClick(playlist.specialid, playlist.specialname ?: "未知歌单") },
+                                onClick = { onPlaylistClick(playlist) },
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                                 shape = RoundedCornerShape(12.dp),
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth().padding(12.dp),
@@ -549,12 +735,233 @@ fun SearchPage(
                                     }
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(playlist.specialname ?: "未知歌单", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(playlist.specialname ?: "未知歌单", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         Spacer(modifier = Modifier.height(4.dp))
-                                        Text("${playlist.nickname ?: "未知"} · ${playlist.song_count}首", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        val playCountText = playlist.play_count?.let { raw ->
+                                            val num = raw.replace("[^0-9]".toRegex(), "").toLongOrNull() ?: 0L
+                                            when {
+                                                num >= 100_000_000 -> String.format("%.1f亿", num / 100_000_000.0)
+                                                num >= 10_000 -> String.format("%.1f万", num / 10_000.0)
+                                                num > 0 -> "${num}次"
+                                                else -> null
+                                            }
+                                        }
+                                        val metaText = buildString {
+                                            append(playlist.nickname ?: "未知")
+                                            append(" · ")
+                                            append("${playlist.song_count}首")
+                                            if (!playCountText.isNullOrBlank()) {
+                                                append(" · ")
+                                                append(playCountText)
+                                            }
+                                        }
+                                        Text(metaText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
                             }
+                        }
+                        if (isLoadingMore) {
+                            item {
+                                Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                    IOLoadingIndicator(Modifier.size(24.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+                hasSearched && authorResults.isNotEmpty() -> {
+                    // 歌手搜索结果
+                    val authorListState = rememberLazyListState()
+                    val shouldLoadMore by remember {
+                        derivedStateOf {
+                            val last = authorListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                            last >= authorListState.layoutInfo.totalItemsCount - 3 && !isLoadingMore && !noMoreData
+                        }
+                    }
+                    LaunchedEffect(shouldLoadMore) { if (shouldLoadMore) loadMore() }
+                    LaunchedEffect(authorListState.isScrollInProgress) {
+                        if (authorListState.isScrollInProgress) {
+                            focusManager.clearFocus(force = true)
+                            keyboardController?.hide()
+                        }
+                    }
+                    LazyColumn(state = authorListState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 100.dp)) {
+                        item {
+                            Text(
+                                text = if (totalResults > 0) "共 $totalResults 位歌手，已加载 ${authorResults.size} 位" else "已加载 ${authorResults.size} 位歌手",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
+                            )
+                        }
+                        items(authorResults) { author ->
+                            Surface(
+                                onClick = { playByName(author.authorname ?: "") },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh
+                            ) {
+                                Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    val coverUrl = author.coverUrl
+                                    if (coverUrl.isNotBlank()) {
+                                        val painter = rememberAsyncImagePainter(model = ImageRequest.Builder(context).data(coverUrl).memoryCacheKey(coverUrl).crossfade(150).build())
+                                        Image(painter, null, Modifier.size(56.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+                                    } else {
+                                        Box(Modifier.size(56.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Default.MusicNote, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(author.authorname ?: "未知歌手", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        val meta = buildString {
+                                            if (author.songcount > 0) append("${author.songcount}首歌曲")
+                                            if (author.albumcount > 0) {
+                                                if (isNotEmpty()) append(" · ")
+                                                append("${author.albumcount}张专辑")
+                                            }
+                                        }
+                                        if (meta.isNotBlank()) Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
+                        if (isLoadingMore) {
+                            item { Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { IOLoadingIndicator(Modifier.size(24.dp)) } }
+                        }
+                    }
+                }
+                hasSearched && albumResults.isNotEmpty() -> {
+                    // 专辑搜索结果
+                    val albumListState = rememberLazyListState()
+                    val shouldLoadMore by remember {
+                        derivedStateOf {
+                            val last = albumListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                            last >= albumListState.layoutInfo.totalItemsCount - 3 && !isLoadingMore && !noMoreData
+                        }
+                    }
+                    LaunchedEffect(shouldLoadMore) { if (shouldLoadMore) loadMore() }
+                    LaunchedEffect(albumListState.isScrollInProgress) {
+                        if (albumListState.isScrollInProgress) {
+                            focusManager.clearFocus(force = true)
+                            keyboardController?.hide()
+                        }
+                    }
+                    LazyColumn(state = albumListState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 100.dp)) {
+                        item {
+                            Text(
+                                text = if (totalResults > 0) "共 $totalResults 张专辑，已加载 ${albumResults.size} 张" else "已加载 ${albumResults.size} 张专辑",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
+                            )
+                        }
+                        items(albumResults) { album ->
+                            Surface(
+                                onClick = { playByName(album.albumname ?: "") },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh
+                            ) {
+                                Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    val coverUrl = album.coverUrl
+                                    if (coverUrl.isNotBlank()) {
+                                        val painter = rememberAsyncImagePainter(model = ImageRequest.Builder(context).data(coverUrl).memoryCacheKey(coverUrl).crossfade(150).build())
+                                        Image(painter, null, Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
+                                    } else {
+                                        Box(Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Default.MusicNote, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(album.albumname ?: "未知专辑", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        val meta = buildString {
+                                            if (!album.authorname.isNullOrBlank()) append(album.authorname)
+                                            if (album.songcount > 0) {
+                                                if (isNotEmpty()) append(" · ")
+                                                append("${album.songcount}首")
+                                            }
+                                        }
+                                        if (meta.isNotBlank()) Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
+                        if (isLoadingMore) {
+                            item { Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { IOLoadingIndicator(Modifier.size(24.dp)) } }
+                        }
+                    }
+                }
+                hasSearched && mvResults.isNotEmpty() -> {
+                    // MV 搜索结果
+                    val mvListState = rememberLazyListState()
+                    val shouldLoadMore by remember {
+                        derivedStateOf {
+                            val last = mvListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                            last >= mvListState.layoutInfo.totalItemsCount - 3 && !isLoadingMore && !noMoreData
+                        }
+                    }
+                    LaunchedEffect(shouldLoadMore) { if (shouldLoadMore) loadMore() }
+                    LaunchedEffect(mvListState.isScrollInProgress) {
+                        if (mvListState.isScrollInProgress) {
+                            focusManager.clearFocus(force = true)
+                            keyboardController?.hide()
+                        }
+                    }
+                    LazyColumn(state = mvListState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 100.dp)) {
+                        item {
+                            Text(
+                                text = if (totalResults > 0) "共 $totalResults 个MV，已加载 ${mvResults.size} 个" else "已加载 ${mvResults.size} 个MV",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
+                            )
+                        }
+                        items(mvResults) { mv ->
+                            Surface(
+                                onClick = { playByName(mv.mvname ?: "") },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh
+                            ) {
+                                Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    val coverUrl = mv.coverUrl
+                                    if (coverUrl.isNotBlank()) {
+                                        val painter = rememberAsyncImagePainter(model = ImageRequest.Builder(context).data(coverUrl).memoryCacheKey(coverUrl).crossfade(150).build())
+                                        Image(painter, null, Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
+                                    } else {
+                                        Box(Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
+                                            Icon(Icons.Default.MusicNote, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(mv.mvname ?: "未知MV", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        val meta = buildString {
+                                            if (!mv.authorname.isNullOrBlank()) append(mv.authorname)
+                                            if (mv.durationText.isNotBlank()) {
+                                                if (isNotEmpty()) append(" · ")
+                                                append(mv.durationText)
+                                            }
+                                            mv.playcount?.let { raw ->
+                                                val num = raw.replace("[^0-9]".toRegex(), "").toLongOrNull() ?: 0L
+                                                val formatted = when {
+                                                    num >= 100_000_000 -> String.format("%.1f亿", num / 100_000_000.0)
+                                                    num >= 10_000 -> String.format("%.1f万", num / 10_000.0)
+                                                    num > 0 -> "${num}次"
+                                                    else -> null
+                                                }
+                                                if (!formatted.isNullOrBlank()) {
+                                                    if (isNotEmpty()) append(" · ")
+                                                    append(formatted)
+                                                }
+                                            }
+                                        }
+                                        if (meta.isNotBlank()) Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
+                        if (isLoadingMore) {
+                            item { Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { IOLoadingIndicator(Modifier.size(24.dp)) } }
                         }
                     }
                 }
@@ -571,7 +978,10 @@ fun SearchPage(
                     }
                     // 滚动时收起键盘
                     LaunchedEffect(listState.isScrollInProgress) {
-                        if (listState.isScrollInProgress) focusManager.clearFocus()
+                        if (listState.isScrollInProgress) {
+                            focusManager.clearFocus(force = true)
+                            keyboardController?.hide()
+                        }
                     }
 
                     LazyColumn(
@@ -637,7 +1047,15 @@ fun SearchPage(
                     }
                 }
                 else -> {
+                    val defaultListState = rememberLazyListState()
+                    LaunchedEffect(defaultListState.isScrollInProgress) {
+                        if (defaultListState.isScrollInProgress) {
+                            focusManager.clearFocus(force = true)
+                            keyboardController?.hide()
+                        }
+                    }
                     LazyColumn(
+                        state = defaultListState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 100.dp)
                     ) {
@@ -681,7 +1099,11 @@ fun SearchPage(
                                                     deleteHistory(setOf(keyword))
                                                     if (historyList.isEmpty()) isDeletingHistory = false
                                                 } else {
-                                                    doSearch(keyword)
+                                                    focusManager.clearFocus(force = true)
+                                                    keyboardController?.hide()
+                                                    selectedType = "song"
+                                                    onSelectedTypeChange("song")
+                                                    doSearch(keyword, "song")
                                                 }
                                             },
                                             shape = RoundedCornerShape(16.dp),
@@ -720,9 +1142,15 @@ fun SearchPage(
                                         hotSearchExpanded = !hotSearchExpanded
                                         historyPrefs.edit().putBoolean("hot_expanded", hotSearchExpanded).apply()
                                     }, modifier = Modifier.size(24.dp)) {
+                                        val rotation by animateFloatAsState(
+                                            targetValue = if (hotSearchExpanded) 180f else 0f,
+                                            animationSpec = tween(250, easing = FastOutSlowInEasing),
+                                            label = "hotSearchRotation"
+                                        )
                                         Icon(
-                                            if (hotSearchExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                            null, Modifier.size(20.dp)
+                                            Icons.Default.ExpandMore,
+                                            null,
+                                            Modifier.size(20.dp).graphicsLayer(rotationZ = rotation)
                                         )
                                     }
                                 }
@@ -731,7 +1159,13 @@ fun SearchPage(
                                 itemsIndexed(hotSearchList.take(20), key = { i, hot -> hot.keyword ?: "hot_$i" }) { index, hot ->
                                     hot.keyword?.let { keyword ->
                                         Surface(
-                                            onClick = { doSearch(keyword) },
+                                            onClick = {
+                                                focusManager.clearFocus(force = true)
+                                                keyboardController?.hide()
+                                                selectedType = "song"
+                                                onSelectedTypeChange("song")
+                                                doSearch(keyword, "song")
+                                            },
                                             modifier = Modifier.fillMaxWidth(),
                                             color = Color.Transparent
                                         ) {

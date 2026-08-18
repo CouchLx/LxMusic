@@ -34,7 +34,6 @@ fun PlayerBackdrop(
     secondaryColor: Color,
     tertiaryColor: Color,
     coverModel: Any?,
-    meshBackground: Boolean,
     dynamicBackground: Boolean,
     backgroundEnhance: Boolean,
     playerHyperBg: Boolean,
@@ -79,7 +78,7 @@ fun PlayerBackdrop(
                 .fillMaxSize()
                 .background(backgroundColor)
         )
-        // 封面模糊背景（与流体/动态渐变/Mesh/图片互斥）
+        // 封面模糊背景（与流体/动态渐变/图片互斥）
         if (playerCoverBlurBg) {
             Image(
                 painter = albumPainter,
@@ -106,16 +105,8 @@ fun PlayerBackdrop(
                 modifier = Modifier.fillMaxSize()
             )
         }
-        // 动态背景2（Mesh 渐变，与「动态渐变背景」「应用背景图片」互斥）
-        else if (meshBackground) {
-            MeshGradientBackground(
-                colors = dynamicBgColors,
-                playing = playing,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-        // 动态渐变背景（与背景图片互斥，随专辑旋转）
-        if (!playerHyperBg && !playerCoverBlurBg && !meshBackground && dynamicBackground) {
+        // 动态渐变背景（与背景图片互斥，随专辑旋转流动）
+        if (!playerHyperBg && !playerCoverBlurBg && dynamicBackground) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -125,7 +116,7 @@ fun PlayerBackdrop(
                     )
             )
         }
-        if (!playerHyperBg && !playerCoverBlurBg && !meshBackground && !dynamicBackground &&
+        if (!playerHyperBg && !playerCoverBlurBg && !dynamicBackground &&
             backgroundEnhance
         ) {
             // 使用应用设置中的背景图片

@@ -419,9 +419,22 @@ class PlayerService : MediaSessionService() {
 
         // 添加播放器监听器，确保播放时启动前台服务 + 暂停时调度空闲退出
         player.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                lastAudioFormat = null
+            }
+
             override fun onEvents(p: Player, events: Player.Events) {
-                // 更新当前解码音频格式（采样率/位深/编码），供播放器页显示
-                lastAudioFormat = player.audioFormat
+                // 更新当前解码音频格式（采样率/位深/编码/码率），供播放器页显示
+                var sourceFormat: androidx.media3.common.Format? = null
+                for (group in p.currentTracks.groups) {
+                    if (group.type == androidx.media3.common.C.TRACK_TYPE_AUDIO && group.isSelected) {
+                        sourceFormat = group.getTrackFormat(0)
+                        break
+                    }
+                }
+                if (sourceFormat != null) {
+                    lastAudioFormat = sourceFormat
+                }
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {

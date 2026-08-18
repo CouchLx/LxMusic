@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -129,6 +130,12 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Cloud
+import com.example.lxmusic.ui.components.ThemeModeToggleButton
+import com.example.lxmusic.ui.components.ThemeRevealOverlay
+import com.example.lxmusic.ui.components.AppUpdateDialog
+import androidx.compose.ui.graphics.asImageBitmap
+import kotlin.coroutines.resume
+import kotlinx.coroutines.suspendCancellableCoroutine
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
@@ -371,12 +378,26 @@ class MainActivity : ComponentActivity() {
                 ) {
                     try { Color(android.graphics.Color.parseColor(themeColorHex)) } catch (_: Exception) { null }
                 } else null
+
                 // 明暗模式：自动 / 浅色 / 深色
                 val resolvedDarkTheme = when (themeDarkMode) {
                     "light" -> false
                     "dark" -> true
                     else -> isSystemInDarkTheme()
                 }
+
+                val view = androidx.compose.ui.platform.LocalView.current
+                if (!view.isInEditMode) {
+                    androidx.compose.runtime.SideEffect {
+                        val window = (view.context as? android.app.Activity)?.window
+                        if (window != null) {
+                            val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, view)
+                            insetsController.isAppearanceLightStatusBars = !resolvedDarkTheme
+                            insetsController.isAppearanceLightNavigationBars = !resolvedDarkTheme
+                        }
+                    }
+                }
+
                 LxMusicTheme(
                     darkTheme = resolvedDarkTheme,
                     dynamicColor = dynamicColor,
@@ -387,52 +408,56 @@ class MainActivity : ComponentActivity() {
                     colorAnimation = themeColorAnimation,
                     uiDensityScale = uiDensityScale
                 ) {
-                    HapticsProvider(enabled = hapticEnabled) {
-                        AppScaffold(
-                        onDynamicColorChange = { enabled ->
-                            dynamicColor = enabled
-                            settingsRepository.dynamicColor = enabled
-                        },
-                        onThemeColorChange = { hex ->
-                            themeColorHex = hex
-                            settingsRepository.themeColorHex = hex
-                        },
-                        themeSeedColor = themeSeedColor,
-                        onThemeSeedColorChange = { value ->
-                            themeSeedColor = value
-                            settingsRepository.themeSeedColor = value
-                        },
-                        themePaletteStyle = themePaletteStyle,
-                        onThemePaletteStyleChange = { value ->
-                            themePaletteStyle = value
-                            settingsRepository.themePaletteStyle = value
-                        },
-                        themeDarkMode = themeDarkMode,
-                        onThemeDarkModeChange = { value ->
-                            themeDarkMode = value
-                            settingsRepository.themeDarkMode = value
-                        },
-                        themeColorAnimation = themeColorAnimation,
-                        onThemeColorAnimationChange = { enabled ->
-                            themeColorAnimation = enabled
-                            settingsRepository.themeColorAnimation = enabled
-                        },
-                        uiDensityScale = uiDensityScale,
-                        onUiDensityScaleChange = { value ->
-                            uiDensityScale = value
-                            settingsRepository.uiDensityScale = value
-                        },
-                        hapticEnabled = hapticEnabled,
-                        onHapticEnabledChange = { enabled ->
-                            hapticEnabled = enabled
-                            settingsRepository.hapticFeedback = enabled
-                        },
-                        preferHighRefreshRate = preferHighRefreshRate,
-                        onPreferHighRefreshRateChange = { enabled ->
-                            preferHighRefreshRate = enabled
-                            settingsRepository.preferHighRefreshRate = enabled
+                    CompositionLocalProvider(
+                        androidx.compose.material3.LocalContentColor provides MaterialTheme.colorScheme.onBackground
+                    ) {
+                        HapticsProvider(enabled = hapticEnabled) {
+                            AppScaffold(
+                                onDynamicColorChange = { enabled ->
+                                    dynamicColor = enabled
+                                    settingsRepository.dynamicColor = enabled
+                                },
+                                onThemeColorChange = { hex ->
+                                    themeColorHex = hex
+                                    settingsRepository.themeColorHex = hex
+                                },
+                                themeSeedColor = themeSeedColor,
+                                onThemeSeedColorChange = { value ->
+                                    themeSeedColor = value
+                                    settingsRepository.themeSeedColor = value
+                                },
+                                themePaletteStyle = themePaletteStyle,
+                                onThemePaletteStyleChange = { value ->
+                                    themePaletteStyle = value
+                                    settingsRepository.themePaletteStyle = value
+                                },
+                                themeDarkMode = themeDarkMode,
+                                onThemeDarkModeChange = { value ->
+                                    themeDarkMode = value
+                                    settingsRepository.themeDarkMode = value
+                                },
+                                themeColorAnimation = themeColorAnimation,
+                                onThemeColorAnimationChange = { enabled ->
+                                    themeColorAnimation = enabled
+                                    settingsRepository.themeColorAnimation = enabled
+                                },
+                                uiDensityScale = uiDensityScale,
+                                onUiDensityScaleChange = { value ->
+                                    uiDensityScale = value
+                                    settingsRepository.uiDensityScale = value
+                                },
+                                hapticEnabled = hapticEnabled,
+                                onHapticEnabledChange = { enabled ->
+                                    hapticEnabled = enabled
+                                    settingsRepository.hapticFeedback = enabled
+                                },
+                                preferHighRefreshRate = preferHighRefreshRate,
+                                onPreferHighRefreshRateChange = { enabled ->
+                                    preferHighRefreshRate = enabled
+                                    settingsRepository.preferHighRefreshRate = enabled
+                                }
+                            )
                         }
-                    )
                     }
                 }
             }
@@ -452,6 +477,49 @@ class MainActivity : ComponentActivity() {
                     .handleUsbDeviceAttached(this)
             }
         }
+    }
+}
+
+private suspend fun captureActivitySnapshot(activity: android.app.Activity): androidx.compose.ui.graphics.ImageBitmap? {
+    return try {
+        val window = activity.window ?: return null
+        val decorView = window.decorView ?: return null
+        if (decorView.width <= 0 || decorView.height <= 0) return null
+
+        val bitmap = android.graphics.Bitmap.createBitmap(
+            decorView.width,
+            decorView.height,
+            android.graphics.Bitmap.Config.ARGB_8888
+        )
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            suspendCancellableCoroutine<androidx.compose.ui.graphics.ImageBitmap?> { continuation ->
+                android.view.PixelCopy.request(
+                    window,
+                    bitmap,
+                    { copyResult ->
+                        if (copyResult == android.view.PixelCopy.SUCCESS) {
+                            continuation.resume(bitmap.asImageBitmap())
+                        } else {
+                            try {
+                                val canvas = android.graphics.Canvas(bitmap)
+                                decorView.draw(canvas)
+                                continuation.resume(bitmap.asImageBitmap())
+                            } catch (_: Exception) {
+                                continuation.resume(null)
+                            }
+                        }
+                    },
+                    android.os.Handler(android.os.Looper.getMainLooper())
+                )
+            }
+        } else {
+            val canvas = android.graphics.Canvas(bitmap)
+            decorView.draw(canvas)
+            bitmap.asImageBitmap()
+        }
+    } catch (_: Exception) {
+        null
     }
 }
 
@@ -485,6 +553,12 @@ fun AppScaffold(
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var settingsSubPage by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(selectedTab) { if (selectedTab != 12) settingsSubPage = null }
+    var isThemeRevealing by remember { mutableStateOf(false) }
+    var themeRevealSnapshot by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    var themeRevealOrigin by remember { mutableStateOf<Offset?>(null) }
+    var themeRevealStartRadius by remember { mutableFloatStateOf(18f) }
+    var themeRevealFallbackColor by remember { mutableStateOf<Color?>(null) }
+    val currentBgColor = MaterialTheme.colorScheme.background
     var showPlayerPage by rememberSaveable { mutableStateOf(false) }
     // 歌词页状态：由播放器翻页器驱动，此处仅作进程重建时的持久化镜像
     var showLyricsPage by rememberSaveable { mutableStateOf(false) }
@@ -551,8 +625,12 @@ fun AppScaffold(
     var showLoginPage by rememberSaveable { mutableStateOf(false) }
     var loginVersion by rememberSaveable { mutableIntStateOf(0) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
+    var searchSelectedType by rememberSaveable { mutableStateOf("song") }
     var searchPlaylistId by rememberSaveable { mutableLongStateOf(0L) }
     var searchPlaylistName by rememberSaveable { mutableStateOf("") }
+    var searchPlaylistCover by rememberSaveable { mutableStateOf("") }
+    var searchPlaylistAuthor by rememberSaveable { mutableStateOf("") }
+    var searchPlaylistGid by rememberSaveable { mutableStateOf("") }
     var dailySongsForList by remember { mutableStateOf<List<DailyRecommendSong>>(emptyList()) }
     var vipSongsForList by remember { mutableStateOf<List<SongInfo>>(emptyList()) }
     var historySongsForList by remember { mutableStateOf<List<DailyRecommendSong>>(emptyList()) }
@@ -613,9 +691,11 @@ fun AppScaffold(
     var playerBgOpacity by remember { mutableFloatStateOf(settingsRepository.playerBgOpacity) }
     var playerBlur by remember { mutableStateOf(settingsRepository.playerBlur) }
     var playerDynamicBg by remember { mutableStateOf(settingsRepository.playerDynamicBg) }
-    var playerMeshBg by remember { mutableStateOf(settingsRepository.playerMeshBg) }
     var playerRoundAlbum by remember { mutableStateOf(settingsRepository.playerRoundAlbum) }
     var playerRotate by remember { mutableStateOf(settingsRepository.playerRotate) }
+    var playerVinylStyle by remember { mutableStateOf(settingsRepository.playerVinylStyle) }
+    var playerVinylPointer by remember { mutableStateOf(settingsRepository.playerVinylPointer) }
+    var playerVinylBase by remember { mutableStateOf(settingsRepository.playerVinylBase) }
     var playerBgEnhance by remember { mutableStateOf(settingsRepository.playerBgEnhance) }
     var playerHyperBg by remember { mutableStateOf(settingsRepository.playerHyperBg) }
     var playerWaveformSlider by remember { mutableStateOf(settingsRepository.playerWaveformSlider) }
@@ -629,6 +709,7 @@ fun AppScaffold(
     var playerLyricBlurAmount by remember { mutableFloatStateOf(settingsRepository.playerLyricBlurAmount) }
     var playerTapCoverToLyrics by remember { mutableStateOf(settingsRepository.playerTapCoverToLyrics) }
     var playerCompactControls by remember { mutableStateOf(settingsRepository.playerCompactControls) }
+    var playerMinimalistControls by remember { mutableStateOf(settingsRepository.playerMinimalistControls) }
     var playerShowTopFavorite by remember { mutableStateOf(settingsRepository.playerShowTopFavorite) }
     var playerLyricFontSize by remember { mutableFloatStateOf(settingsRepository.playerLyricFontSize) }
     var playerLyricFontWeight by remember { mutableFloatStateOf(settingsRepository.playerLyricFontWeight) }
@@ -686,6 +767,8 @@ fun AppScaffold(
         val key = "${hash}|${audioId}"
         isCurrentSongFavorite = collectionDao.isSongCollected(key)
     }
+
+    var launchUpdateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
 
     // 初始化 API 认证信息和设备注册
     LaunchedEffect(Unit) {
@@ -752,6 +835,22 @@ fun AppScaffold(
         }
         playerViewModel.onApiReady()
         android.util.Log.d("LxMusic", "API就绪: dfid=${KuGouApi.dfid}, owner=${KuGouApi.ownerUserid}")
+
+        // 启动时自动检查 GitHub 更新（默认开启）
+        if (settingsRepository.autoCheckUpdateDialog) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val info = UpdateChecker.checkForUpdate()
+                    if (info != null && !UpdateChecker.isVersionIgnored(context, info.versionName)) {
+                        withContext(Dispatchers.Main) {
+                            launchUpdateInfo = info
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("LxMusic", "启动自动检查更新失败: ${e.message}")
+                }
+            }
+        }
     }
 
     // 本地音乐排序/定位回调
@@ -793,6 +892,7 @@ fun AppScaffold(
             selectedTab == 11 -> {
                 selectedTab = previousTab
                 searchQuery = ""
+                searchSelectedType = "song"
             }
             selectedTab == 12 -> selectedTab = 2
             selectedTab == 14 -> selectedTab = 2
@@ -818,7 +918,7 @@ fun AppScaffold(
 
     // 迷你播放条底部间距：原生主题下用实测底栏高度（含导航栏 inset 的差值），
     // 保证与底栏严丝合缝；悬浮主题保持胶囊悬浮间距
-    val showNavBar = selectedTab !in 3..15 && showRankDetail == null && !showLoginPage
+    val showNavBar = selectedTab !in 3..16 && showRankDetail == null && !showLoginPage
     val miniPlayerBottomPadding by animateDpAsState(
         targetValue = when {
             !showNavBar -> 0.dp
@@ -861,291 +961,384 @@ fun AppScaffold(
         Scaffold(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             containerColor = Color.Transparent,
+            contentColor = MaterialTheme.colorScheme.onBackground,
             topBar = {
-                if (showLoginPage) {
-                    // 登录页面不显示标题栏
-                } else if (showRankDetail != null) {
-                    val rank = showRankDetail
-                    TopAppBar(
-                        title = { Text(rank?.rankname ?: stringResource(R.string.title_rank)) },
-                        navigationIcon = {
-                            IconButton(onClick = { rankLocateAction = null; showRankDetail = null }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { rankLocateAction?.invoke() }) {
-                                Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                    )
-                } else if (selectedTab == 3) {
-                    // 本地音乐页顶栏（汉堡菜单 + 搜索），与页面面板联动；面板展开时随内容右移
-                    Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
-                        LocalMusicTopBar(
-                            onMenuClick = { localShowSidePanel = !localShowSidePanel },
-                            onSearchClick = {
-                                previousTab = selectedTab
-                                selectedTab = 11
+                AnimatedContent(
+                    targetState = selectedTab,
+                    transitionSpec = {
+                        val isSearch = targetState == 11 || initialState == 11
+                        if (isSearch) {
+                            (fadeIn(tween(260)) + slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { if (targetState == 11) it / 6 else -it / 6 }) togetherWith
+                                (fadeOut(tween(180)) + slideOutHorizontally(tween(180, easing = FastOutSlowInEasing)) { if (targetState == 11) -it / 6 else it / 6 })
+                        } else {
+                            fadeIn(tween(200)) togetherWith fadeOut(tween(150))
+                        }
+                    },
+                    label = "topBarTransition"
+                ) { currentTab ->
+                    if (showLoginPage) {
+                        // 登录页面不显示标题栏
+                    } else if (showRankDetail != null) {
+                        val rank = showRankDetail
+                        TopAppBar(
+                            title = { Text(rank?.rankname ?: stringResource(R.string.title_rank)) },
+                            navigationIcon = {
+                                IconButton(onClick = { rankLocateAction = null; showRankDetail = null }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                                }
                             },
-                            onLocateClick = { locatePlayingSong++ },
-                            isMenuOpen = localShowSidePanel,
-                            modifier = Modifier.offset { IntOffset(localPanelOffset.value.roundToInt(), 0) }
+                            actions = {
+                                IconButton(onClick = { rankLocateAction?.invoke() }) {
+                                    Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
                         )
-                    }
-                } else if (selectedTab == 4) {
-                    TopAppBar(
-                        title = { Text(stringResource(R.string.title_daily_recommend)) },
-                        navigationIcon = {
-                            IconButton(onClick = { selectedTab = 0 }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { playlistLocateAction?.invoke() }) {
-                                Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                    )
-                } else if (selectedTab == 5) {
-                    TopAppBar(
-                        title = { Text(stringResource(R.string.title_vip_recommend)) },
-                        navigationIcon = {
-                            IconButton(onClick = { selectedTab = 0 }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { playlistLocateAction?.invoke() }) {
-                                Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                    )
-                } else if (selectedTab == 6) {
-                    TopAppBar(
-                        title = { Text(stringResource(R.string.title_history_recommend)) },
-                        navigationIcon = {
-                            IconButton(onClick = { selectedTab = 0 }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { playlistLocateAction?.invoke() }) {
-                                Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                    )
-                } else if (selectedTab == 7) {
-                    TopAppBar(
-                        title = { Text(stringResource(R.string.title_style_recommend)) },
-                        navigationIcon = {
-                            IconButton(onClick = { selectedTab = 0 }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { playlistLocateAction?.invoke() }) {
-                                Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                    )
-                } else if (selectedTab in 8..10) {
-                    val playlistName = when (selectedTab) {
-                        8 -> stringResource(R.string.title_default_favorites)
-                        9 -> stringResource(R.string.title_liked)
-                        else -> selectedPlaylist?.listname ?: stringResource(R.string.title_playlist_detail)
-                    }
-                    TopAppBar(
-                        title = { Text(playlistName) },
-                        navigationIcon = {
-                            IconButton(onClick = { selectedTab = 2 }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { playlistLocateAction?.invoke() }) {
-                                Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                    )
-                } else if (selectedTab == 14) {
-                    TopAppBar(
-                        title = {
-                            Text(
-                                if (selectedCollectionType == "favorites") stringResource(R.string.title_my_favorites)
-                                else stringResource(R.string.title_playlist_detail)
+                    } else if (currentTab == 3) {
+                        // 本地音乐页顶栏（汉堡菜单 + 搜索），与页面面板联动；面板展开时随内容右移
+                        Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
+                            LocalMusicTopBar(
+                                onMenuClick = { localShowSidePanel = !localShowSidePanel },
+                                onSearchClick = {
+                                    previousTab = selectedTab
+                                    searchQuery = ""
+                                    searchSelectedType = "song"
+                                    selectedTab = 11
+                                },
+                                onLocateClick = { locatePlayingSong++ },
+                                isMenuOpen = localShowSidePanel,
+                                modifier = Modifier.offset { IntOffset(localPanelOffset.value.roundToInt(), 0) }
                             )
-                        },
-                        navigationIcon = {
-                            IconButton(onClick = { selectedTab = 2 }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = { playlistLocateAction?.invoke() }) {
-                                Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                    )
-                } else if (selectedTab == 11) {
-                    SearchTopBar(
-                        onBack = { selectedTab = previousTab; searchQuery = "" },
-                        onSearch = { query -> searchQuery = query },
-                        externalQuery = searchQuery
-                    )
-                } else if (selectedTab == 12) {
-                    TopAppBar(
-                        title = { Text(when (settingsSubPage) {
-                            "display" -> "主题设置"
-                            "customize" -> "自定义个性化"
-                            "motion" -> "动效设置"
-                            "player" -> "播放器设置"
-                            "playback" -> "播放设置"
-                            "usb" -> "USB 独占模式"
-                            "general" -> "通用设置"
-                            "storage" -> "存储与缓存"
-                            "proxy" -> "代理设置"
-                            else -> stringResource(R.string.title_settings)
-                        }) },
-                        navigationIcon = {
-                            IconButton(onClick = {
-                                if (settingsSubPage != null) settingsSubPage = null
-                                else selectedTab = 2
-                            }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                    )
-                } else if (selectedTab == 15) {
-                    TopAppBar(
-                        title = { Text(stringResource(R.string.title_manage_playlists)) },
-                        navigationIcon = {
-                            IconButton(onClick = { selectedTab = 2 }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
-                    )
-                } else {
-                    TopAppBar(
-                        title = {
-                            if (selectedTab == 0 && homeAllSongs.isNotEmpty()) {
-                                var homePlayMode by remember { mutableIntStateOf(settingsRepository.homePlayMode) }
-                                // "Lx Music" + 音符 整体可点击/长按
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .pointerInput(Unit) {
-                                            detectTapGestures(
-                                                onTap = {
-                                                    when (homePlayMode) {
-                                                        0 -> playOnlineSong(homeAllSongs, 0)
-                                                        1 -> playOnlineSong(homeAllSongs.shuffled(), 0)
-                                                        2 -> playOnlineSong(homeAllSongs.shuffled(), 0)
-                                                    }
-                                                },
-                                                onLongPress = { showPlayModePopup = !showPlayModePopup }
-                                            )
-                                        }
-                                        .background(
-                                            if (showPlayModePopup) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)
-                                            else Color.Transparent,
-                                            RoundedCornerShape(12.dp)
-                                        )
-                                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                                ) {
-                                    Text(stringResource(R.string.app_name))
-                                    Spacer(modifier = Modifier.width(2.dp))
-                                    Icon(
-                                        Icons.Default.MusicNote,
-                                        contentDescription = stringResource(R.string.action_play_all),
-                                        modifier = Modifier.size(18.dp),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                    // 展开的模式选择条
-                                    AnimatedVisibility(
-                                        visible = showPlayModePopup,
-                                        enter = expandHorizontally(tween(200)) + fadeIn(tween(200)),
-                                        exit = shrinkHorizontally(tween(150)) + fadeOut(tween(150))
+                        }
+                    } else if (currentTab == 4) {
+                        TopAppBar(
+                            title = { Text(stringResource(R.string.title_daily_recommend)) },
+                            navigationIcon = {
+                                IconButton(onClick = { selectedTab = 0 }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                                }
+                            },
+                            actions = {
+                                IconButton(onClick = { playlistLocateAction?.invoke() }) {
+                                    Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                        )
+                    } else if (currentTab == 5) {
+                        TopAppBar(
+                            title = { Text(stringResource(R.string.title_vip_recommend)) },
+                            navigationIcon = {
+                                IconButton(onClick = { selectedTab = 0 }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                                }
+                            },
+                            actions = {
+                                IconButton(onClick = { playlistLocateAction?.invoke() }) {
+                                    Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                        )
+                    } else if (currentTab == 6) {
+                        TopAppBar(
+                            title = { Text(stringResource(R.string.title_history_recommend)) },
+                            navigationIcon = {
+                                IconButton(onClick = { selectedTab = 0 }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                                }
+                            },
+                            actions = {
+                                IconButton(onClick = { playlistLocateAction?.invoke() }) {
+                                    Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                        )
+                    } else if (currentTab == 7) {
+                        TopAppBar(
+                            title = { Text(stringResource(R.string.title_style_recommend)) },
+                            navigationIcon = {
+                                IconButton(onClick = { selectedTab = 0 }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                                }
+                            },
+                            actions = {
+                                IconButton(onClick = { playlistLocateAction?.invoke() }) {
+                                    Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                        )
+                    } else if (currentTab in 8..10) {
+                        val playlistName = when (currentTab) {
+                            8 -> stringResource(R.string.title_default_favorites)
+                            9 -> stringResource(R.string.title_liked)
+                            else -> selectedPlaylist?.listname ?: stringResource(R.string.title_playlist_detail)
+                        }
+                        TopAppBar(
+                            title = { Text(playlistName) },
+                            navigationIcon = {
+                                IconButton(onClick = { selectedTab = 2 }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                                }
+                            },
+                            actions = {
+                                IconButton(onClick = { playlistLocateAction?.invoke() }) {
+                                    Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                        )
+                    } else if (currentTab == 14) {
+                        TopAppBar(
+                            title = {
+                                Text(
+                                    if (selectedCollectionType == "favorites") stringResource(R.string.title_my_favorites)
+                                    else stringResource(R.string.title_playlist_detail)
+                                )
+                            },
+                            navigationIcon = {
+                                IconButton(onClick = { selectedTab = 2 }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                                }
+                            },
+                            actions = {
+                                IconButton(onClick = { playlistLocateAction?.invoke() }) {
+                                    Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                        )
+                    } else if (currentTab == 11) {
+                        SearchTopBar(
+                            onBack = {
+                                selectedTab = previousTab
+                                searchQuery = ""
+                                searchSelectedType = "song"
+                            },
+                            onSearch = { query -> searchQuery = query },
+                            externalQuery = searchQuery
+                        )
+                    } else if (currentTab == 12) {
+                        TopAppBar(
+                            title = {
+                                if (settingsSubPage == null) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        Row(
-                                            modifier = Modifier.padding(start = 6.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                        ) {
-                                            val modes = listOf(
-                                                Triple(Icons.Default.QueueMusic, "顺序", 0),
-                                                Triple(Icons.Default.Shuffle, "随机", 1),
-                                                Triple(Icons.Default.Favorite, "心动", 2)
+                                        Text(
+                                            text = stringResource(R.string.title_settings),
+                                            style = MaterialTheme.typography.headlineMedium.copy(
+                                                fontWeight = FontWeight.Bold
                                             )
-                                            modes.forEach { (icon, label, mode) ->
-                                                val isSelected = homePlayMode == mode
-                                                Column(
-                                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                                    modifier = Modifier
-                                                        .clip(RoundedCornerShape(10.dp))
-                                                        .background(
-                                                            if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                                                            else Color.Transparent
-                                                        )
-                                                        .clickable {
-                                                            homePlayMode = mode
-                                                            settingsRepository.homePlayMode = mode
-                                                            showPlayModePopup = false
+                                        )
+                                        val isDark = when (themeDarkMode) {
+                                            "light" -> false
+                                            "dark" -> true
+                                            else -> isSystemInDarkTheme()
+                                        }
+                                        ThemeModeToggleButton(
+                                            isDark = isDark,
+                                            enabled = !isThemeRevealing,
+                                            onClick = { origin, startRadius ->
+                                                if (isThemeRevealing) return@ThemeModeToggleButton
+                                                isThemeRevealing = true
+                                                val activity = context as? android.app.Activity
+                                                val nextMode = if (isDark) "light" else "dark"
+
+                                                scope.launch {
+                                                    val snapshot = activity?.let { captureActivitySnapshot(it) }
+                                                    themeRevealSnapshot = snapshot
+                                                    themeRevealOrigin = origin
+                                                    themeRevealStartRadius = startRadius
+                                                    themeRevealFallbackColor = currentBgColor
+                                                    onThemeDarkModeChange(nextMode)
+                                                }
+                                            }
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        text = when (settingsSubPage) {
+                                            "display" -> "主题设置"
+                                            "customize" -> "自定义个性化"
+                                            "motion" -> "动效设置"
+                                            "player" -> "播放器设置"
+                                            "playback" -> "播放设置"
+                                            "usb" -> "USB 独占模式"
+                                            "general" -> "通用设置"
+                                            "storage" -> "存储与缓存"
+                                            "proxy" -> "代理设置"
+                                            "about" -> "关于应用"
+                                            else -> stringResource(R.string.title_settings)
+                                        },
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            },
+                            navigationIcon = {
+                                if (settingsSubPage != null) {
+                                    IconButton(onClick = {
+                                        settingsSubPage = null
+                                    }) {
+                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                                    }
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                        )
+                    } else if (currentTab == 15) {
+                        TopAppBar(
+                            title = { Text(stringResource(R.string.title_manage_playlists)) },
+                            navigationIcon = {
+                                IconButton(onClick = { selectedTab = 2 }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                        )
+                    } else if (currentTab == 16) {
+                        TopAppBar(
+                            title = {
+                                Text(
+                                    text = searchPlaylistName.ifBlank { stringResource(R.string.title_playlist_detail) },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            },
+                            navigationIcon = {
+                                IconButton(onClick = { selectedTab = 11 }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                                }
+                            },
+                            actions = {
+                                IconButton(onClick = { playlistLocateAction?.invoke() }) {
+                                    Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                        )
+                    } else {
+                        TopAppBar(
+                            title = {
+                                if (currentTab == 0 && homeAllSongs.isNotEmpty()) {
+                                    var homePlayMode by remember { mutableIntStateOf(settingsRepository.homePlayMode) }
+                                    // "Lx Music" + 音符 整体可点击/长按
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .pointerInput(Unit) {
+                                                detectTapGestures(
+                                                    onTap = {
+                                                        when (homePlayMode) {
+                                                            0 -> playOnlineSong(homeAllSongs, 0)
+                                                            1 -> playOnlineSong(homeAllSongs.shuffled(), 0)
+                                                            2 -> playOnlineSong(homeAllSongs.shuffled(), 0)
                                                         }
-                                                        .padding(horizontal = 10.dp, vertical = 5.dp)
-                                                ) {
-                                                    Icon(
-                                                        icon,
-                                                        contentDescription = label,
-                                                        modifier = Modifier.size(20.dp),
-                                                        tint = if (isSelected) MaterialTheme.colorScheme.primary
-                                                               else Color.White
-                                                    )
-                                                    Text(
-                                                        label,
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        fontSize = 10.sp,
-                                                        color = if (isSelected) MaterialTheme.colorScheme.primary
-                                                                else Color.White
-                                                    )
+                                                    },
+                                                    onLongPress = { showPlayModePopup = !showPlayModePopup }
+                                                )
+                                            }
+                                            .background(
+                                                if (showPlayModePopup) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)
+                                                else Color.Transparent,
+                                                RoundedCornerShape(12.dp)
+                                            )
+                                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(stringResource(R.string.app_name))
+                                        Spacer(modifier = Modifier.width(2.dp))
+                                        Icon(
+                                            Icons.Default.MusicNote,
+                                            contentDescription = stringResource(R.string.action_play_all),
+                                            modifier = Modifier.size(18.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        // 展开的模式选择条
+                                        AnimatedVisibility(
+                                            visible = showPlayModePopup,
+                                            enter = expandHorizontally(tween(200)) + fadeIn(tween(200)),
+                                            exit = shrinkHorizontally(tween(150)) + fadeOut(tween(150))
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(start = 6.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                            ) {
+                                                val modes = listOf(
+                                                    Triple(Icons.Default.QueueMusic, "顺序", 0),
+                                                    Triple(Icons.Default.Shuffle, "随机", 1),
+                                                    Triple(Icons.Default.Favorite, "心动", 2)
+                                                )
+                                                modes.forEach { (icon, label, mode) ->
+                                                    val isSelected = homePlayMode == mode
+                                                    Column(
+                                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(10.dp))
+                                                            .background(
+                                                                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                                                else Color.Transparent
+                                                            )
+                                                            .clickable {
+                                                                homePlayMode = mode
+                                                                settingsRepository.homePlayMode = mode
+                                                                showPlayModePopup = false
+                                                            }
+                                                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                                                    ) {
+                                                        Icon(
+                                                            icon,
+                                                            contentDescription = label,
+                                                            modifier = Modifier.size(20.dp),
+                                                            tint = if (isSelected) MaterialTheme.colorScheme.primary
+                                                                   else MaterialTheme.colorScheme.onSurface
+                                                        )
+                                                        Text(
+                                                            label,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontSize = 10.sp,
+                                                            color = if (isSelected) MaterialTheme.colorScheme.primary
+                                                                    else MaterialTheme.colorScheme.onSurface
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
                                     }
+                                } else {
+                                    Text("Lx Music")
                                 }
-                            } else {
-                                Text("Lx Music")
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                        actions = {
-                            if (selectedTab == 0) {
-                                IconButton(
-                                    onClick = { homeClickRefresh?.invoke() },
-                                    enabled = !isHomeRefreshing
-                                ) {
-                                    Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.action_refresh))
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                            actions = {
+                                if (currentTab == 0) {
+                                    IconButton(
+                                        onClick = { homeClickRefresh?.invoke() },
+                                        enabled = !isHomeRefreshing
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.action_refresh))
+                                    }
+                                }
+                                IconButton(onClick = {
+                                    previousTab = selectedTab
+                                    searchQuery = ""
+                                    searchSelectedType = "song"
+                                    selectedTab = 11
+                                }) {
+                                    Icon(Icons.Default.Search, contentDescription = stringResource(R.string.title_search))
+                                }
+                                if (currentTab == 2) {
+                                    IconButton(onClick = { selectedTab = 12 }) {
+                                        Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.title_settings))
+                                    }
                                 }
                             }
-                            IconButton(onClick = { previousTab = selectedTab; selectedTab = 11 }) {
-                                Icon(Icons.Default.Search, contentDescription = stringResource(R.string.title_search))
-                            }
-                            if (selectedTab == 2) {
-                                IconButton(onClick = { selectedTab = 12 }) {
-                                    Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.title_settings))
-                                }
-                            }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         ) { innerPadding ->
@@ -1403,14 +1596,23 @@ fun AppScaffold(
                         )
                         11 -> SearchPage(
                             initialQuery = searchQuery,
-                            onBack = { selectedTab = previousTab; searchQuery = "" },
+                            initialSelectedType = searchSelectedType,
+                            onBack = {
+                                selectedTab = previousTab
+                                searchQuery = ""
+                                searchSelectedType = "song"
+                            },
                             onPlaySong = { songs, index -> playOnlineSong(songs, index) },
-                            onPlaylistClick = { playlistId, playlistName ->
-                                searchPlaylistId = playlistId
-                                searchPlaylistName = playlistName
+                            onPlaylistClick = { playlist ->
+                                searchPlaylistId = playlist.specialid
+                                searchPlaylistName = playlist.specialname ?: "未知歌单"
+                                searchPlaylistCover = playlist.coverUrl
+                                searchPlaylistAuthor = playlist.nickname ?: ""
+                                searchPlaylistGid = playlist.gid ?: ""
                                 selectedTab = 16
                             },
                             onQueryChange = { query -> searchQuery = query },
+                            onSelectedTypeChange = { type -> searchSelectedType = type },
                             currentPlayingPath = currentSong?.filePath,
                             isPlaying = isPlaying,
                             onAddToQueueNext = { song -> addToQueueNext(song) }
@@ -1418,10 +1620,14 @@ fun AppScaffold(
                         16 -> SearchPlaylistDetailPage(
                             playlistId = searchPlaylistId,
                             playlistName = searchPlaylistName,
+                            coverUrl = searchPlaylistCover,
+                            authorName = searchPlaylistAuthor,
+                            gid = searchPlaylistGid,
                             onBack = { selectedTab = 11 },
                             onPlaySong = { songs, index -> playOnlineSong(songs, index) },
                             currentPlayingPath = currentSong?.filePath,
                             isPlaying = isPlaying,
+                            onLocateReady = { playlistLocateAction = it },
                             onAddToQueueNext = { song -> addToQueueNext(song) }
                         )
                         12 -> SettingsPage(
@@ -1521,20 +1727,40 @@ fun AppScaffold(
                                 playerDynamicBg = enabled
                                 settingsRepository.playerDynamicBg = enabled
                             },
-                            playerMeshBg = playerMeshBg,
-                            onPlayerMeshBgChange = { enabled ->
-                                playerMeshBg = enabled
-                                settingsRepository.playerMeshBg = enabled
-                            },
                             playerRoundAlbum = playerRoundAlbum,
                             onPlayerRoundAlbumChange = { enabled ->
                                 playerRoundAlbum = enabled
                                 settingsRepository.playerRoundAlbum = enabled
+                                if (!enabled) {
+                                    playerRotate = false
+                                    settingsRepository.playerRotate = false
+                                    playerVinylStyle = false
+                                    settingsRepository.playerVinylStyle = false
+                                    playerVinylPointer = false
+                                    settingsRepository.playerVinylPointer = false
+                                    playerVinylBase = false
+                                    settingsRepository.playerVinylBase = false
+                                }
                             },
                             playerRotate = playerRotate,
                             onPlayerRotateChange = { enabled ->
                                 playerRotate = enabled
                                 settingsRepository.playerRotate = enabled
+                            },
+                            playerVinylStyle = playerVinylStyle,
+                            onPlayerVinylStyleChange = { enabled ->
+                                playerVinylStyle = enabled
+                                settingsRepository.playerVinylStyle = enabled
+                            },
+                            playerVinylPointer = playerVinylPointer,
+                            onPlayerVinylPointerChange = { enabled ->
+                                playerVinylPointer = enabled
+                                settingsRepository.playerVinylPointer = enabled
+                            },
+                            playerVinylBase = playerVinylBase,
+                            onPlayerVinylBaseChange = { enabled ->
+                                playerVinylBase = enabled
+                                settingsRepository.playerVinylBase = enabled
                             },
                             playerBgEnhance = playerBgEnhance,
                             onPlayerBgEnhanceChange = { enabled ->
@@ -1600,6 +1826,11 @@ fun AppScaffold(
                             onPlayerCompactControlsChange = { enabled ->
                                 playerCompactControls = enabled
                                 settingsRepository.playerCompactControls = enabled
+                            },
+                            playerMinimalistControls = playerMinimalistControls,
+                            onPlayerMinimalistControlsChange = { enabled ->
+                                playerMinimalistControls = enabled
+                                settingsRepository.playerMinimalistControls = enabled
                             },
                             playerShowTopFavorite = playerShowTopFavorite,
                             onPlayerShowTopFavoriteChange = { enabled ->
@@ -1881,13 +2112,17 @@ fun AppScaffold(
         val song = playerSong
         // 背景旋转相位：舞台层统一驱动（原在 PlayerPage 内，翻页后连续不跳变）
         val rotationAngle = remember { Animatable(0f) }
-        LaunchedEffect(isPlaying, playerRotate, playerRoundAlbum) {
-            if (isPlaying && playerRotate && playerRoundAlbum) {
+        LaunchedEffect(isPlaying, playerRotate, playerRoundAlbum, playerVinylStyle, playerVinylPointer, playerVinylBase, song.filePath) {
+            rotationAngle.snapTo(0f)
+            if (isPlaying && playerRoundAlbum && (playerRotate || playerVinylStyle || playerVinylPointer || playerVinylBase)) {
+                // 等待切歌进场放大（scaleIn 520ms + delay 180ms = 700ms）动效完全就绪后，再从 0 开始平滑转动
+                kotlinx.coroutines.delay(700)
                 while (true) {
                     rotationAngle.animateTo(
                         targetValue = rotationAngle.value + 360f,
                         animationSpec = tween(20000, easing = LinearEasing)
                     )
+                    rotationAngle.snapTo(0f)
                 }
             }
         }
@@ -1991,7 +2226,6 @@ fun AppScaffold(
                         secondaryColor = MaterialTheme.colorScheme.secondary,
                         tertiaryColor = MaterialTheme.colorScheme.tertiary,
                         coverModel = albumModel,
-                        meshBackground = playerMeshBg,
                         dynamicBackground = playerDynamicBg,
                         backgroundEnhance = playerBgEnhance,
                         playerHyperBg = playerHyperBg,
@@ -2055,6 +2289,13 @@ fun AppScaffold(
                         rotationAngle = rotationAngle.value,
                         isRoundAlbum = playerRoundAlbum,
                         isRotating = playerRotate,
+                        isVinylStyle = playerVinylStyle && playerRoundAlbum,
+                        isVinylPointer = playerVinylPointer && playerRoundAlbum,
+                        isVinylBase = playerVinylBase && playerRoundAlbum,
+                        songIndex = currentSongIndex,
+                        queueSize = currentSongList.size.coerceAtLeast(1),
+                        playerDynamicBg = playerDynamicBg,
+                        playerBgEnhance = playerBgEnhance,
                         playerHyperBg = playerHyperBg,
                         playerCoverBlurBg = playerCoverBlurBg,
                         playerLyricsWordEffect = playerLyricsWordEffect,
@@ -2064,6 +2305,7 @@ fun AppScaffold(
                         playerLyricBlurAmount = playerLyricBlurAmount,
                         playerTapCoverToLyrics = playerTapCoverToLyrics,
                         playerCompactControls = playerCompactControls,
+                        playerMinimalistControls = playerMinimalistControls,
                         playerShowTopFavorite = playerShowTopFavorite,
                         lyricFontSize = playerLyricFontSize,
                         onLyricFontSizeChange = { value ->
@@ -2124,7 +2366,7 @@ fun AppScaffold(
 
         // 导航栏叠加在底部
         AnimatedVisibility(
-            visible = selectedTab !in 3..15 && !showPlayerPage && showRankDetail == null && !showLoginPage,
+            visible = selectedTab !in 3..16 && !showPlayerPage && showRankDetail == null && !showLoginPage,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .onSizeChanged { bottomBarHeightPx = it.height },
@@ -2151,6 +2393,37 @@ fun AppScaffold(
                 if (floatingBottomBar) floatingBarOpacity else navBarOpacity,
                 followThemeColor, playerBarWhiteBlend)
             }
+        }
+
+        // 全屏圆形波纹主题揭示过渡（对齐 NeriPlayer）
+        val revealOrigin = themeRevealOrigin
+        val revealFallback = themeRevealFallbackColor
+        if (revealOrigin != null && revealFallback != null) {
+            ThemeRevealOverlay(
+                snapshot = themeRevealSnapshot,
+                fallbackColor = revealFallback,
+                originInWindow = revealOrigin,
+                startRadiusPx = themeRevealStartRadius,
+                durationMillis = 680,
+                onFinished = {
+                    themeRevealSnapshot = null
+                    themeRevealOrigin = null
+                    themeRevealFallbackColor = null
+                    isThemeRevealing = false
+                }
+            )
+        }
+
+        // 应用启动自动检测到的新版本弹窗
+        launchUpdateInfo?.let { info ->
+            AppUpdateDialog(
+                updateInfo = info,
+                onDismiss = { launchUpdateInfo = null },
+                onIgnoreVersion = {
+                    UpdateChecker.setVersionIgnored(context, info.versionName)
+                    Toast.makeText(context, "已忽略 v${info.versionName} 版本提示", Toast.LENGTH_SHORT).show()
+                }
+            )
         }
     }
 }

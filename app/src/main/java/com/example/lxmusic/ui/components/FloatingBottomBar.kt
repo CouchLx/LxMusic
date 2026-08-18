@@ -1,5 +1,6 @@
 package com.example.lxmusic.ui.components
 
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -27,6 +28,11 @@ import androidx.compose.ui.unit.dp
 import com.example.lxmusic.R
 import com.example.lxmusic.ui.components.bottombar.KernelSuAlignedBottomBar
 import com.kyant.backdrop.Backdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur
+import com.kyant.backdrop.effects.vibrancy
+import com.kyant.backdrop.highlight.Highlight
+import com.kyant.backdrop.shadow.InnerShadow
 
 /**
  * 底栏入口组件。
@@ -106,24 +112,39 @@ private fun DefaultBottomBar(
                 containerColor = Color.Transparent,
                 tonalElevation = 0.dp
             ) {
-                NavigationBarItem(selected = selectedTabIndex == 0, onClick = {
-                    context.performHapticFeedback(HapticFeedbackEffect.Click)
-                    onTabSelected(0)
-                },
-                    icon = { Icon(Icons.Default.Home, null) }, label = { Text(stringResource(R.string.nav_home)) },
-                    alwaysShowLabel = true, colors = itemColors)
-                NavigationBarItem(selected = selectedTabIndex == 1, onClick = {
-                    context.performHapticFeedback(HapticFeedbackEffect.Click)
-                    onTabSelected(1)
-                },
-                    icon = { Icon(Icons.Default.Search, null) }, label = { Text(stringResource(R.string.nav_discover)) },
-                    alwaysShowLabel = true, colors = itemColors)
-                NavigationBarItem(selected = selectedTabIndex == 2, onClick = {
-                    context.performHapticFeedback(HapticFeedbackEffect.Click)
-                    onTabSelected(2)
-                },
-                    icon = { Icon(Icons.Default.Person, null) }, label = { Text(stringResource(R.string.nav_mine)) },
-                    alwaysShowLabel = true, colors = itemColors)
+                NavigationBarItem(
+                    selected = selectedTabIndex == 0,
+                    onClick = {
+                        context.performHapticFeedback(HapticFeedbackEffect.Click)
+                        onTabSelected(0)
+                    },
+                    icon = { Icon(Icons.Default.Home, null) },
+                    label = { Text(stringResource(R.string.nav_home)) },
+                    alwaysShowLabel = true,
+                    colors = itemColors
+                )
+                NavigationBarItem(
+                    selected = selectedTabIndex == 1,
+                    onClick = {
+                        context.performHapticFeedback(HapticFeedbackEffect.Click)
+                        onTabSelected(1)
+                    },
+                    icon = { Icon(Icons.Default.Search, null) },
+                    label = { Text(stringResource(R.string.nav_discover)) },
+                    alwaysShowLabel = true,
+                    colors = itemColors
+                )
+                NavigationBarItem(
+                    selected = selectedTabIndex == 2,
+                    onClick = {
+                        context.performHapticFeedback(HapticFeedbackEffect.Click)
+                        onTabSelected(2)
+                    },
+                    icon = { Icon(Icons.Default.Person, null) },
+                    label = { Text(stringResource(R.string.nav_mine)) },
+                    alwaysShowLabel = true,
+                    colors = itemColors
+                )
             }
         }
     }

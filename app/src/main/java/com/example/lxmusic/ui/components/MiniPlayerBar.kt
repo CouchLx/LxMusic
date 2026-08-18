@@ -66,6 +66,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
@@ -85,6 +86,7 @@ import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
+import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.Shadow
 import java.io.File
 import kotlin.math.abs
@@ -201,9 +203,10 @@ fun MiniPlayerBar(
     } else 0f
 
     // 液态玻璃：开启且背景层可用时启用（与导航栏保持一致的苹果风格）
+    val isDarkTheme = isSystemInDarkTheme()
     val glassActive = liquidGlass && backdrop != null
     // 玻璃容器色：半透明，深浅跟随主题（对齐导航栏 shell 容器色 alpha 0.4）
-    val glassContainerColor = if (isSystemInDarkTheme()) {
+    val glassContainerColor = if (isDarkTheme) {
         Color(0xFF121212).copy(alpha = 0.4f)
     } else {
         Color.White.copy(alpha = 0.4f)
@@ -250,22 +253,38 @@ fun MiniPlayerBar(
                 .fillMaxWidth()
                 .then(
                     if (glassActive) {
-                        // 液态玻璃背景：高折射 + 模糊 + 鲜艳度 + 高光 + 阴影。
-                        // 专辑图片等前景内容边缘做了羽化（AlbumCoverSimple），
-                        // 高折射下也不会在圆角边缘出现明显棱线
+                        // 液态玻璃背景：无割裂层感 + 纯净通透 + 柔和毛玻璃模糊 + 鲜艳度 + 纯净晶莹折射。
+                        // 移除内部包裹圈（InnerShadow），让封面、歌名文字与整个播放条融为一体，无包裹割裂感
                         Modifier.drawBackdrop(
                             backdrop = backdrop!!,
                             shape = { barShape },
                             effects = {
                                 vibrancy()
-                                blur(8f.dp.toPx())
-                                lens(24f.dp.toPx(), 24f.dp.toPx())
+                                blur(14f.dp.toPx())
+                                smoothLiquidLens(
+                                    refractionHeight = if (isFloatingBottomBar) 5f.dp.toPx() else 3.5f.dp.toPx(),
+                                    refractionAmount = if (isFloatingBottomBar) 2.5f.dp.toPx() else 1.5f.dp.toPx(),
+                                    chromaticAberration = true,
+                                    depthEffect = isFloatingBottomBar
+                                )
                             },
+                            innerShadow = null,
                             highlight = {
-                                // 高光描边：极低透明度，避免在专辑图片圆角处产生白线
-                                Highlight.Default.copy(alpha = 0.1f)
+                                if (isFloatingBottomBar) {
+                                    Highlight.Default.copy(
+                                        width = 0.5.dp,
+                                        alpha = if (isDarkTheme) 0.10f else 0.18f
+                                    )
+                                } else {
+                                    Highlight.Plain.copy(
+                                        width = 0.5.dp,
+                                        alpha = if (isDarkTheme) 0.08f else 0.16f
+                                    )
+                                }
                             },
-                            shadow = { Shadow.Default.copy(color = Color.Black.copy(alpha = 0.1f)) },
+                            shadow = if (isFloatingBottomBar) {
+                                { Shadow.Default.copy(color = Color.Black.copy(alpha = 0.08f)) }
+                            } else null,
                             onDrawSurface = { drawRect(glassContainerColor) }
                         )
                     } else {

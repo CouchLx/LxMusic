@@ -31,9 +31,11 @@ class SettingsRepository(context: Context) {
         const val PLAYER_BG_OPACITY = "player_bg_opacity"
         const val PLAYER_BLUR = "player_blur"
         const val PLAYER_DYNAMIC_BG = "player_dynamic_bg"
-        const val PLAYER_MESH_BG = "player_mesh_bg"
         const val PLAYER_ROUND_ALBUM = "player_round_album"
         const val PLAYER_ROTATE = "player_rotate"
+        const val PLAYER_VINYL_STYLE = "player_vinyl_style"
+        const val PLAYER_VINYL_POINTER = "player_vinyl_pointer"
+        const val PLAYER_VINYL_BASE = "player_vinyl_base"
         const val PLAYER_BG_ENHANCE = "player_bg_enhance"
         const val PLAYER_HYPER_BG = "player_hyper_bg"
         const val PLAYER_WAVEFORM_SLIDER = "player_waveform_slider"
@@ -47,10 +49,10 @@ class SettingsRepository(context: Context) {
         const val PLAYER_AUDIO_REACTIVE = "player_audio_reactive"
         const val PLAYER_LYRIC_BLUR = "player_lyric_blur"
         const val PLAYER_LYRIC_BLUR_AMOUNT = "player_lyric_blur_amount"
-        // 播放器 UI 显示（点击封面切歌词 / 精简控制栏 / 顶栏收藏按钮）
         const val PLAYER_TAP_COVER_TO_LYRICS = "player_tap_cover_to_lyrics"
         const val PLAYER_COMPACT_CONTROLS = "player_compact_controls"
         const val PLAYER_SHOW_TOP_FAVORITE = "player_show_top_favorite"
+        const val PLAYER_MINIMALIST_CONTROLS = "player_minimalist_controls"
         // 歌词显示（播放器菜单-歌词设置：字号/粗细/排版，持久化）
         // 歌词页（歌词卡）与封面卡（歌词预览条）两套独立，互不互通
         const val PLAYER_LYRIC_FONT_SIZE = "player_lyric_font_size"
@@ -94,6 +96,8 @@ class SettingsRepository(context: Context) {
         const val USB_EXCLUSIVE_PLAYBACK = "usb_exclusive_playback"
         const val USB_EXCLUSIVE_SAMPLE_RATE = "usb_exclusive_sample_rate"
         const val USB_EXCLUSIVE_BIT_DEPTH = "usb_exclusive_bit_depth"
+        // 自动更新
+        const val AUTO_CHECK_UPDATE_DIALOG = "auto_check_update_dialog"
     }
 
     // ==================== 主题 ====================
@@ -250,16 +254,6 @@ class SettingsRepository(context: Context) {
         prefs.getBoolean(Keys.PLAYER_DYNAMIC_BG, true)
     )
 
-    var playerMeshBg: Boolean
-        get() = _playerMeshBg
-        set(value) {
-            _playerMeshBg = value
-            prefs.edit().putBoolean(Keys.PLAYER_MESH_BG, value).apply()
-        }
-    private var _playerMeshBg: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_MESH_BG, false)
-    )
-
     var playerRoundAlbum: Boolean
         get() = _playerRoundAlbum
         set(value) {
@@ -277,6 +271,36 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PLAYER_ROTATE, value).apply()
         }
     private var _playerRotate: Boolean by mutableStateOf(prefs.getBoolean(Keys.PLAYER_ROTATE, false))
+
+    var playerVinylStyle: Boolean
+        get() = _playerVinylStyle
+        set(value) {
+            _playerVinylStyle = value
+            prefs.edit().putBoolean(Keys.PLAYER_VINYL_STYLE, value).apply()
+        }
+    private var _playerVinylStyle: Boolean by mutableStateOf(
+        prefs.getBoolean(Keys.PLAYER_VINYL_STYLE, false)
+    )
+
+    var playerVinylPointer: Boolean
+        get() = _playerVinylPointer
+        set(value) {
+            _playerVinylPointer = value
+            prefs.edit().putBoolean(Keys.PLAYER_VINYL_POINTER, value).apply()
+        }
+    private var _playerVinylPointer: Boolean by mutableStateOf(
+        prefs.getBoolean(Keys.PLAYER_VINYL_POINTER, false)
+    )
+
+    var playerVinylBase: Boolean
+        get() = _playerVinylBase
+        set(value) {
+            _playerVinylBase = value
+            prefs.edit().putBoolean(Keys.PLAYER_VINYL_BASE, value).apply()
+        }
+    private var _playerVinylBase: Boolean by mutableStateOf(
+        prefs.getBoolean(Keys.PLAYER_VINYL_BASE, false)
+    )
 
     var playerBgEnhance: Boolean
         get() = _playerBgEnhance
@@ -399,7 +423,7 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PLAYER_TAP_COVER_TO_LYRICS, value).apply()
         }
     private var _playerTapCoverToLyrics: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_TAP_COVER_TO_LYRICS, false)
+        prefs.getBoolean(Keys.PLAYER_TAP_COVER_TO_LYRICS, true)
     )
 
     var playerCompactControls: Boolean
@@ -409,7 +433,7 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PLAYER_COMPACT_CONTROLS, value).apply()
         }
     private var _playerCompactControls: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_COMPACT_CONTROLS, false)
+        prefs.getBoolean(Keys.PLAYER_COMPACT_CONTROLS, true)
     )
 
     var playerShowTopFavorite: Boolean
@@ -419,7 +443,17 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PLAYER_SHOW_TOP_FAVORITE, value).apply()
         }
     private var _playerShowTopFavorite: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_SHOW_TOP_FAVORITE, false)
+        prefs.getBoolean(Keys.PLAYER_SHOW_TOP_FAVORITE, true)
+    )
+
+    var playerMinimalistControls: Boolean
+        get() = _playerMinimalistControls
+        set(value) {
+            _playerMinimalistControls = value
+            prefs.edit().putBoolean(Keys.PLAYER_MINIMALIST_CONTROLS, value).apply()
+        }
+    private var _playerMinimalistControls: Boolean by mutableStateOf(
+        prefs.getBoolean(Keys.PLAYER_MINIMALIST_CONTROLS, false)
     )
 
     // ==================== 歌词显示（播放器菜单-歌词设置） ====================
@@ -765,6 +799,18 @@ class SettingsRepository(context: Context) {
     fun getBoolean(key: String, default: Boolean): Boolean = prefs.getBoolean(key, default)
 
     fun getString(key: String, default: String?): String? = prefs.getString(key, default)
+
+    // ==================== 自动更新 ====================
+
+    var autoCheckUpdateDialog: Boolean
+        get() = _autoCheckUpdateDialog
+        set(value) {
+            _autoCheckUpdateDialog = value
+            prefs.edit().putBoolean(Keys.AUTO_CHECK_UPDATE_DIALOG, value).apply()
+        }
+    private var _autoCheckUpdateDialog: Boolean by mutableStateOf(
+        prefs.getBoolean(Keys.AUTO_CHECK_UPDATE_DIALOG, true)
+    )
 
     fun getInt(key: String, default: Int): Int = prefs.getInt(key, default)
 

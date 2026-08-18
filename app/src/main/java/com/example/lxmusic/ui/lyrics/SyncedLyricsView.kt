@@ -33,6 +33,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -260,7 +261,7 @@ fun SyncedLyricsView(
     lyrics: List<LyricEntry>,
     currentTimeMs: Long,
     modifier: Modifier = Modifier,
-    textColor: Color = if (isSystemInDarkTheme()) Color.White else Color.Black,
+    textColor: Color = MaterialTheme.colorScheme.onSurface,
     inactiveAlphaNear: Float = 0.4f,
     inactiveAlphaFar: Float = 0.35f,
     blurInactiveAlphaNear: Float = 0.72f,

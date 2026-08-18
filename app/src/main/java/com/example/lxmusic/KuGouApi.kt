@@ -3,6 +3,7 @@ package com.example.lxmusic
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.*
+import com.example.lxmusic.model.SongInfo
 
 // ==================== 排行榜列表 ====================
 
@@ -437,8 +438,9 @@ data class PlaylistTracksResponse(
 )
 
 data class PlaylistTracksData(
-    @com.google.gson.annotations.SerializedName("songs")
+    @com.google.gson.annotations.SerializedName("songs", alternate = ["info", "list", "songlist", "lists", "data"])
     val list: List<PlaylistTrackSong>? = null,
+    @com.google.gson.annotations.SerializedName("count", alternate = ["total", "totalcount", "total_count", "songcount"])
     val count: Int = 0
 )
 
@@ -449,12 +451,16 @@ data class PlaylistTracksNewResponse(
 )
 
 data class PlaylistTracksNewData(
+    @com.google.gson.annotations.SerializedName("info", alternate = ["songs", "list", "songlist", "lists", "data"])
     val info: List<PlaylistTrackSong>? = null,
+    @com.google.gson.annotations.SerializedName("count", alternate = ["total", "totalcount", "total_count", "songcount"])
     val count: Int = 0
 )
 
 data class PlaylistTrackSingerInfo(
+    @com.google.gson.annotations.SerializedName("id", alternate = ["singerid", "singer_id", "author_id"])
     val id: Long = 0,
+    @com.google.gson.annotations.SerializedName("name", alternate = ["singername", "singer_name", "author_name"])
     val name: String? = null
 )
 
@@ -467,15 +473,24 @@ data class PlaylistAudioInfo(
 )
 
 data class PlaylistTrackSong(
+    @com.google.gson.annotations.SerializedName("name", alternate = ["songname", "song_name", "filename", "FileName", "title", "audio_name"])
     val name: String? = null,
+    @com.google.gson.annotations.SerializedName("singerinfo", alternate = ["authors", "singers"])
     val singerinfo: List<PlaylistTrackSingerInfo>? = null,
+    @com.google.gson.annotations.SerializedName("singername", alternate = ["singer_name", "author_name", "SingerName", "artist"])
+    val singername: String? = null,
+    @com.google.gson.annotations.SerializedName("hash", alternate = ["Hash", "FileHash", "fileHash", "hash_128"])
     val hash: String? = null,
+    @com.google.gson.annotations.SerializedName("album_id", alternate = ["albumid", "AlbumID", "albumId"])
     val album_id: Long = 0,
+    @com.google.gson.annotations.SerializedName("audio_id", alternate = ["audioid", "AudioID", "audioId"])
     val audio_id: Long = 0,
+    @com.google.gson.annotations.SerializedName("mixsongid", alternate = ["MixSongID", "album_audio_id", "mix_song_id", "id"])
     val mixsongid: Long = 0,
+    @com.google.gson.annotations.SerializedName("timelen", alternate = ["duration", "Duration", "duration_128", "time_len", "timeLen"])
     val timelen: Int = 0,
+    @com.google.gson.annotations.SerializedName("cover", alternate = ["img", "album_img", "sizable_cover", "union_cover", "pic", "image", "coverUrl"])
     val cover: String? = null,
-    val id: Long = 0,
     val fileid: Long = 0,  // 新版 API 返回的歌单内歌曲 ID，用于精准删除
     val audio_info: PlaylistAudioInfo? = null
 ) {
@@ -489,6 +504,7 @@ data class PlaylistTrackSong(
         }
     val artist: String
         get() {
+            if (!singername.isNullOrBlank()) return singername
             singerinfo?.firstOrNull()?.name?.takeIf { it.isNotBlank() }?.let { return it }
             val n = name ?: ""
             // API 返回格式: "歌手 - 歌名.mp3"
@@ -498,8 +514,12 @@ data class PlaylistTrackSong(
         }
     val durationMs: Long
         get() {
-            if (timelen > 0) return timelen.toLong()
-            return (audio_info?.duration_320 ?: audio_info?.duration_128 ?: 0).toLong()
+            if (timelen > 1000) return timelen.toLong()
+            if (timelen > 0) return timelen.toLong() * 1000L
+            val audioDur = audio_info?.duration_320 ?: audio_info?.duration_128 ?: 0
+            if (audioDur > 1000) return audioDur.toLong()
+            if (audioDur > 0) return audioDur.toLong() * 1000L
+            return 0L
         }
     val coverUrl: String
         get() {
@@ -575,13 +595,122 @@ data class SearchPlaylistItem(
     val nickname: String? = null,
     val play_count: String? = null,
     val collect_count: String? = null,
-    val intro: String? = null
+    val intro: String? = null,
+    val gid: String? = null
 ) {
     val coverUrl: String
         get() {
             val raw = img ?: ""
             if (raw.isBlank()) return ""
             return raw.replace("{size}", "240").replace("http://", "https://")
+        }
+}
+
+// ==================== 歌手搜索 ====================
+
+data class SearchAuthorResponse(
+    val status: Int = 0,
+    val data: SearchAuthorData? = null
+)
+
+data class SearchAuthorData(
+    @com.google.gson.annotations.SerializedName("lists", alternate = ["info", "data", "list"])
+    val lists: List<SearchAuthorItem>? = null,
+    val total: Int = 0
+)
+
+data class SearchAuthorItem(
+    @com.google.gson.annotations.SerializedName("authorid", alternate = ["id", "singerid", "singer_id"])
+    val authorid: Long = 0,
+    @com.google.gson.annotations.SerializedName("authorname", alternate = ["name", "singername", "singer_name", "author_name"])
+    val authorname: String? = null,
+    @com.google.gson.annotations.SerializedName("avatar", alternate = ["img", "pic", "image", "sizable_cover", "union_cover"])
+    val avatar: String? = null,
+    @com.google.gson.annotations.SerializedName("songcount", alternate = ["songs_count", "song_count"])
+    val songcount: Int = 0,
+    @com.google.gson.annotations.SerializedName("albumcount", alternate = ["albums_count", "album_count"])
+    val albumcount: Int = 0
+) {
+    val coverUrl: String
+        get() {
+            val raw = avatar ?: ""
+            if (raw.isBlank()) return ""
+            return raw.replace("{size}", "240").replace("http://", "https://")
+        }
+}
+
+// ==================== 专辑搜索 ====================
+
+data class SearchAlbumResponse(
+    val status: Int = 0,
+    val data: SearchAlbumData? = null
+)
+
+data class SearchAlbumData(
+    @com.google.gson.annotations.SerializedName("lists", alternate = ["info", "data", "list"])
+    val lists: List<SearchAlbumItem>? = null,
+    val total: Int = 0
+)
+
+data class SearchAlbumItem(
+    @com.google.gson.annotations.SerializedName("albumid", alternate = ["id", "album_id"])
+    val albumid: Long = 0,
+    @com.google.gson.annotations.SerializedName("albumname", alternate = ["name", "album_name"])
+    val albumname: String? = null,
+    @com.google.gson.annotations.SerializedName("cover", alternate = ["img", "pic", "image", "sizable_cover", "union_cover"])
+    val cover: String? = null,
+    @com.google.gson.annotations.SerializedName("authorname", alternate = ["singername", "singer_name", "author_name"])
+    val authorname: String? = null,
+    @com.google.gson.annotations.SerializedName("songcount", alternate = ["songs_count", "song_count"])
+    val songcount: Int = 0
+) {
+    val coverUrl: String
+        get() {
+            val raw = cover ?: ""
+            if (raw.isBlank()) return ""
+            return raw.replace("{size}", "240").replace("http://", "https://")
+        }
+}
+
+// ==================== MV 搜索 ====================
+
+data class SearchMvResponse(
+    val status: Int = 0,
+    val data: SearchMvData? = null
+)
+
+data class SearchMvData(
+    @com.google.gson.annotations.SerializedName("lists", alternate = ["info", "data", "list"])
+    val lists: List<SearchMvItem>? = null,
+    val total: Int = 0
+)
+
+data class SearchMvItem(
+    @com.google.gson.annotations.SerializedName("mvid", alternate = ["id", "mv_id"])
+    val mvid: Long = 0,
+    @com.google.gson.annotations.SerializedName("mvname", alternate = ["name", "title", "mv_name"])
+    val mvname: String? = null,
+    @com.google.gson.annotations.SerializedName("authorname", alternate = ["singername", "singer_name", "author_name"])
+    val authorname: String? = null,
+    @com.google.gson.annotations.SerializedName("cover", alternate = ["img", "pic", "image", "sizable_cover", "union_cover", "thumbnail"])
+    val cover: String? = null,
+    @com.google.gson.annotations.SerializedName("duration", alternate = ["timelen", "time_len"])
+    val duration: Int = 0,
+    @com.google.gson.annotations.SerializedName("playcount", alternate = ["play_count", "play_times"])
+    val playcount: String? = null
+) {
+    val coverUrl: String
+        get() {
+            val raw = cover ?: ""
+            if (raw.isBlank()) return ""
+            return raw.replace("{size}", "240").replace("http://", "https://")
+        }
+    val durationText: String
+        get() {
+            if (duration <= 0) return ""
+            val min = duration / 60
+            val sec = duration % 60
+            return "${min}:${String.format("%02d", sec)}"
         }
 }
 
@@ -733,6 +862,20 @@ interface KuGouService {
         @Query("pagesize") pageSize: Int = 30
     ): PlaylistTracksResponse
 
+    @GET("playlist/track/all")
+    suspend fun getPlaylistTracksRaw(
+        @Query("id") id: String,
+        @Query("page") page: Int = 1,
+        @Query("pagesize") pageSize: Int = 30
+    ): okhttp3.ResponseBody
+
+    @GET("special/song")
+    suspend fun getSpecialSongRaw(
+        @Query("specialid") specialid: Long,
+        @Query("page") page: Int = 1,
+        @Query("pagesize") pageSize: Int = 30
+    ): okhttp3.ResponseBody
+
     // 新版歌单歌曲接口 (POST /v4/get_list_all_file)，返回包含正确的 fileid 用于删除
     @GET("playlist/track/all/new")
     suspend fun getPlaylistTracksNew(
@@ -800,6 +943,39 @@ interface KuGouService {
         @Query("pagesize") pageSize: Int = 30,
         @Query("type") type: String = "special"
     ): SearchPlaylistResponse
+
+    // 搜索歌手
+    @GET("search")
+    suspend fun searchAuthor(
+        @Query("keywords") keywords: String,
+        @Query("page") page: Int = 1,
+        @Query("pagesize") pageSize: Int = 30,
+        @Query("type") type: String = "author"
+    ): SearchAuthorResponse
+
+    // 搜索专辑
+    @GET("search")
+    suspend fun searchAlbum(
+        @Query("keywords") keywords: String,
+        @Query("page") page: Int = 1,
+        @Query("pagesize") pageSize: Int = 30,
+        @Query("type") type: String = "album"
+    ): SearchAlbumResponse
+
+    // 搜索 MV
+    @GET("search")
+    suspend fun searchMv(
+        @Query("keywords") keywords: String,
+        @Query("page") page: Int = 1,
+        @Query("pagesize") pageSize: Int = 30,
+        @Query("type") type: String = "mv"
+    ): SearchMvResponse
+
+    // 歌单详情（获取歌单元数据：名称、封面、歌曲数、创建者等）
+    @GET("special/detail")
+    suspend fun getSpecialDetail(
+        @Query("specialid") specialId: Long
+    ): okhttp3.ResponseBody
 
     // 热搜列表
     @GET("search/hot")
@@ -889,6 +1065,180 @@ object KuGouApi {
     private var _service: KuGouService? = null
     val service: KuGouService
         get() = _service ?: createService().also { _service = it }
+
+    /**
+     * 获取搜索/网络精选歌单内的歌曲列表（支持 gid 与酷狗官方 CDN 多源降级与全量日志调试输出）
+     */
+    suspend fun fetchSpecialPlaylistSongs(
+        specialId: Long,
+        gid: String? = null,
+        page: Int = 1,
+        pageSize: Int = 30
+    ): Pair<List<SongInfo>, Int> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val tag = "LxMusic_Playlist"
+        android.util.Log.d(tag, "==================================================")
+        android.util.Log.d(tag, ">>> [歌单歌曲请求] specialId=$specialId, gid=$gid, page=$page, pageSize=$pageSize")
+
+        val client = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .build()
+
+        val candidateUrls = mutableListOf<String>()
+
+        // 1. 如果有 gid (例如 collection_3_xxx)，优先使用后端接口
+        if (!gid.isNullOrBlank()) {
+            candidateUrls.add("${baseUrl.trimEnd('/')}/playlist/track/all?id=$gid&page=$page&pagesize=$pageSize")
+        }
+
+        // 2. 优先：通过后端 special/song 获取歌曲列表（解析更稳定，字段映射一致）
+        candidateUrls.add("${baseUrl.trimEnd('/')}/special/song?specialid=$specialId&page=$page&pagesize=$pageSize")
+
+        // 3. 酷狗官方移动端 CDN 接口 (高可用、返回标准 json)
+        candidateUrls.add("http://mobilecdnbss.kugou.com/api/v3/special/song?specialid=$specialId&page=$page&pagesize=$pageSize&plat=0&version=9108")
+
+        // 4. 酷狗 M 站 plist 接口
+        candidateUrls.add("https://m.kugou.com/plist/list/$specialId?json=true&page=$page&pagesize=$pageSize")
+
+        // 5. 酷狗 specialsearch 搜索接口
+        candidateUrls.add("http://specialsearch.kugou.com/v1/special/song?specialid=$specialId&page=$page&pagesize=$pageSize&plat=0&version=9108")
+
+        // 6. 后端 API 服务器的 playlist/track/all（兜底：用 specialId 作为 id 查询）
+        candidateUrls.add("${baseUrl.trimEnd('/')}/playlist/track/all?id=$specialId&page=$page&pagesize=$pageSize")
+
+        val gson = com.google.gson.Gson()
+
+        for (url in candidateUrls) {
+            android.util.Log.d(tag, "--> 尝试请求歌单候选地址: $url")
+            try {
+                val request = okhttp3.Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/100.0.4896.127 Mobile Safari/537.36")
+                    .header("Accept", "application/json, text/plain, */*")
+                    .build()
+
+                val response = client.newCall(request).execute()
+                val code = response.code
+                val bodyStr = response.body?.string() ?: ""
+                response.close()
+
+                android.util.Log.d(tag, "<-- 接口响应: HTTP $code, 长度 ${bodyStr.length} 字符")
+                if (code in 200..299 && bodyStr.isNotBlank() && bodyStr.contains("{")) {
+                    val rootObj = try {
+                        gson.fromJson(bodyStr, com.google.gson.JsonObject::class.java)
+                    } catch (_: Exception) { null }
+
+                    if (rootObj != null) {
+                        // 检查是否有错误码报错
+                        val status = rootObj.get("status")?.run { if (isJsonPrimitive && asJsonPrimitive.isNumber) asInt else null }
+                        val errCode = rootObj.get("error_code")?.run { if (isJsonPrimitive && asJsonPrimitive.isNumber) asInt else null }
+                            ?: rootObj.get("errcode")?.run { if (isJsonPrimitive && asJsonPrimitive.isNumber) asInt else null }
+                        if (status == 0 && errCode != null && errCode != 0) {
+                            android.util.Log.w(tag, "接口返回业务错误: error_code=$errCode, body=${bodyStr.take(120)}")
+                            continue
+                        }
+
+                        val songArray = findSongArray(rootObj)
+                        val totalCount = findTotalCount(rootObj)
+
+                        if (songArray != null && songArray.size() > 0) {
+                            val parsedSongs = mutableListOf<SongInfo>()
+                            for (item in songArray) {
+                                if (item.isJsonObject) {
+                                    try {
+                                        val track = gson.fromJson(item, PlaylistTrackSong::class.java)
+                                        val hash = track.hash ?: ""
+                                        if (hash.isNotBlank()) {
+                                            val audioId = if (track.mixsongid > 0) track.mixsongid else track.audio_id
+                                            parsedSongs.add(
+                                                SongInfo(
+                                                    title = track.title,
+                                                    artist = track.artist,
+                                                    filePath = "$hash|$audioId",
+                                                    albumArtUri = track.coverUrl,
+                                                    duration = track.durationMs
+                                                )
+                                            )
+                                        }
+                                    } catch (e: Exception) {
+                                        android.util.Log.w(tag, "解析单曲出错: ${e.message}")
+                                    }
+                                }
+                            }
+
+                            if (parsedSongs.isNotEmpty()) {
+                                val finalTotal = if (totalCount > 0) totalCount else parsedSongs.size
+                                android.util.Log.d(tag, "=== [歌单解析成功] 来源接口: $url, 解析歌曲数: ${parsedSongs.size}, 歌单总数: $finalTotal ===")
+                                android.util.Log.d(tag, "==================================================")
+                                return@withContext Pair(parsedSongs, finalTotal)
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w(tag, "请求 $url 异常: ${e.message}")
+            }
+        }
+
+        android.util.Log.e(tag, "!!! 所有歌单接口均未返回有效数据，请检查网络或后端接口实现 !!!")
+        android.util.Log.d(tag, "==================================================")
+        Pair(emptyList(), 0)
+    }
+
+    private fun findSongArray(element: com.google.gson.JsonElement): com.google.gson.JsonArray? {
+        if (element.isJsonArray) {
+            val arr = element.asJsonArray
+            if (arr.size() > 0 && arr[0].isJsonObject) {
+                val firstObj = arr[0].asJsonObject
+                if (firstObj.has("hash") || firstObj.has("Hash") || firstObj.has("filename") ||
+                    firstObj.has("songname") || firstObj.has("name") || firstObj.has("title") ||
+                    firstObj.has("audio_id") || firstObj.has("audio_name")) {
+                    return arr
+                }
+            }
+        } else if (element.isJsonObject) {
+            val obj = element.asJsonObject
+            // 优先查找常见键名
+            for (key in listOf("info", "songs", "list", "songlist", "lists", "data")) {
+                if (obj.has(key)) {
+                    val found = findSongArray(obj.get(key))
+                    if (found != null && found.size() > 0) return found
+                }
+            }
+            // 深度遍历子节点
+            for ((_, value) in obj.entrySet()) {
+                if (value.isJsonObject || value.isJsonArray) {
+                    val found = findSongArray(value)
+                    if (found != null && found.size() > 0) return found
+                }
+            }
+        }
+        return null
+    }
+
+    private fun findTotalCount(element: com.google.gson.JsonElement): Int {
+        if (element.isJsonObject) {
+            val obj = element.asJsonObject
+            for (key in listOf("total", "count", "total_count", "songcount", "totalcount", "song_count")) {
+                val v = obj.get(key)
+                if (v != null && v.isJsonPrimitive) {
+                    try {
+                        val c = v.asInt
+                        if (c > 0) return c
+                    } catch (_: Exception) {}
+                }
+            }
+            for ((_, value) in obj.entrySet()) {
+                if (value.isJsonObject) {
+                    val c = findTotalCount(value)
+                    if (c > 0) return c
+                }
+            }
+        }
+        return 0
+    }
 
     private fun createService(): KuGouService {
         val loggingInterceptor = okhttp3.logging.HttpLoggingInterceptor { message ->

@@ -88,6 +88,7 @@ fun PlaylistCard(playlist: UserPlaylistItem, onClick: () -> Unit = {}) {
                     text = playlist.listname ?: "未知歌单",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

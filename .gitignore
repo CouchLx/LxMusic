@@ -15,6 +15,7 @@ local.properties
 # 源码备份文件
 *.backup
 *.bak
+*.bak_split
 *.orig
 
 # 本地工具配置

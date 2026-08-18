@@ -48,6 +48,7 @@ fun ModernKaraokeLyricsView(
         lineHeight = 24.sp
     ),
     textColor: Color = Color.White,
+    blendMode: BlendMode = BlendMode.SrcOver,
     showTranslation: Boolean = true,
     showPhonetic: Boolean = true,
     useBlurEffect: Boolean = true,
@@ -69,13 +70,11 @@ fun ModernKaraokeLyricsView(
         renderCurrentPosition = renderCurrentPosition,
         onLineClicked = onLineClicked,
         onLinePressed = onLinePressed,
-        modifier = modifier.graphicsLayer {
-            blendMode = BlendMode.Plus
-            compositingStrategy = CompositingStrategy.Offscreen
-        },
+        modifier = modifier,
         normalLineTextStyle = normalLineTextStyle,
         accompanimentLineTextStyle = accompanimentLineTextStyle,
         textColor = textColor,
+        blendMode = blendMode,
         showTranslation = showTranslation,
         showPhonetic = showPhonetic,
         animateViewportScroll = animateViewportScroll,

@@ -226,7 +226,7 @@ fun KaraokeLyricsView(
         textMotion = TextMotion.Animated,
     ),
     textColor: Color = Color.White,
-    breathingDotsDefaults: KaraokeBreathingDotsDefaults = KaraokeBreathingDotsDefaults(),
+    breathingDotsDefaults: KaraokeBreathingDotsDefaults = KaraokeBreathingDotsDefaults(breathingDotsColor = textColor),
     phoneticTextStyle: TextStyle = normalLineTextStyle.copy(
         fontSize = 13.sp,
         fontWeight = FontWeight.Normal,
@@ -238,7 +238,7 @@ fun KaraokeLyricsView(
 //        0.6f to Color.White,
 //        1f to Color.White.copy(0f)
 //    ),
-    blendMode: BlendMode = BlendMode.Plus,
+    blendMode: BlendMode = BlendMode.SrcOver,
     useBlurEffect: Boolean = true,
     showTranslation: Boolean = true,
     showPhonetic: Boolean = true,
