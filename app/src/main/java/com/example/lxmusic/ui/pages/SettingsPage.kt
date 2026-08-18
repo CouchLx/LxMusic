@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.OpenInBrowser
@@ -2189,6 +2190,61 @@ internal fun SettingsAboutContent() {
                         modifier = Modifier.size(22.dp)
                     )
                 }
+            }
+
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                thickness = 0.5.dp
+            )
+
+            // QQ 测试群
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        try {
+                            // 优先用 mqqapi 协议直接拉起 QQ 加群
+                            val qqIntent = Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse("mqqapi://card/show_pslcard?src_type=internal&version=1&uin=778350277&card_type=group&source=qrcode")
+                            )
+                            context.startActivity(qqIntent)
+                        } catch (e: Exception) {
+                            // 兜底：网页版加群链接
+                            try {
+                                val webIntent = Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse("https://qm.qq.com/cgi-bin/qmqr?k=778350277")
+                                )
+                                context.startActivity(webIntent)
+                            } catch (e2: Exception) {
+                                Toast.makeText(context, "无法打开 QQ，请手动搜索群号 778350277 加入", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "加入 QQ 测试群",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "群号 778350277 · 分享测试安装包、反馈问题",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Default.Group,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
             }
 
             HorizontalDivider(
