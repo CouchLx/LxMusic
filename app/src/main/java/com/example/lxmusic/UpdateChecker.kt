@@ -224,16 +224,18 @@ object UpdateChecker {
 
     /**
      * 从 GitHub 直链生成国内加速镜像地址列表（直链在最前，镜像兜底）
+     * 顺序按实测连通性排列：gh-proxy.com / ghproxy.net 国内多数网络可连，
+     * ghfast.top / gh.llkk.cc 部分网络超时放后面。
      */
     fun buildMirrorUrls(directUrl: String): List<String> {
         if (directUrl.isBlank()) return emptyList()
         val result = mutableListOf(directUrl)
-        // 常见 GitHub 加速镜像（前缀代理方式）
+        // 常见 GitHub 加速镜像（前缀代理方式），实测可用性从高到低
         val mirrors = listOf(
-            "https://ghfast.top/",
             "https://gh-proxy.com/",
-            "https://gh.llkk.cc/",
             "https://ghproxy.net/",
+            "https://ghfast.top/",
+            "https://gh.llkk.cc/",
             "https://mirror.ghproxy.com/"
         )
         for (mirror in mirrors) {

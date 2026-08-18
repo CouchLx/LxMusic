@@ -4,8 +4,9 @@
   "desc": "3.7.56 更新内容：\n- 新增液态玻璃透镜、黑胶封面、极简播放控制、主题切换\n- 更新下载优化：多镜像自动切换 + 断点续传\n- 更新包保存到手机 Download 文件夹",
   "apkUrl": "https://github.com/CouchLx/LxMusic/releases/download/v3.7.56/app-release.apk",
   "apkMirrors": [
-    "https://ghfast.top/https://github.com/CouchLx/LxMusic/releases/download/v3.7.56/app-release.apk",
     "https://gh-proxy.com/https://github.com/CouchLx/LxMusic/releases/download/v3.7.56/app-release.apk",
+    "https://ghproxy.net/https://github.com/CouchLx/LxMusic/releases/download/v3.7.56/app-release.apk",
+    "https://ghfast.top/https://github.com/CouchLx/LxMusic/releases/download/v3.7.56/app-release.apk",
     "https://gh.llkk.cc/https://github.com/CouchLx/LxMusic/releases/download/v3.7.56/app-release.apk"
   ]
 }
