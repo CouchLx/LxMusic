@@ -71,17 +71,42 @@ KEY_PASSWORD=
 3. 修改 `ACTIVATE_CODES` 生成激活码发给朋友
 4. 客户端设置页 → VIP 服务 → 输入激活码激活
 
-## 自动发布
+## 自动发布（全自动，一次配置永久省心）
 
 推送 `v*` 标签（如 `v3.7.56`）到 GitHub 会自动触发 [release.yml](.github/workflows/release.yml)：
 
-- 构建 Release APK
-- 生成 `publish/version.json`（客户端更新检查用）
-- 上传 APK 与 version.json 到 GitHub Releases
+1. 构建签名 Release APK
+2. 自动上传 APK 到你的服务器（如配置了 `SERVER_HOST` Secrets）
+3. 生成 `publish/version.json`（客户端更新检查用）并同步到仓库
+4. 上传 APK 与 version.json 到 GitHub Releases
 
-需要配置仓库 Secrets：`LX_SERVER_URL`、`LX_ADMIN_PASSWORD`、`STORE_FILE`、`STORE_PASSWORD`、`KEY_ALIAS`、`KEY_PASSWORD`、`KEYSTORE_BASE64`（keystore 的 base64）。
+**你只需要做一件事**：
+```bash
+git tag v3.7.56
+git push origin v3.7.56
+```
 
-客户端在设置 → 关于 → 检查更新，会依次尝试多个镜像（GitHub raw / jsdelivr / 国内加速）获取 version.json。
+### 一次性配置仓库 Secrets
+
+在 GitHub 仓库 **Settings → Secrets and variables → Actions** 添加：
+
+| Secret | 用途 | 必填 |
+|---|---|---|
+| `LX_SERVER_URL` | 你的酷狗 API 服务器地址（如 `http://你的IP:3000/`） | ✅ |
+| `STORE_FILE` / `STORE_PASSWORD` / `KEY_ALIAS` / `KEY_PASSWORD` | APK 签名信息 | ✅ |
+| `KEYSTORE_BASE64` | 签名 keystore 文件的 base64 编码 | ✅ |
+| `SERVER_HOST` / `SERVER_USER` / `SERVER_PASS` / `SERVER_PORT` | 服务器 SSH 信息，自动上传 APK 到服务器 | 可选 |
+| `LX_ADMIN_PASSWORD` | 设置页管理员密码 | 可选 |
+| `LX_UPDATE_VERSION_URL` | 自定义更新检查地址（默认用 GitHub） | 可选 |
+
+> 配置了 `SERVER_*` 后，每次发版 Actions 会把 APK 自动 scp 到服务器的 `/opt/kugou-api/update/` 目录，无需手动上传。
+
+### 服务器端 APK 托管
+
+`server_vip_api.template.js` 已包含 `/vip/update/:file` 路由：
+把 APK 放到服务器 `/opt/kugou-api/update/` 目录，客户端更新时会优先从你的服务器下载（国内快且稳），GitHub 直链和国内镜像自动兜底。
+
+客户端在设置 → 关于 → 检查更新，会依次尝试多个镜像（服务器 / GitHub 直链 / jsdelivr / 国内加速）获取 version.json 与 APK。
 
 ## 免责声明
 

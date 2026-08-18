@@ -1,5 +1,6 @@
 name: Build & Release APK
 
+# 全自动发布：推送 v* 标签即可，自动完成 构建 → 签名 → 上传服务器 → 发布 Release
 on:
   push:
     tags:
@@ -36,7 +37,7 @@ jobs:
       - name: Decode keystore
         run: |
           if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > ${{ secrets.STORE_FILE }}
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.jks
           fi
 
       - name: Grant execute permission for gradlew
@@ -45,20 +46,65 @@ jobs:
       - name: Build Release APK
         run: ./gradlew assembleRelease --no-daemon
 
-      # 生成 version.json（客户端多镜像检查更新用）
+      # 生成 version.json：优先指向自己的服务器（快），GitHub 直链兜底
       - name: Generate version.json
         id: version
         run: |
           APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
-          echo "apk=$APK" >> $GITHUB_OUTPUT
           APK_NAME=$(basename $APK)
+          echo "apk=$APK" >> $GITHUB_OUTPUT
           echo "apk_name=$APK_NAME" >> $GITHUB_OUTPUT
-          # 从 build.gradle.kts 提取版本信息
           VERSION_CODE=$(grep -oP 'versionCode\s*=\s*\K[0-9]+' app/build.gradle.kts | head -1)
           VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts | head -1)
           echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
           echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
-          echo "{\"versionCode\": $VERSION_CODE, \"versionName\": \"$VERSION_NAME\", \"desc\": \"${{ github.event.head_commit.message }}\", \"apkUrl\": \"https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$APK_NAME\"}" > publish/version.json
+
+          SERVER_URL="${{ secrets.LX_SERVER_URL }}"
+          GH_DIRECT="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$APK_NAME"
+          if [ -n "$SERVER_URL" ]; then
+            # 服务器优先：version.json 的 apkUrl 指向自己的服务器
+            SERVER_APK="${SERVER_URL%/}/vip/update/$APK_NAME"
+            echo "{\"versionCode\": $VERSION_CODE, \"versionName\": \"$VERSION_NAME\", \"desc\": \"${{ github.event.head_commit.message }}\", \"apkUrl\": \"$SERVER_APK\", \"apkMirrors\": [\"$GH_DIRECT\", \"https://ghfast.top/$GH_DIRECT\", \"https://gh-proxy.com/$GH_DIRECT\"]}" > publish/version.json
+          else
+            echo "{\"versionCode\": $VERSION_CODE, \"versionName\": \"$VERSION_NAME\", \"desc\": \"${{ github.event.head_commit.message }}\", \"apkUrl\": \"$GH_DIRECT\", \"apkMirrors\": [\"https://ghfast.top/$GH_DIRECT\", \"https://gh-proxy.com/$GH_DIRECT\"]}" > publish/version.json
+          fi
+          echo "--- version.json ---"
+          cat publish/version.json
+
+      # 自动上传 APK 到自己的服务器（配好 Secrets 后全自动，不用手动 scp）
+      - name: Upload APK to own server
+        if: secrets.SERVER_HOST != ''
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASS }}
+          port: ${{ secrets.SERVER_PORT }}
+          source: "app/build/outputs/apk/release/*.apk"
+          target: "/tmp/lxmusic-release"
+          strip_components: 5
+
+      - name: Move APK to update dir on server
+        if: secrets.SERVER_HOST != ''
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASS }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            mkdir -p /opt/kugou-api/update
+            mv -f /tmp/lxmusic-release/*.apk /opt/kugou-api/update/
+            ls -la /opt/kugou-api/update/
+
+      # 同步 version.json 到仓库（客户端检测更新用）
+      - name: Commit version.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add publish/version.json
+          git commit -m "chore: bump version to ${{ steps.version.outputs.version_name }} [skip ci]" || echo "no changes"
+          git push origin master
 
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
