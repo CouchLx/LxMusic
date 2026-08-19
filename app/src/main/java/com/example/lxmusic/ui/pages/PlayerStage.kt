@@ -178,22 +178,22 @@ fun PlayerStage(
     playerBgEnhance: Boolean = false,
     playerHyperBg: Boolean = false,
     playerCoverBlurBg: Boolean = false,
-    playerLyricBlur: Boolean = true,
+    playerLyricBlur: Boolean = false,
     playerLyricBlurAmount: Float = 10f,
     // 逐字歌词动效（设置-播放器设置，默认开启；关闭=整行高亮）
     playerLyricsWordEffect: Boolean = true,
-    playerWaveformSlider: Boolean = true,
+    playerWaveformSlider: Boolean = false,
     playerLyricsSeekPreview: Boolean = true,
     // 播放器 UI 显示设置（设置-播放器设置，默认全开启）
     playerTapCoverToLyrics: Boolean = true,
     playerCompactControls: Boolean = true,
-    playerMinimalistControls: Boolean = false,
+    playerMinimalistControls: Boolean = true,
     playerShowTopFavorite: Boolean = true,
     // 歌词显示（播放器菜单-歌词设置，实时生效并持久化）
     // 两套独立：lyric* = 歌词页（歌词卡）；coverLyric* = 主页（封面卡歌词预览条），互不互通
-    lyricFontSize: Float = 20f,
+    lyricFontSize: Float = 35f,
     onLyricFontSizeChange: (Float) -> Unit = {},
-    lyricFontWeight: Float = 500f,
+    lyricFontWeight: Float = 600f,
     onLyricFontWeightChange: (Float) -> Unit = {},
     lyricAlignment: String = "center",
     onLyricAlignmentChange: (String) -> Unit = {},
@@ -201,7 +201,7 @@ fun PlayerStage(
     onCoverLyricFontSizeChange: (Float) -> Unit = {},
     coverLyricFontWeight: Float = 500f,
     onCoverLyricFontWeightChange: (Float) -> Unit = {},
-    coverLyricAlignment: String = "center",
+    coverLyricAlignment: String = "left",
     onCoverLyricAlignmentChange: (String) -> Unit = {},
     lyricsText: String? = null
 ) {
@@ -643,7 +643,7 @@ private fun PlayerProgressSection(
     lyricHaptic: LyricSeekHapticFeedback,
     playerLyricsSeekPreview: Boolean,
     playerWaveformSlider: Boolean,
-    playerMinimalistControls: Boolean = false,
+    playerMinimalistControls: Boolean = true,
     deepBackdrop: Boolean,
     primaryColor: Color,
     uiTint: Color,

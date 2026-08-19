@@ -69,7 +69,7 @@ fun NeriAdvancedLyricsView(
     showLyricTranslation: Boolean = true,
     // 逐字歌词动效：true=当前行逐字点亮；false=整行高亮（其余样式/动效不变）
     karaokeEnabled: Boolean = true,
-    lyricBlurEnabled: Boolean = true,
+    lyricBlurEnabled: Boolean = false,
     lyricBlurAmount: Float = 2.5f,
     isPlaying: Boolean = false,
     animateViewportScroll: Boolean = false,

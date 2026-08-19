@@ -272,7 +272,7 @@ fun SyncedLyricsView(
     centerPadding: Dp = 16.dp,
     visualSpec: LyricVisualSpec = LyricVisualSpec(),
     lyricOffsetMs: Long = 0L,
-    lyricBlurEnabled: Boolean = true,
+    lyricBlurEnabled: Boolean = false,
     lyricBlurAmount: Float = 10f,
     isPlaying: Boolean = false,
     playbackSpeed: Float = 1f,

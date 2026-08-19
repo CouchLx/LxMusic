@@ -268,7 +268,7 @@ fun SettingsPage(
     onPlayerBgOpacityChange: (Float) -> Unit = {},
     playerBlur: Boolean = false,
     onPlayerBlurChange: (Boolean) -> Unit = {},
-    playerDynamicBg: Boolean = true,
+    playerDynamicBg: Boolean = false,
     onPlayerDynamicBgChange: (Boolean) -> Unit = {},
     playerRoundAlbum: Boolean = false,
     onPlayerRoundAlbumChange: (Boolean) -> Unit = {},
@@ -284,7 +284,7 @@ fun SettingsPage(
     onPlayerBgEnhanceChange: (Boolean) -> Unit = {},
     playerHyperBg: Boolean = false,
     onPlayerHyperBgChange: (Boolean) -> Unit = {},
-    playerWaveformSlider: Boolean = true,
+    playerWaveformSlider: Boolean = false,
     onPlayerWaveformSliderChange: (Boolean) -> Unit = {},
     playerLyricsWordEffect: Boolean = true,
     onPlayerLyricsWordEffectChange: (Boolean) -> Unit = {},
@@ -298,7 +298,7 @@ fun SettingsPage(
     onPlayerCoverBlurDarkenChange: (Float) -> Unit = {},
     playerAudioReactive: Boolean = true,
     onPlayerAudioReactiveChange: (Boolean) -> Unit = {},
-    playerLyricBlur: Boolean = true,
+    playerLyricBlur: Boolean = false,
     onPlayerLyricBlurChange: (Boolean) -> Unit = {},
     playerLyricBlurAmount: Float = 10f,
     onPlayerLyricBlurAmountChange: (Float) -> Unit = {},
@@ -306,7 +306,7 @@ fun SettingsPage(
     onPlayerTapCoverToLyricsChange: (Boolean) -> Unit = {},
     playerCompactControls: Boolean = false,
     onPlayerCompactControlsChange: (Boolean) -> Unit = {},
-    playerMinimalistControls: Boolean = false,
+    playerMinimalistControls: Boolean = true,
     onPlayerMinimalistControlsChange: (Boolean) -> Unit = {},
     playerShowTopFavorite: Boolean = false,
     onPlayerShowTopFavoriteChange: (Boolean) -> Unit = {},
@@ -2439,7 +2439,7 @@ fun SettingsPlayerContent(
     onPlayerTapCoverToLyricsChange: (Boolean) -> Unit,
     playerCompactControls: Boolean,
     onPlayerCompactControlsChange: (Boolean) -> Unit,
-    playerMinimalistControls: Boolean = false,
+    playerMinimalistControls: Boolean = true,
     onPlayerMinimalistControlsChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -2534,7 +2534,11 @@ fun SettingsPlayerContent(
                 title = "波浪进度条",
                 subtitle = "自绘正弦波进度条，播放时波浪流动，加载时脉冲动画",
                 checked = playerWaveformSlider,
-                onCheckedChange = onPlayerWaveformSliderChange
+                onCheckedChange = { enabled ->
+                    onPlayerWaveformSliderChange(enabled)
+                    // 与「简约风控件」互斥：开启一方自动关闭另一方
+                    if (enabled && playerMinimalistControls) onPlayerMinimalistControlsChange(false)
+                }
             )
         }
 
@@ -2759,7 +2763,11 @@ fun SettingsPlayerContent(
                 title = "简约风控件",
                 subtitle = "采用胶囊形扁平进度条与极简实心播放控制按钮",
                 checked = playerMinimalistControls,
-                onCheckedChange = onPlayerMinimalistControlsChange
+                onCheckedChange = { enabled ->
+                    onPlayerMinimalistControlsChange(enabled)
+                    // 与「波浪进度条」互斥：开启一方自动关闭另一方
+                    if (enabled && playerWaveformSlider) onPlayerWaveformSliderChange(false)
+                }
             )
         }
     }

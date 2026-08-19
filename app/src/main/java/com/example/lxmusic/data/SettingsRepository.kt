@@ -251,7 +251,7 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PLAYER_DYNAMIC_BG, value).apply()
         }
     private var _playerDynamicBg: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_DYNAMIC_BG, true)
+        prefs.getBoolean(Keys.PLAYER_DYNAMIC_BG, false)
     )
 
     var playerRoundAlbum: Boolean
@@ -329,7 +329,7 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PLAYER_WAVEFORM_SLIDER, value).apply()
         }
     private var _playerWaveformSlider: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_WAVEFORM_SLIDER, true)
+        prefs.getBoolean(Keys.PLAYER_WAVEFORM_SLIDER, false)
     )
 
     // ==================== 逐字歌词动效 ====================
@@ -401,7 +401,7 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PLAYER_LYRIC_BLUR, value).apply()
         }
     private var _playerLyricBlur: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_LYRIC_BLUR, true)
+        prefs.getBoolean(Keys.PLAYER_LYRIC_BLUR, false)
     )
 
     var playerLyricBlurAmount: Float
@@ -453,7 +453,7 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PLAYER_MINIMALIST_CONTROLS, value).apply()
         }
     private var _playerMinimalistControls: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_MINIMALIST_CONTROLS, false)
+        prefs.getBoolean(Keys.PLAYER_MINIMALIST_CONTROLS, true)
     )
 
     // ==================== 歌词显示（播放器菜单-歌词设置） ====================
@@ -465,7 +465,7 @@ class SettingsRepository(context: Context) {
             prefs.edit().putFloat(Keys.PLAYER_LYRIC_FONT_SIZE, value).apply()
         }
     private var _playerLyricFontSize: Float by mutableFloatStateOf(
-        prefs.getFloat(Keys.PLAYER_LYRIC_FONT_SIZE, 20f)
+        prefs.getFloat(Keys.PLAYER_LYRIC_FONT_SIZE, 35f)
     )
 
     var playerLyricFontWeight: Float
@@ -475,7 +475,7 @@ class SettingsRepository(context: Context) {
             prefs.edit().putFloat(Keys.PLAYER_LYRIC_FONT_WEIGHT, value).apply()
         }
     private var _playerLyricFontWeight: Float by mutableFloatStateOf(
-        prefs.getFloat(Keys.PLAYER_LYRIC_FONT_WEIGHT, 500f)
+        prefs.getFloat(Keys.PLAYER_LYRIC_FONT_WEIGHT, 600f)
     )
 
     var playerLyricAlignment: String
@@ -517,7 +517,7 @@ class SettingsRepository(context: Context) {
             prefs.edit().putString(Keys.PLAYER_COVER_LYRIC_ALIGNMENT, value).apply()
         }
     private var _playerCoverLyricAlignment: String by mutableStateOf(
-        prefs.getString(Keys.PLAYER_COVER_LYRIC_ALIGNMENT, "center") ?: "center"
+        prefs.getString(Keys.PLAYER_COVER_LYRIC_ALIGNMENT, "left") ?: "left"
     )
 
     // ==================== 播放设置（对齐 Neri） ====================
