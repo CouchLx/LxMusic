@@ -48,6 +48,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ColorLens
 import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MusicNote
@@ -84,6 +86,8 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -107,6 +111,8 @@ import com.example.lxmusic.KuGouApi
 import com.example.lxmusic.UpdateChecker
 import com.example.lxmusic.UpdateInfo
 import com.example.lxmusic.VipConfigManager
+import com.example.lxmusic.CollectionBackup
+import com.example.lxmusic.CollectionBackupIO
 import com.example.lxmusic.MusicDatabase
 import com.example.lxmusic.ui.components.IOLoadingIndicator
 import com.example.lxmusic.ui.components.ThemeCustomizationSection
@@ -116,6 +122,7 @@ import com.example.lxmusic.ui.components.NavBarCustomizationSection
 import com.example.lxmusic.ui.theme.PALETTE_STYLES
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import org.json.JSONArray
 import org.json.JSONObject
@@ -349,7 +356,11 @@ fun SettingsPage(
     hapticEnabled: Boolean = true,
     onHapticEnabledChange: (Boolean) -> Unit = {},
     preferHighRefreshRate: Boolean = false,
-    onPreferHighRefreshRateChange: (Boolean) -> Unit = {}
+    onPreferHighRefreshRateChange: (Boolean) -> Unit = {},
+    favoriteToKugou: Boolean = false,
+    onFavoriteToKugouChange: (Boolean) -> Unit = {},
+    favoriteSyncLocal: Boolean = false,
+    onFavoriteSyncLocalChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val authPrefs = remember { context.getSharedPreferences("auth", Context.MODE_PRIVATE) }
@@ -531,6 +542,14 @@ fun SettingsPage(
                                                 .remove("history_songs_json")
                                                 .remove("style_songs_json")
                                                 .apply()
+                                            // 清掉「我的」页缓存的在线歌单（带账号标识）
+                                            val minePrefs = context.getSharedPreferences("mine_state", Context.MODE_PRIVATE)
+                                            minePrefs.edit()
+                                                .remove("playlists_json")
+                                                .remove("playlists_json_uid")
+                                                .apply()
+                                            // 清掉酷狗「喜欢」歌单的缓存，避免串账号
+                                            KuGouApi.clearKugouLikeCache()
                                             scope.launch(Dispatchers.IO) {
                                                 try {
                                                     val db = MusicDatabase.getDatabase(context)
@@ -704,7 +723,11 @@ fun SettingsPage(
                         hapticEnabled = hapticEnabled,
                         onHapticEnabledChange = onHapticEnabledChange,
                         preferHighRefreshRate = preferHighRefreshRate,
-                        onPreferHighRefreshRateChange = onPreferHighRefreshRateChange
+                        onPreferHighRefreshRateChange = onPreferHighRefreshRateChange,
+                        favoriteToKugou = favoriteToKugou,
+                        onFavoriteToKugouChange = onFavoriteToKugouChange,
+                        favoriteSyncLocal = favoriteSyncLocal,
+                        onFavoriteSyncLocalChange = onFavoriteSyncLocalChange
                     )
                 }
 
@@ -1367,7 +1390,11 @@ internal fun SettingsGeneralContent(
     hapticEnabled: Boolean = true,
     onHapticEnabledChange: (Boolean) -> Unit = {},
     preferHighRefreshRate: Boolean = false,
-    onPreferHighRefreshRateChange: (Boolean) -> Unit = {}
+    onPreferHighRefreshRateChange: (Boolean) -> Unit = {},
+    favoriteToKugou: Boolean = false,
+    onFavoriteToKugouChange: (Boolean) -> Unit = {},
+    favoriteSyncLocal: Boolean = false,
+    onFavoriteSyncLocalChange: (Boolean) -> Unit = {}
 ) {
     val settingsContext = LocalContext.current
     Column {
@@ -1528,6 +1555,109 @@ internal fun SettingsGeneralContent(
         }
     )
 
+    Spacer(modifier = Modifier.height(12.dp))
+
+    // 收藏到酷狗官方列表（默认关闭；开启后收藏/喜欢写入酷狗账号的喜欢歌单）
+    var favoriteToKugouLocal by remember { mutableStateOf(favoriteToKugou) }
+    SettingsSwitchItem(
+        icon = Icons.Default.Favorite,
+        title = "收藏到酷狗官方列表",
+        description = "开启后「喜欢/收藏」歌曲写入酷狗账号的喜欢歌单，关闭恢复本地收藏",
+        checked = favoriteToKugouLocal,
+        onCheckedChange = { enabled ->
+            favoriteToKugouLocal = enabled
+            settingsPrefs.edit().putBoolean("favorite_to_kugou", enabled).apply()
+            onFavoriteToKugouChange(enabled)
+        }
+    )
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    // 收藏的歌曲同步到本地收藏（依赖上方官方收藏开启，关闭时置灰不可点）
+    var syncLocalFavoriteLocal by remember { mutableStateOf(favoriteSyncLocal) }
+    SettingsSwitchItem(
+        icon = Icons.Default.FavoriteBorder,
+        title = "收藏的歌曲同步到本地收藏",
+        description = "开启官方收藏后，喜欢/收藏的歌曲同时加入本地“我的收藏”",
+        checked = syncLocalFavoriteLocal && favoriteToKugouLocal,
+        onCheckedChange = { enabled ->
+            syncLocalFavoriteLocal = enabled
+            settingsPrefs.edit().putBoolean("favorite_sync_local", enabled).apply()
+            onFavoriteSyncLocalChange(enabled)
+        },
+        enabled = favoriteToKugouLocal
+    )
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    // ===== 本地收藏数据导出 / 导入（防止卸载丢失本地收藏） =====
+    val backupScope = rememberCoroutineScope()
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            backupScope.launch(Dispatchers.IO) {
+                try {
+                    val dao = MusicDatabase.getDatabase(settingsContext).collectionDao()
+                    settingsContext.contentResolver.openOutputStream(uri)?.use { out ->
+                        CollectionBackupIO.export(dao, out)
+                    }
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(settingsContext, "导出成功", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(settingsContext, "导出失败: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            backupScope.launch(Dispatchers.IO) {
+                try {
+                    val db = MusicDatabase.getDatabase(settingsContext)
+                    val dao = db.collectionDao()
+                    var backup: com.example.lxmusic.CollectionBackup? = null
+                    settingsContext.contentResolver.openInputStream(uri)?.use { input ->
+                        backup = CollectionBackupIO.import(db, dao, input)
+                    }
+                    val b = backup
+                    withContext(Dispatchers.Main) {
+                        if (b != null) {
+                            android.widget.Toast.makeText(
+                                settingsContext,
+                                "导入成功（歌曲 ${b.collectedSongs.size + b.likedSongs.size}，歌单 ${b.playlists.size + b.likedPlaylists.size}）",
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
+                        } else {
+                            android.widget.Toast.makeText(settingsContext, "导入失败：文件格式不正确", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(settingsContext, "导入失败: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+    SettingsChoiceItem(
+        title = "本地收藏数据导出",
+        subtitle = "把本地收藏的歌曲、歌单导出为一个备份文件，防止卸载丢失",
+        currentLabel = "",
+        onClick = { exportLauncher.launch("lxmusic_collection_backup.json") }
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    SettingsChoiceItem(
+        title = "导入本地收藏数据",
+        subtitle = "选择之前导出的备份文件恢复（会覆盖现有本地收藏）",
+        currentLabel = "",
+        onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }
+    )
     Spacer(modifier = Modifier.height(12.dp))
 
     // UI 缩放（点击打开对话框，应用后立即生效）

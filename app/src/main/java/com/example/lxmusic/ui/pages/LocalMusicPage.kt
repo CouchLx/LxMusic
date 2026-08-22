@@ -503,7 +503,8 @@ fun LocalMusicPage(
                 song = song,
                 onDismiss = { contextSong = null },
                 onAddToQueueNext = { onAddToQueueNext(song) },
-                showCollectionActions = false
+                showCollectionActions = false,
+                showOnlyPlaylistAdd = true
             )
         }
     }

@@ -11,6 +11,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,19 +24,24 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -58,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -78,6 +85,7 @@ import com.example.lxmusic.model.SongInfo
 import com.example.lxmusic.ui.components.PlaylistCard
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -90,7 +98,10 @@ fun MinePage(
     onAvatarClick: () -> Unit,
     onPlaylistDetailClick: (UserPlaylistItem) -> Unit = {},
     onCollectionDetailClick: (String, Long) -> Unit = { _, _ -> },
-    onManagePlaylists: () -> Unit = {}
+    onManagePlaylists: () -> Unit = {},
+    onManageKugouPlaylists: () -> Unit = {},
+    listState: LazyListState = rememberLazyListState(),
+    initialScrollOffset: Int = 0
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -104,7 +115,26 @@ fun MinePage(
 
     val gson = remember { Gson() }
     val minePrefs = remember { context.getSharedPreferences("mine_state", Context.MODE_PRIVATE) }
-    var playlists by remember { mutableStateOf<List<UserPlaylistItem>>(emptyList()) }
+    // 官方收藏模式：歌单区把“喜欢镜像”歌单（本地先写）持久置顶显示
+    val mineSettingsPrefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
+    val kugouFavOn = mineSettingsPrefs.getBoolean("favorite_to_kugou", false)
+    // 歌单首屏直接从缓存同步初始化（带账号标识 + 本地顺序），保证首帧就有完整高度，
+    // 避免 LazyListState 在“空内容”时恢复偏移被夹回顶部
+    fun loadCachedPlaylists(): List<UserPlaylistItem> {
+        val uid = authPrefs.getLong("userid", 0)
+        val cached = minePrefs.getString("playlists_json", null)
+        if (!cached.isNullOrBlank() && minePrefs.getLong("playlists_json_uid", 0L) == uid) {
+            try {
+                val type = TypeToken.getParameterized(List::class.java, UserPlaylistItem::class.java).type
+                val list: List<UserPlaylistItem> = gson.fromJson(cached, type)
+                return KuGouApi.applyLocalPlaylistOrder(list, minePrefs.getString("playlists_order_$uid", null))
+            } catch (_: Exception) {}
+        }
+        return emptyList()
+    }
+    var playlists by remember { mutableStateOf(loadCachedPlaylists()) }
+    // 本地「喜欢镜像」歌单的 listid（用于卡片显示"已收藏"标签）
+    var likedMirrorIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     var playlistLoading by remember { mutableStateOf(false) }
     var playlistError by remember { mutableStateOf<String?>(null) }
     var playlistExpanded by remember { mutableStateOf(minePrefs.getBoolean("playlist_expanded", false)) }
@@ -116,42 +146,39 @@ fun MinePage(
     var showCreateDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
 
+    // 本地自建歌单排序
+    fun applyLocalUserPlaylistsOrder(list: List<UserPlaylistEntity>): List<UserPlaylistEntity> {
+        val orderStr = minePrefs.getString("local_playlists_order", null)
+        if (orderStr.isNullOrBlank() || list.size <= 1) return list
+        val idList = orderStr.split(",").mapNotNull { it.trim().toLongOrNull() }
+        val orderMap = idList.withIndex().associate { it.value to it.index }
+        return list.sortedWith(compareBy({ orderMap[it.id] ?: Int.MAX_VALUE }, { it.id }))
+    }
+
+    // 本账号的歌单本地显示顺序（仅本地，酷狗服务端顺序不变）
+    fun applyLocalOrder(list: List<UserPlaylistItem>): List<UserPlaylistItem> {
+        val uid = authPrefs.getLong("userid", 0)
+        return KuGouApi.applyLocalPlaylistOrder(list, minePrefs.getString("playlists_order_$uid", null))
+    }
+
+    fun saveLocalOrder(ordered: List<UserPlaylistItem>) {
+        val uid = authPrefs.getLong("userid", 0)
+        minePrefs.edit().putString("playlists_order_$uid", KuGouApi.encodePlaylistOrder(ordered)).apply()
+    }
+
+    // 我的页滚动：LazyListState 由外层（AppScaffold）提升创建并传入，切 tab 复用同一对象；
+    // 首屏渲染稳定后（已有缓存歌单、高度完整）再滚回保存位置，并后台刷新数据（列表保持不塌陷）
+    val scrollState = listState
+    var contentReady by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { contentReady = true }
+
     // 加载本地收藏数据
     LaunchedEffect(collectionExpanded) {
         if (collectionExpanded) {
             scope.launch(Dispatchers.IO) {
                 collectedSongCount = collectionDao.getCollectedSongCount()
-                userPlaylists = collectionDao.getAllUserPlaylists()
-            }
-        }
-    }
-
-    // 从缓存加载歌单
-    LaunchedEffect(Unit) {
-        val cached = minePrefs.getString("playlists_json", null)
-        if (!cached.isNullOrBlank()) {
-            try {
-                val type = TypeToken.getParameterized(List::class.java, UserPlaylistItem::class.java).type
-                val list: List<UserPlaylistItem> = gson.fromJson(cached, type)
-                if (list.isNotEmpty()) playlists = list
-            } catch (_: Exception) {}
-        }
-        // 如果已展开且没有缓存数据，自动加载
-        if (playlistExpanded && playlists.isEmpty() && isLoggedIn) {
-            val token = authPrefs.getString("token", "") ?: ""
-            val userid = authPrefs.getLong("userid", 0)
-            if (token.isNotBlank() && userid != 0L) {
-                playlistLoading = true
-                scope.launch(Dispatchers.IO) {
-                    try {
-                        val resp = KuGouApi.service.getUserPlaylist(token, userid)
-                        if (resp.status == 1 && resp.data?.list != null) {
-                            playlists = resp.data.list
-                            minePrefs.edit().putString("playlists_json", gson.toJson(playlists)).apply()
-                        }
-                    } catch (_: Exception) {}
-                    finally { playlistLoading = false }
-                }
+                val raw = collectionDao.getAllUserPlaylists()
+                userPlaylists = applyLocalUserPlaylistsOrder(raw)
             }
         }
     }
@@ -166,8 +193,38 @@ fun MinePage(
             try {
                 val resp = KuGouApi.service.getUserPlaylist(token, userid)
                 if (resp.status == 1 && resp.data?.list != null) {
-                    playlists = resp.data.list
-                    minePrefs.edit().putString("playlists_json", gson.toJson(playlists)).apply()
+                    if (kugouFavOn) {
+                        // 官方模式：删除黑名单过滤（已删的不回弹）→ 稳定顺序（新歌单首次出现即固化，刷新不跳）→ 分组（我喜欢置顶/自建/收藏/镜像）
+                        val orderRaw = minePrefs.getString("playlists_order_$userid", null)
+                        val blacklist = KuGouApi.readDeletedPlaylistIds(minePrefs, userid)
+                        val raw = resp.data.list
+                        val available = raw.filter { it.listid !in blacklist }
+                        // 只有服务器确认不再返回该歌单（官方已真正删除）才释放黑名单；还返回说明官方没删掉 → 黑名单保留、本地一直隐藏
+                        blacklist.forEach { id ->
+                            if (raw.none { it.listid == id }) KuGouApi.removeDeletedPlaylistId(minePrefs, userid, id)
+                        }
+                        val mirror = collectionDao.getAllLikedPlaylists().map {
+                            com.example.lxmusic.UserPlaylistItem(
+                                // 镜像用负 listid：官方歌单 listid 都是正数（1、2…），避免与本地自增 id 撞号导致列表 key 重复崩溃
+                                listid = -it.id,
+                                listname = it.name,
+                                pic = it.coverUrl,
+                                global_collection_id = it.gid,
+                                songcount = it.songcount
+                            )
+                        }
+                        val (stable, newOrder) = KuGouApi.stabilizePlaylistOrder(available, orderRaw)
+                        if (newOrder != orderRaw) minePrefs.edit().putString("playlists_order_$userid", newOrder).apply()
+                        val (grouped, mirrorIds) = KuGouApi.groupPlaylists(stable, mirror, userid, "我喜欢")
+                        likedMirrorIds = mirrorIds
+                        playlists = grouped
+                    } else {
+                        playlists = KuGouApi.mergeLocallyAddedPlaylists(applyLocalOrder(resp.data.list))
+                    }
+                    minePrefs.edit()
+                        .putString("playlists_json", gson.toJson(playlists))
+                        .putLong("playlists_json_uid", userid)
+                        .apply()
                 } else {
                     playlistError = "获取歌单失败"
                 }
@@ -179,9 +236,37 @@ fun MinePage(
         }
     }
 
-    // 每次进入页面自动刷新歌单
-    LaunchedEffect(Unit) {
-        if (isLoggedIn) loadPlaylists()
+    // 首屏渲染稳定后（已有缓存歌单、高度完整）再滚回保存位置，并后台刷新数据（列表保持不塌陷）
+    LaunchedEffect(contentReady) {
+        if (contentReady) {
+            if (initialScrollOffset > 0) {
+                runCatching { scrollState.scrollToItem(0, initialScrollOffset) }
+            }
+            if (isLoggedIn && playlists.isNotEmpty()) {
+                loadPlaylists()
+            }
+        }
+    }
+
+    // 只在“账号/登录状态 真正变化”时清空重拉；重进同一账号不清空，
+    // 避免歌单区内容高度塌陷把 LazyListState 的滚动位置夹回顶部
+    val mineUserid = authPrefs.getLong("userid", 0)
+    val authKey = "$mineUserid-$isLoggedIn"
+    LaunchedEffect(mineUserid, isLoggedIn) {
+        if (authKey != minePrefs.getString("last_load_auth", null)) {
+            // 真正的账号切换 / 登录状态变化
+            minePrefs.edit().putString("last_load_auth", authKey).apply()
+            playlists = emptyList()
+            playlistError = null
+            if (isLoggedIn) {
+                loadPlaylists()
+            } else {
+                minePrefs.edit().remove("playlists_json").remove("playlists_json_uid").apply()
+            }
+        } else if (isLoggedIn && playlists.isEmpty()) {
+            // 同账号重进但没有数据：后台补拉一次
+            loadPlaylists()
+        }
     }
 
 
@@ -191,13 +276,17 @@ fun MinePage(
     }
     val navBarDp = with(LocalDensity.current) { navBarHeight.toDp() }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp)
-            .padding(bottom = 120.dp + navBarDp)
+    LazyColumn(
+        state = scrollState,
+        modifier = Modifier.fillMaxSize()
     ) {
+        item {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .padding(bottom = 120.dp + navBarDp)
+        ) {
         // 用户信息卡片
         Surface(
             modifier = Modifier
@@ -340,7 +429,7 @@ fun MinePage(
                     }
                     // 多选管理按钮
                     IconButton(onClick = { onManagePlaylists() }) {
-                        Icon(Icons.Default.SelectAll, "管理歌单", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(Icons.Default.Checklist, "管理歌单", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     // 折叠按钮
                     IconButton(onClick = {
@@ -453,9 +542,13 @@ fun MinePage(
                         onClick = {
                             if (newPlaylistName.isNotBlank()) {
                                 scope.launch(Dispatchers.IO) {
-                                    collectionDao.createPlaylist(UserPlaylistEntity(name = newPlaylistName.trim()))
-                                    userPlaylists = collectionDao.getAllUserPlaylists()
+                                    val newId = collectionDao.createPlaylist(UserPlaylistEntity(name = newPlaylistName.trim()))
+                                    val raw = collectionDao.getAllUserPlaylists()
+                                    val ordered = applyLocalUserPlaylistsOrder(raw)
+                                    val newOrderStr = ordered.joinToString(",") { it.id.toString() }
+                                    minePrefs.edit().putString("local_playlists_order", newOrderStr).apply()
                                     withContext(Dispatchers.Main) {
+                                        userPlaylists = ordered
                                         showCreateDialog = false
                                         newPlaylistName = ""
                                         Toast.makeText(context, "歌单已创建", Toast.LENGTH_SHORT).show()
@@ -493,6 +586,13 @@ fun MinePage(
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f)
                     )
+                    IconButton(onClick = onManageKugouPlaylists) {
+                        Icon(
+                            Icons.Default.Checklist,
+                            contentDescription = "管理歌单",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     IconButton(onClick = {
                         playlistExpanded = false
                         minePrefs.edit().putBoolean("playlist_expanded", false).apply()
@@ -506,7 +606,7 @@ fun MinePage(
                 }
 
                 when {
-                    playlistLoading -> {
+                    playlistLoading && playlists.isEmpty() -> {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -539,7 +639,14 @@ fun MinePage(
                             playlists.forEach { playlist ->
                                 PlaylistCard(
                                     playlist = playlist,
-                                    onClick = { onPlaylistDetailClick(playlist) }
+                                    onClick = { onPlaylistDetailClick(playlist) },
+                                    countOverride = if (kugouFavOn && playlist.listname == "我喜欢") {
+                                        // 「我喜欢的」：用官方∪本地的合并数量（进页面后记录），未记录时用官方缓存数
+                                        KuGouApi.likedCount() ?: playlist.songcount
+                                    } else {
+                                        KuGouApi.playlistRealCount(playlist.listid) ?: playlist.songcount
+                                    },
+                                    countLabel = if (playlist.listid in likedMirrorIds && playlist.songcount <= 0) "已收藏" else null
                                 )
                             }
                         }
@@ -548,6 +655,8 @@ fun MinePage(
 
                 Spacer(modifier = Modifier.height(16.dp))
             }
+        }
+        }
         }
     }
 }

@@ -205,6 +205,8 @@ fun LoginPage(onBack: () -> Unit, onLoginSuccess: (String) -> Unit) {
                             // 更新 API 认证信息
                             KuGouApi.token = token ?: ""
                             KuGouApi.userid = userid.toString()
+                            // 切换账号后清掉上一个账号的「喜欢」歌单缓存
+                            KuGouApi.clearKugouLikeCache()
                             // 清除旧用户的个性化推荐缓存
                             val homePrefs = context.getSharedPreferences("home_cache", Context.MODE_PRIVATE)
                             homePrefs.edit()

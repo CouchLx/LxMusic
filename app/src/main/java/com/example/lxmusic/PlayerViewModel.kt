@@ -24,6 +24,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -75,8 +78,18 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private data class PendingPlay(val songs: List<SongInfo>, val index: Int)
     private var pendingPlay: PendingPlay? = null
 
+    // 「下一首播放」排队偏移：当前播放歌曲后已连续插入的待播歌曲数（FIFO 排队用）
+    private var nextInsertOffset = 0
+
     init {
         connectController()
+        // 当前播放歌曲变化（切歌/播放完成/重新播放）时，重置排队偏移
+        viewModelScope.launch {
+            _uiState.map { it.currentIndex }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { nextInsertOffset = 0 }
+        }
     }
 
     fun onApiReady() {
@@ -384,12 +397,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     fun addToQueueNext(song: SongInfo) {
         val q = _uiState.value.queue
         val currentIdx = _uiState.value.currentIndex
-        val targetIndex = if (q.isEmpty()) 0 else (currentIdx + 1).coerceIn(0, q.size)
+        // FIFO 排队：连续添加时依次排在上一次插入的待播歌曲之后
+        val targetIndex = if (q.isEmpty()) 0 else (currentIdx + 1 + nextInsertOffset).coerceIn(0, q.size)
 
         val existingIdx = q.indexOfFirst { it.filePath == song.filePath }
         val newQ: List<SongInfo>
         if (existingIdx >= 0) {
-            // 已在队列中：移到下一首位置（避免重复 filePath 导致列表 key 冲突）
+            // 已在队列中：移到目标位置（避免重复 filePath 导致列表 key 冲突）
             newQ = q.toMutableList().apply {
                 removeAt(existingIdx)
                 var t = targetIndex
@@ -399,8 +413,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         } else {
             newQ = q.toMutableList().apply { add(targetIndex, song) }
         }
+        nextInsertOffset++
 
-        // 更新 currentIndex（按当前播放路径重新定位）
+        // 更新 currentIndex（按当前播放路径重新定位；值不变时 StateFlow 去重，不会触发 offset 重置）
         val currentPath = _uiState.value.currentPlayingPath
         val newIndex = newQ.indexOfFirst { it.filePath == currentPath }.coerceAtLeast(0)
         _uiState.update { it.copy(queue = newQ, currentIndex = newIndex) }

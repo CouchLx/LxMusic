@@ -362,7 +362,23 @@ data class TopCardSong(
 data class AddToPlaylistResponse(
     val status: Int = 0,
     val errcode: Int = 0,
+    @com.google.gson.annotations.SerializedName("errmsg", alternate = ["error_msg", "err_msg", "msg", "error", "message"])
+    val errmsg: String? = null,
     val data: Any? = null
+)
+
+// 新建歌单响应 (playlist/add → v5/add_list)
+data class CreatePlaylistData(
+    @com.google.gson.annotations.SerializedName("newlistid", alternate = ["listid", "list_id"])
+    val newlistid: Long = 0,
+    @com.google.gson.annotations.SerializedName("listid", alternate = ["newlistid", "list_id"])
+    val listid: Long = 0
+)
+
+data class CreatePlaylistResponse(
+    val status: Int = 0,
+    val errcode: Int = 0,
+    val data: CreatePlaylistData? = null
 )
 
 // ==================== 歌词 ====================
@@ -420,7 +436,10 @@ data class UserPlaylistItem(
     val list_create_userid: Long = 0,
     @com.google.gson.annotations.SerializedName("is_def")
     val is_default: Int = 0,
-    val global_collection_id: String? = null
+    val global_collection_id: String? = null,
+    // 歌单版本号：酷狗增删歌曲需要带当前版本，否则会返回“版本不符”错误
+    @com.google.gson.annotations.SerializedName("list_ver", alternate = ["listver"])
+    val list_ver: Long = 0
 ) {
     val coverUrl: String
         get() {
@@ -454,7 +473,10 @@ data class PlaylistTracksNewData(
     @com.google.gson.annotations.SerializedName("info", alternate = ["songs", "list", "songlist", "lists", "data"])
     val info: List<PlaylistTrackSong>? = null,
     @com.google.gson.annotations.SerializedName("count", alternate = ["total", "totalcount", "total_count", "songcount"])
-    val count: Int = 0
+    val count: Int = 0,
+    // 歌单版本号：增删歌曲需要带当前版本，否则酷狗返厂会拒绝（版本不符）
+    @com.google.gson.annotations.SerializedName("list_ver", alternate = ["listver"])
+    val list_ver: Long = 0
 )
 
 data class PlaylistTrackSingerInfo(
@@ -995,15 +1017,43 @@ interface KuGouService {
     @GET("playlist/tracks/add")
     suspend fun addToPlaylist(
         @Query("listid") listId: Long,
-        @Query("data") data: String
+        @Query("data") data: String,
+        @Query("list_ver") listVer: Long = 0
     ): AddToPlaylistResponse
 
     // 从歌单删除歌曲
     @GET("playlist/tracks/del")
     suspend fun removeFromPlaylist(
         @Query("listid") listId: Long,
-        @Query("fileids") fileids: String
+        @Query("fileids") fileids: String,
+        @Query("list_ver") listVer: Long = 0
     ): AddToPlaylistResponse
+
+    // 新建歌单 (playlist/add；type=0 创建空歌单，source=1) —— 返回原始 body 手动解析
+    @GET("playlist/add")
+    suspend fun createPlaylistRaw(
+        @Query("type") type: Int = 0,
+        @Query("name") name: String,
+        @Query("is_pri") isPri: Int = 0,
+        @Query("source") source: Int = 1
+    ): okhttp3.ResponseBody
+
+    // 删除/取消收藏歌单 (playlist/del → v2/delete_list)
+    @GET("playlist/del")
+    suspend fun deletePlaylist(
+        @Query("listid") listId: Long
+    ): AddToPlaylistResponse
+
+    // 收藏歌单到酷狗账号 (playlist/add?type=1 → v5/add_list 收藏已存在的在线歌单) —— 原始 body 手动解析
+    @GET("playlist/add")
+    suspend fun collectPlaylistRaw(
+        @Query("type") type: Int = 1,
+        @Query("source") source: Int = 1,
+        @Query("name") name: String,
+        @Query("list_create_userid") listCreateUserId: Long = 0,
+        @Query("list_create_listid") listCreateListid: Long = 0,
+        @Query("list_create_gid") listCreateGid: String = ""
+    ): okhttp3.ResponseBody
 }
 
 // ==================== 单例 ====================
@@ -1065,6 +1115,544 @@ object KuGouApi {
     private var _service: KuGouService? = null
     val service: KuGouService
         get() = _service ?: createService().also { _service = it }
+
+    // ==================== 收藏到酷狗（喜欢/歌单增删） ====================
+
+    private var _kugouLikePlaylist: UserPlaylistItem? = null
+    private var _kugouLikeHashes: Set<String>? = null
+    // 喜欢歌单内 hash -> fileid（删除优先用 fileid，比 hash 更稳）
+    private var _kugouLikeFileIds: Map<String, Long> = emptyMap()
+    private var _kugouLikeHashesAt: Long = 0L
+
+    /** 统一规范化歌曲 hash（去掉 |后缀、去空格、转大写），避免同一首歌大小写不同导致去重失败 */
+    fun normalizedHash(raw: String): String = raw.substringBefore("|").trim().uppercase()
+
+    /** 解析当前账号的「喜欢」歌单（优先名字含「喜欢」的，如"我喜欢的音乐/我喜欢"；否则退回默认歌单），内存缓存 */
+    suspend fun resolveKugouLikePlaylist(): UserPlaylistItem? {
+        _kugouLikePlaylist?.let { return it }
+        if (token.isBlank() || userid.isBlank()) return null
+        val uid = userid.toLongOrNull() ?: return null
+        return try {
+            val resp = service.getUserPlaylist(token, uid)
+            val list = resp.data?.list ?: return null
+            val defaults = list.filter { it.is_default == 1 }
+            if (defaults.isNotEmpty()) {
+                android.util.Log.i(
+                    "LxMusic_KugouLike",
+                    "账号默认歌单: " + defaults.joinToString(" | ") { "${it.listname ?: ""}(${it.listid})" }
+                )
+            }
+            val picked = list.firstOrNull { it.listname?.contains("喜欢") == true }
+                ?: defaults.firstOrNull()
+                ?: list.firstOrNull()
+            picked?.let {
+                android.util.Log.i(
+                    "LxMusic_KugouLike",
+                    "收藏目标歌单: ${it.listname ?: ""} (listid=${it.listid}, is_def=${it.is_default}, list_ver=${it.list_ver})"
+                )
+            }
+            _kugouLikePlaylist = picked
+            picked
+        } catch (e: Exception) {
+            android.util.Log.w("LxMusic_KugouLike", "解析喜欢歌单失败: ${e.message}")
+            null
+        }
+    }
+
+    /** 拉取「喜欢」歌单内的歌曲（hash 集合 + hash->fileid 映射），带 60 秒新鲜度缓存，供红心判亮与删除 */
+    suspend fun kugouLikeHashes(refresh: Boolean = false): Set<String> {
+        val now = System.currentTimeMillis()
+        if (!refresh && _kugouLikeHashes != null && now - _kugouLikeHashesAt < 60_000L) {
+            return _kugouLikeHashes!!
+        }
+        val playlist = resolveKugouLikePlaylist() ?: return _kugouLikeHashes ?: emptySet()
+        val hashes = mutableSetOf<String>()
+        val fileIds = HashMap<String, Long>()
+        try {
+            var page = 1
+            while (page <= 20) {
+                val resp = service.getPlaylistTracksNew(playlist.listid, page, 100)
+                val info = resp.data?.info.orEmpty()
+                info.forEach { t ->
+                    val h = t.hash
+                    if (h != null && h.isNotBlank()) {
+                        val norm = normalizedHash(h)
+                        hashes.add(norm)
+                        if (t.fileid > 0) fileIds[norm] = t.fileid
+                    }
+                }
+                if (info.size < 100) break
+                if ((resp.data?.count ?: 0) in 1..(page * 100)) break
+                page++
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("LxMusic_KugouLike", "拉取喜欢歌单歌曲失败: ${e.message}")
+        }
+        _kugouLikeHashes = hashes
+        _kugouLikeFileIds = fileIds
+        _kugouLikeHashesAt = now
+        return hashes
+    }
+
+    /** 判断某首歌是否已在「喜欢」歌单（红心判亮用，统一大小写） */
+    suspend fun isSongLikedKugou(filePath: String): Boolean {
+        val key = normalizedHash(filePath)
+        if (key.isBlank()) return false
+        return kugouLikeHashes().contains(key)
+    }
+
+    /** 获取「喜欢」歌单里某个 hash 对应的 fileid（删除用），没有则 0 */
+    fun kugouLikeFileId(hash: String): Long = _kugouLikeFileIds[normalizedHash(hash)] ?: 0L
+
+    /** 拉取官方「喜欢」歌单里的全部歌曲（用于官方模式下「我喜欢的」列表：官方已有的 + 本地先写的合并显示） */
+    suspend fun fetchKugouLikeSongs(): List<SongInfo> {
+        val playlist = resolveKugouLikePlaylist() ?: return emptyList()
+        val gid = playlist.global_collection_id
+        val result = mutableListOf<SongInfo>()
+        try {
+            var page = 1
+            while (page <= 50) {
+                val list: List<SongInfo>
+                if (!gid.isNullOrBlank()) {
+                    val (s, _) = fetchSpecialPlaylistSongs(0L, gid, page, 100)
+                    list = s
+                } else {
+                    list = service.getPlaylistTracksNew(playlist.listid, page, 100).data?.info?.mapNotNull { t ->
+                        val h = t.hash ?: return@mapNotNull null
+                        SongInfo(
+                            title = t.title,
+                            artist = t.artist,
+                            filePath = "$h|${t.mixsongid}",
+                            albumArtUri = t.coverUrl,
+                            duration = t.durationMs,
+                            albumId = t.album_id,
+                            mixsongid = t.mixsongid
+                        )
+                    }.orEmpty()
+                }
+                if (list.isEmpty()) break
+                result.addAll(list)
+                if (list.size < 100) break
+                page++
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("LxMusic_KugouLike", "拉取官方喜欢歌曲失败: ${e.message}")
+        }
+        return result
+    }
+
+    private val kugouListVerCache = HashMap<Long, Long>()
+
+    /** 获取酷狗歌单当前的 list_ver（增删歌曲需要同步版本号，版本不符酷狗会拒绝），内存缓存 */
+    suspend fun fetchKugouListVer(listid: Long): Long {
+        if (listid <= 0) return 0L
+        kugouListVerCache[listid]?.let { return it }
+        return try {
+            val ver = service.getPlaylistTracksNew(listid, 1, 1).data?.list_ver ?: 0L
+            if (ver > 0) kugouListVerCache[listid] = ver
+            ver
+        } catch (e: Exception) {
+            android.util.Log.w("LxMusic_KugouLike", "获取歌单 $listid list_ver 失败: ${e.message}")
+            0L
+        }
+    }
+
+    /** 把一首歌加入指定酷狗歌单（喜欢歌单/自建歌单都走这里） */
+    suspend fun addSongToKugouPlaylist(listid: Long, song: SongInfo, listVer: Long = 0): Boolean {
+        val hash = song.filePath.substringBefore("|")
+        if (hash.isBlank() || listid <= 0) return false
+        val name = song.title.ifBlank { hash }
+        val data = "$name|$hash|${song.albumId}|${song.mixsongid}"
+        // 加歌对版本号宽松，不再额外请求 list_ver（删除才需要），减少一次往返
+        return try {
+            val t0 = System.currentTimeMillis()
+            val resp = service.addToPlaylist(listid, data, listVer)
+            val elapsed = System.currentTimeMillis() - t0
+            val ok = resp.status == 1 && resp.errcode == 0
+            android.util.Log.i(
+                "LxMusic_KugouLike",
+                "加歌到歌单 $listid: ok=$ok, status=${resp.status}, errcode=${resp.errcode}, errmsg=${resp.errmsg}, 耗时=${elapsed}ms"
+            )
+            if (ok) recordLocallyAdded(listid, hash, song)
+            ok
+        } catch (e: Exception) {
+            android.util.Log.w("LxMusic_KugouLike", "加歌到歌单 $listid 异常: ${e.message}")
+            false
+        }
+    }
+
+    /** 从指定酷狗歌单移除歌曲（按 hash） */
+    suspend fun removeFromKugouPlaylist(listid: Long, song: SongInfo, listVer: Long = 0): Boolean {
+        val hash = song.filePath.substringBefore("|")
+        if (hash.isBlank() || listid <= 0) return false
+        var ver = listVer
+        if (ver <= 0) ver = fetchKugouListVer(listid)
+        return try {
+            val t0 = System.currentTimeMillis()
+            val resp = service.removeFromPlaylist(listid, hash, ver)
+            val elapsed = System.currentTimeMillis() - t0
+            val ok = resp.status == 1 && resp.errcode == 0
+            android.util.Log.i(
+                "LxMusic_KugouLike",
+                "从歌单 $listid 删歌(hash): ok=$ok, status=${resp.status}, errcode=${resp.errcode}, errmsg=${resp.errmsg}, 耗时=${elapsed}ms"
+            )
+            ok
+        } catch (e: Exception) {
+            android.util.Log.w("LxMusic_KugouLike", "从歌单 $listid 删歌(hash)异常: ${e.message}")
+            false
+        }
+    }
+
+    /** 从指定酷狗歌单移除歌曲（按 fileid，更稳） */
+    suspend fun removeFromKugouPlaylistByFileid(listid: Long, fileid: Long, listVer: Long = 0): Boolean {
+        if (fileid <= 0 || listid <= 0) return false
+        var ver = listVer
+        if (ver <= 0) ver = fetchKugouListVer(listid)
+        return try {
+            val t0 = System.currentTimeMillis()
+            val resp = service.removeFromPlaylist(listid, fileid.toString(), ver)
+            val elapsed = System.currentTimeMillis() - t0
+            val ok = resp.status == 1 && resp.errcode == 0
+            android.util.Log.i(
+                "LxMusic_KugouLike",
+                "从歌单 $listid 删歌(fileid=$fileid): ok=$ok, status=${resp.status}, errcode=${resp.errcode}, errmsg=${resp.errmsg}, 耗时=${elapsed}ms"
+            )
+            ok
+        } catch (e: Exception) {
+            android.util.Log.w("LxMusic_KugouLike", "从歌单 $listid 删歌(fileid=$fileid)异常: ${e.message}")
+            false
+        }
+    }
+
+    /** 收藏到「喜欢」歌单 */
+    suspend fun addToKugouLike(song: SongInfo): Boolean {
+        val p = resolveKugouLikePlaylist() ?: return false
+        val ok = addSongToKugouPlaylist(p.listid, song, p.list_ver)
+        if (ok) noteKugouLikeAdded(song.filePath.substringBefore("|"))
+        return ok
+    }
+
+    /** 从「喜欢」歌单取消：优先按 fileid 删除，没有 fileid 再按 hash 删除 */
+    suspend fun removeFromKugouLike(song: SongInfo): Boolean {
+        val p = resolveKugouLikePlaylist() ?: return false
+        val hash = song.filePath.substringBefore("|")
+        var ok = false
+        val fileId = kugouLikeFileId(hash)
+        if (fileId > 0) {
+            ok = removeFromKugouPlaylistByFileid(p.listid, fileId, p.list_ver)
+        }
+        if (!ok) {
+            ok = removeFromKugouPlaylist(p.listid, song, p.list_ver)
+        }
+        if (ok) {
+            noteKugouLikeRemoved(hash)
+            recordLocallyRemoved(p.listid, hash)
+        }
+        return ok
+    }
+
+    /** 更新内存里的喜欢 hash 缓存（收藏成功后调用） */
+    fun noteKugouLikeAdded(hash: String) {
+        val norm = normalizedHash(hash)
+        if (norm.isBlank()) return
+        val s = _kugouLikeHashes
+        if (s != null) _kugouLikeHashes = s + norm
+    }
+
+    /** 更新内存里的喜欢 hash 缓存（取消收藏后调用） */
+    fun noteKugouLikeRemoved(hash: String) {
+        val norm = normalizedHash(hash)
+        if (norm.isBlank()) return
+        val s = _kugouLikeHashes
+        if (s != null) _kugouLikeHashes = s - norm
+        if (_kugouLikeFileIds.containsKey(norm)) _kugouLikeFileIds = _kugouLikeFileIds - norm
+    }
+
+    /** 清除酷狗「喜欢」歌单相关缓存（登录/退出/切换账号时调用，避免串账号） */
+    fun clearKugouLikeCache() {
+        _kugouLikePlaylist = null
+        _kugouLikeHashes = null
+        _kugouLikeFileIds = emptyMap()
+        _kugouLikeHashesAt = 0L
+        kugouListVerCache.clear()
+        playlistRealCounts.clear()
+        locallyAddedSongs.clear()
+        locallyRemovedHashes.clear()
+        locallyAddedPlaylists.clear()
+        collectedPlaylistListids.clear()
+        _likedCount = null
+    }
+
+    // ---- 云端歌单「真实歌曲数」/「本地乐观新增」缓存（酷狗读端同步慢，用于即时显示） ----
+
+    private val playlistRealCounts = HashMap<Long, Int>()
+
+    fun recordPlaylistRealCount(listid: Long, count: Int) {
+        if (listid <= 0 || count < 0) return
+        val cur = playlistRealCounts[listid]
+        if (cur == null || count > cur) playlistRealCounts[listid] = count
+    }
+
+    fun playlistRealCount(listid: Long): Int? = playlistRealCounts[listid]
+
+    // 「我喜欢的」数量：官方喜欢 ∪ 本地喜欢镜像 的合并数（由喜欢详情页记录，收藏/取消增减）
+    private var _likedCount: Int? = null
+
+    fun recordLikedCount(count: Int) {
+        if (count >= 0) _likedCount = count
+    }
+
+    fun likedCount(): Int? = _likedCount
+
+    fun bumpLikedCount(delta: Int) {
+        val cur = _likedCount
+        if (cur != null && cur + delta >= 0) _likedCount = cur + delta
+    }
+
+    private val locallyAddedSongs = HashMap<Long, MutableMap<String, SongInfo>>()
+
+    /** 记录一次成功加歌（用于详情页即时显示与卡片计数+1） */
+    fun recordLocallyAdded(listid: Long, hash: String, song: SongInfo) {
+        val norm = normalizedHash(hash)
+        if (listid <= 0 || norm.isBlank()) return
+        locallyAddedSongs.getOrPut(listid) { HashMap() }[norm] = song
+        recordPlaylistRealCount(listid, (playlistRealCounts[listid] ?: 0) + 1)
+    }
+
+    /** 记录一次成功删除（计数-1、移除本地乐观显示、标记已删除以便从列表过滤） */
+    fun recordLocallyRemoved(listid: Long, hash: String) {
+        val norm = normalizedHash(hash)
+        if (listid <= 0 || norm.isBlank()) return
+        locallyRemovedHashes.getOrPut(listid) { HashSet() }.add(norm)
+        locallyAddedSongs[listid]?.remove(norm)
+        val cur = playlistRealCounts[listid]
+        if (cur != null && cur > 0) playlistRealCounts[listid] = cur - 1
+    }
+
+    // 已删除的歌曲 hash（从列表显示中过滤，配合酷狗读端同步慢时的即时删除）
+    private val locallyRemovedHashes = HashMap<Long, MutableSet<String>>()
+
+    /** 只过滤本地已删除的歌（追加页用，避免多页时重复前置新增） */
+    fun filterLocallyRemoved(listid: Long, serverSongs: List<SongInfo>): List<SongInfo> {
+        val removed = locallyRemovedHashes[listid] ?: return serverSongs
+        if (removed.isEmpty()) return serverSongs
+        return serverSongs.filter { normalizedHash(it.filePath) !in removed }
+    }
+
+    /** 详情页合并：先滤掉本地已删除的歌，再前置本地乐观新增（按 hash 去重 + 歌名/歌手兜底） */
+    fun applyLocalOps(listid: Long, serverSongs: List<SongInfo>): List<SongInfo> {
+        val filtered = filterLocallyRemoved(listid, serverSongs)
+        val local = locallyAddedSongs[listid] ?: return filtered
+        if (local.isEmpty()) return filtered
+        val serverHashes = filtered.mapTo(HashSet()) { normalizedHash(it.filePath) }
+        val serverTitleKeys = filtered.mapTo(HashSet()) { titleArtistKey(it) }
+        val toPrepend = mutableListOf<SongInfo>()
+        val toDrop = mutableListOf<String>()
+        local.forEach { (key, song) ->
+            val norm = normalizedHash(key)
+            if (norm in serverHashes || titleArtistKey(song) in serverTitleKeys) {
+                // 酷狗已经同步到这首歌，不再需要本地假显示
+                toDrop.add(key)
+            } else {
+                toPrepend.add(song)
+            }
+        }
+        toDrop.forEach { locallyAddedSongs[listid]?.remove(it) }
+        if (toPrepend.isEmpty()) return filtered
+        return toPrepend.reversed() + filtered
+    }
+
+    /** 歌名+歌手 去重键（用于 hash 变体时的兜底去重） */
+    private fun titleArtistKey(song: SongInfo): String =
+        (song.title.trim() + "|" + song.artist.trim()).lowercase()
+
+    /** 按本地保存的顺序编号给歌单列表排序（未列出的新歌单追加到末尾） */
+    fun applyLocalPlaylistOrder(list: List<UserPlaylistItem>, orderRaw: String?): List<UserPlaylistItem> {
+        if (orderRaw.isNullOrBlank()) return list
+        val order = orderRaw.split(",").mapNotNull { it.toLongOrNull() }
+        if (order.isEmpty()) return list
+        val byId = list.associateBy { it.listid }
+        val ordered = order.mapNotNull { byId[it] }
+        val orderedIds = ordered.map { it.listid }.toSet()
+        return ordered + list.filter { it.listid !in orderedIds }
+    }
+
+    /** 把歌单列表转成本地顺序字符串（仅本地显示顺序，不同步酷狗） */
+    fun encodePlaylistOrder(list: List<UserPlaylistItem>): String =
+        list.joinToString(",") { it.listid.toString() }
+
+    /** 稳定化歌单顺序：已保存顺序固定不动，新出现的按当前顺序追加并入「本地顺序」，返回(稳定列表,新顺序串) */
+    fun stabilizePlaylistOrder(list: List<UserPlaylistItem>, orderRaw: String?): Pair<List<UserPlaylistItem>, String> {
+        val orderedIds = orderRaw?.split(",")?.mapNotNull { it.toLongOrNull() }.orEmpty()
+        val byId = list.associateBy { it.listid }
+        val ordered = orderedIds.mapNotNull { byId[it] }
+        val known = ordered.map { it.listid }.toSet()
+        val rest = list.filter { it.listid !in known }
+        val stable = ordered + rest
+        return Pair(stable, stable.joinToString(",") { it.listid.toString() })
+    }
+
+    /** 分组排序：我喜欢的置顶 → 自建/默认 → 收藏的别人 + 本地镜像（按名字去重）；返回(列表, 镜像条目的 listid 集合) */
+    fun groupPlaylists(
+        official: List<UserPlaylistItem>,
+        mirror: List<UserPlaylistItem>,
+        uid: Long,
+        likeName: String
+    ): Pair<List<UserPlaylistItem>, Set<Long>> {
+        val officialNames = official.mapNotNull { it.listname }.toHashSet()
+        val mirrorVisible = mirror.filter { !officialNames.contains(it.listname) }
+        val top = official.filter { it.listname == likeName }
+        val topNames = top.mapNotNull { it.listname }.toSet()
+        val mine = official.filter {
+            (it.is_default == 1 || it.list_create_userid == uid) && it.listname !in topNames
+        }
+        val collected = official.filter { it.is_default != 1 && it.list_create_userid != uid }
+        val mirrorIds = mirrorVisible.map { it.listid }.toSet()
+        return Pair(top + mine + collected + mirrorVisible, mirrorIds)
+    }
+
+    // ===== 已删除官方歌单黑名单（本地删除立即生效，官方读取端同步前不“回弹”） =====
+
+    fun readDeletedPlaylistIds(prefs: android.content.SharedPreferences, uid: Long): Set<Long> =
+        prefs.getString("deleted_kugou_playlists_$uid", null)
+            ?.split(",")?.mapNotNull { it.toLongOrNull() }?.toSet() ?: emptySet()
+
+    fun addDeletedPlaylistId(prefs: android.content.SharedPreferences, uid: Long, listid: Long) {
+        if (listid <= 0) return
+        val ids = readDeletedPlaylistIds(prefs, uid).toMutableSet()
+        if (ids.add(listid)) prefs.edit().putString("deleted_kugou_playlists_$uid", ids.joinToString(",")).apply()
+    }
+
+    fun removeDeletedPlaylistId(prefs: android.content.SharedPreferences, uid: Long, listid: Long) {
+        val ids = readDeletedPlaylistIds(prefs, uid).toMutableSet()
+        if (ids.remove(listid)) prefs.edit().putString("deleted_kugou_playlists_$uid", ids.joinToString(",")).apply()
+    }
+
+    /** 删除酷狗在线歌单（自建=删除，收藏别人的=取消收藏），外网不可逆操作 */
+    suspend fun deleteKuGouPlaylist(listid: Long): Boolean {
+        if (listid <= 0) return false
+        return try {
+            val resp = service.deletePlaylist(listid)
+            val ok = resp.status == 1 && resp.errcode == 0
+            android.util.Log.i(
+                "LxMusic_KugouLike",
+                "删除歌单 $listid: ok=$ok, status=${resp.status}, errcode=${resp.errcode}, errmsg=${resp.errmsg}"
+            )
+            ok
+        } catch (e: Exception) {
+            android.util.Log.w("LxMusic_KugouLike", "删除歌单 $listid 异常: ${e.message}")
+            false
+        }
+    }
+
+    /** 在酷狗新建空歌单，返回新歌单 listid；失败返回 null */
+    suspend fun createKugouPlaylist(name: String): Long? {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) return null
+        return try {
+            val (newId, raw) = parsePlaylistAddListid(service.createPlaylistRaw(name = trimmed))
+            android.util.Log.i("LxMusic_KugouLike", "新建歌单响应: ${raw.take(300)}")
+            if (newId <= 0) {
+                android.util.Log.w("LxMusic_KugouLike", "新建歌单未返回 listid: $trimmed, raw=${raw.take(300)}")
+                return null
+            }
+            android.util.Log.i("LxMusic_KugouLike", "新建歌单成功: $trimmed -> listid=$newId")
+            newId
+        } catch (e: Exception) {
+            android.util.Log.w("LxMusic_KugouLike", "新建歌单异常: ${e.message}")
+            null
+        }
+    }
+
+    /** 解析 /playlist/add 返回的 JSON，提取新歌单 listid（data/data.info/顶层里的 newlistid·listid，或 data.info.global_collection_id） */
+    private fun parsePlaylistAddListid(body: okhttp3.ResponseBody): Pair<Long, String> {
+        val str = runCatching { body.string() }.getOrDefault("")
+        body.close()
+        val id = runCatching {
+            val json = org.json.JSONObject(str)
+            val d = json.opt("data") as? org.json.JSONObject
+            val info = d?.opt("info") as? org.json.JSONObject
+            var v = d?.optLong("newlistid", -1L) ?: -1L
+            if (v <= 0) v = d?.optLong("listid", -1L) ?: -1L
+            if (v <= 0) v = info?.optLong("newlistid", -1L) ?: -1L
+            if (v <= 0) v = info?.optLong("listid", -1L) ?: -1L
+            if (v <= 0) v = json.optLong("newlistid", -1L)
+            if (v <= 0) v = json.optLong("listid", -1L)
+            if (v <= 0) v = json.optLong("list_id", -1L)
+            // 收藏歌单时新 listid 常藏在 data.info.global_collection_id（collection_{type}_{uid}_{listid}_{x}）
+            if (v <= 0) {
+                val gid = info?.optString("global_collection_id", "") ?: ""
+                v = parseGid(gid)?.second ?: 0L
+            }
+            if (v > 0) v else 0L
+        }.getOrDefault(0L)
+        return Pair(id, str)
+    }
+
+    // ---- 收藏歌单（把搜索到的在线歌单收藏到酷狗 + 本地乐观置顶） ----
+
+    private val locallyAddedPlaylists = LinkedHashMap<Long, UserPlaylistItem>()
+    private val collectedPlaylistListids = HashMap<String, Long>()
+
+    /** 记住某个 gid 收藏成功后在酷狗返回的 listid（供取消收藏时删除） */
+    fun rememberCollectedPlaylist(gid: String, collectedListid: Long) {
+        if (gid.isNotBlank() && collectedListid > 0) collectedPlaylistListids[gid] = collectedListid
+    }
+
+    fun collectedPlaylistListid(gid: String): Long = collectedPlaylistListids[gid] ?: 0L
+
+    /** 记录一条“刚刚收藏”的歌单，用于在歌单列表顶部优先显示（酷狗未同步前） */
+    fun recordLocallyAddedPlaylist(item: UserPlaylistItem) {
+        if (item.listid <= 0) return
+        locallyAddedPlaylists[item.listid] = item
+    }
+
+    /** 把本地乐观新增的歌单合并到在线歌单列表（置顶；服务器已返回的用服务器那份） */
+    fun mergeLocallyAddedPlaylists(serverList: List<UserPlaylistItem>): List<UserPlaylistItem> {
+        if (locallyAddedPlaylists.isEmpty()) return serverList
+        val serverIds = serverList.mapTo(HashSet()) { it.listid }
+        val added = locallyAddedPlaylists.values.filter { it.listid !in serverIds }
+        if (added.isEmpty()) return serverList
+        return added.toList() + serverList
+    }
+
+    /** 从 gid（collection_{type}_{userid}_{listid}_{x}）解析原歌单 owner userid 与 listid */
+    fun parseGid(gid: String): Pair<Long, Long>? {
+        val parts = gid.split("_")
+        if (parts.size >= 4) {
+            val uid = parts.getOrNull(2)?.toLongOrNull()
+            val listid = parts.getOrNull(3)?.toLongOrNull()
+            if (uid != null && listid != null && uid > 0 && listid > 0) return Pair(uid, listid)
+        }
+        return null
+    }
+
+    /** 把搜索到的在线歌单收藏到酷狗账号（type=1 收藏歌单），成功返回收藏后的 listid */
+    suspend fun kuGouCollectPlaylist(name: String, gid: String): Long? {
+        val parsed = parseGid(gid) ?: run {
+            android.util.Log.w("LxMusic_KugouLike", "收藏歌单: gid 无法解析, gid=$gid（跳过官方收藏）")
+            return null
+        }
+        val (ownerUid, ownerListid) = parsed
+        if (name.isBlank()) return null
+        return try {
+            val (newId, raw) = parsePlaylistAddListid(
+                service.collectPlaylistRaw(
+                    name = name.trim(),
+                    listCreateUserId = ownerUid,
+                    listCreateListid = ownerListid,
+                    listCreateGid = gid
+                )
+            )
+            android.util.Log.i("LxMusic_KugouLike", "收藏歌单响应: gid=$gid, raw=${raw.take(300)}")
+            if (newId <= 0) return null
+            android.util.Log.i("LxMusic_KugouLike", "收藏歌单成功: $name -> listid=$newId")
+            newId
+        } catch (e: Exception) {
+            android.util.Log.w("LxMusic_KugouLike", "收藏歌单异常: ${e.message}")
+            null
+        }
+    }
 
     /**
      * 获取搜索/网络精选歌单内的歌曲列表（支持 gid 与酷狗官方 CDN 多源降级与全量日志调试输出）

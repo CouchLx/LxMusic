@@ -45,6 +45,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 
@@ -243,6 +244,7 @@ import com.example.lxmusic.ui.pages.SearchPage
 import com.example.lxmusic.ui.pages.LoginPage
 import com.example.lxmusic.ui.pages.PlayerStage
 import com.example.lxmusic.ui.pages.SongListPage
+import com.example.lxmusic.ui.pages.PlaylistManagePage
 import com.example.lxmusic.ui.pages.PlaylistPage
 import com.example.lxmusic.ui.pages.PlaylistDetailPage
 import com.example.lxmusic.ui.pages.CollectionDetailPage
@@ -348,6 +350,8 @@ class MainActivity : ComponentActivity() {
                 var uiDensityScale by remember { mutableFloatStateOf(settingsRepository.uiDensityScale) }
                 var hapticEnabled by remember { mutableStateOf(settingsRepository.hapticFeedback) }
                 var preferHighRefreshRate by remember { mutableStateOf(settingsRepository.preferHighRefreshRate) }
+                var favoriteToKugou by remember { mutableStateOf(settingsRepository.favoriteToKugou) }
+                var favoriteSyncLocal by remember { mutableStateOf(settingsRepository.favoriteSyncLocal) }
                 // 高刷新率实时生效
                 LaunchedEffect(preferHighRefreshRate) {
                     applyPreferredHighRefreshRate(preferHighRefreshRate)
@@ -455,6 +459,16 @@ class MainActivity : ComponentActivity() {
                                 onPreferHighRefreshRateChange = { enabled ->
                                     preferHighRefreshRate = enabled
                                     settingsRepository.preferHighRefreshRate = enabled
+                                },
+                                favoriteToKugou = favoriteToKugou,
+                                onFavoriteToKugouChange = { enabled ->
+                                    favoriteToKugou = enabled
+                                    settingsRepository.favoriteToKugou = enabled
+                                },
+                                favoriteSyncLocal = favoriteSyncLocal,
+                                onFavoriteSyncLocalChange = { enabled ->
+                                    favoriteSyncLocal = enabled
+                                    settingsRepository.favoriteSyncLocal = enabled
                                 }
                             )
                         }
@@ -543,7 +557,11 @@ fun AppScaffold(
     hapticEnabled: Boolean = true,
     onHapticEnabledChange: (Boolean) -> Unit = {},
     preferHighRefreshRate: Boolean = false,
-    onPreferHighRefreshRateChange: (Boolean) -> Unit = {}
+    onPreferHighRefreshRateChange: (Boolean) -> Unit = {},
+    favoriteToKugou: Boolean = false,
+    onFavoriteToKugouChange: (Boolean) -> Unit = {},
+    favoriteSyncLocal: Boolean = false,
+    onFavoriteSyncLocalChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -645,14 +663,43 @@ fun AppScaffold(
     var discoverScrollIndex by rememberSaveable { mutableIntStateOf(0) }
     var discoverScrollOffset by rememberSaveable { mutableIntStateOf(0) }
     val discoverListState = rememberLazyListState(initialFirstVisibleItemIndex = discoverScrollIndex, initialFirstVisibleItemScrollOffset = discoverScrollOffset)
+    // 我的页滚动进度（与发现页一致：LazyListState 提升到外层只建一次，切 tab 复用同一对象）
+    var mineScrollY by rememberSaveable { mutableIntStateOf(0) }
+    val mineListState = rememberLazyListState(
+        initialFirstVisibleItemIndex = 0,
+        initialFirstVisibleItemScrollOffset = mineScrollY
+    )
+    LaunchedEffect(mineListState.firstVisibleItemScrollOffset) {
+        mineScrollY = mineListState.firstVisibleItemScrollOffset
+    }
+    // 歌单详情列表滚动保留（返回重进同歌单不丢位置；换歌单回到顶部）
+    var playlistDetailScrollIndex by rememberSaveable { mutableIntStateOf(0) }
+    var playlistDetailScrollOffset by rememberSaveable { mutableIntStateOf(0) }
+    val playlistDetailListState = rememberLazyListState(
+        initialFirstVisibleItemIndex = playlistDetailScrollIndex,
+        initialFirstVisibleItemScrollOffset = playlistDetailScrollOffset
+    )
+    LaunchedEffect(
+        playlistDetailListState.firstVisibleItemIndex,
+        playlistDetailListState.firstVisibleItemScrollOffset
+    ) {
+        playlistDetailScrollIndex = playlistDetailListState.firstVisibleItemIndex
+        playlistDetailScrollOffset = playlistDetailListState.firstVisibleItemScrollOffset
+    }
+    val playlistDetailId = selectedPlaylist?.listid
+    LaunchedEffect(playlistDetailId) {
+        if (playlistDetailId != null) playlistDetailListState.scrollToItem(0)
+    }
     var homeClickRefresh by remember { mutableStateOf<(() -> Unit)?>(null) }
     var isHomeRefreshing by remember { mutableStateOf(false) }
     // 滚动或切页时自动收回播放模式弹窗
     LaunchedEffect(homeListState.isScrollInProgress) {
         if (homeListState.isScrollInProgress && showPlayModePopup) showPlayModePopup = false
     }
+    var isSelectionModeActive by remember { mutableStateOf(false) }
     LaunchedEffect(selectedTab) {
         if (showPlayModePopup) showPlayModePopup = false
+        isSelectionModeActive = false
     }
     var selectedCollectionPlaylistId by rememberSaveable { mutableLongStateOf(0L) }
     var onlineSongList by remember { mutableStateOf<List<SongInfo>>(emptyList()) }
@@ -755,7 +802,9 @@ fun AppScaffold(
     val db = remember { MusicDatabase.getDatabase(context) }
     val collectionDao = remember { db.collectionDao() }
     var isCurrentSongFavorite by remember { mutableStateOf(false) }
-    LaunchedEffect(currentSong?.filePath) {
+    // 开启「收藏到酷狗」时每次增删后 +1，强制重查一次红心状态
+    var kugouLikeTick by remember { mutableStateOf(0) }
+    LaunchedEffect(currentSong?.filePath, favoriteToKugou, kugouLikeTick) {
         val fp = currentSong?.filePath ?: return@LaunchedEffect
         val parts = fp.split("|")
         val hash = parts.getOrElse(0) { "" }
@@ -765,7 +814,17 @@ fun AppScaffold(
             return@LaunchedEffect
         }
         val key = "${hash}|${audioId}"
-        isCurrentSongFavorite = collectionDao.isSongCollected(key)
+        if (favoriteToKugou) {
+            // 官方模式：本地「喜欢镜像」先写即亮；酷狗官方喜欢的也亮；本地“我的收藏”忽略
+            if (KuGouApi.token.isNotBlank() && KuGouApi.userid.isNotBlank()) {
+                val liked = withContext(Dispatchers.IO) { KuGouApi.isSongLikedKugou(key) }
+                isCurrentSongFavorite = liked || collectionDao.isLikedSong(key)
+            } else {
+                isCurrentSongFavorite = collectionDao.isLikedSong(key)
+            }
+        } else {
+            isCurrentSongFavorite = collectionDao.isSongCollected(key)
+        }
     }
 
     var launchUpdateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
@@ -857,12 +916,13 @@ fun AppScaffold(
     // 排行榜 / 歌单详情页的"定位播放"回调（替代全局单例，避免数据竞争）
     var rankLocateAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var playlistLocateAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var playlistMenuAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     // 手机返回键：统一的返回处理，替代原先散落的多个 BackHandler
     val backEnabled = showLoginPage || showRankDetail != null || showPlayerPage ||
         selectedTab == 3 || selectedTab in 4..7 || selectedTab in 8..10 ||
         selectedTab == 11 || selectedTab == 12 || selectedTab == 14 ||
-        selectedTab == 15 || selectedTab == 16
+        selectedTab == 15 || selectedTab == 16 || selectedTab == 17
     androidx.activity.compose.BackHandler(enabled = backEnabled) {
         when {
             showLoginPage -> showLoginPage = false
@@ -898,6 +958,7 @@ fun AppScaffold(
             selectedTab == 14 -> selectedTab = 2
             selectedTab == 15 -> selectedTab = 2
             selectedTab == 16 -> selectedTab = 11
+            selectedTab == 17 -> selectedTab = previousTab
         }
     }
 
@@ -918,7 +979,7 @@ fun AppScaffold(
 
     // 迷你播放条底部间距：原生主题下用实测底栏高度（含导航栏 inset 的差值），
     // 保证与底栏严丝合缝；悬浮主题保持胶囊悬浮间距
-    val showNavBar = selectedTab !in 3..16 && showRankDetail == null && !showLoginPage
+    val showNavBar = selectedTab !in 3..17 && showRankDetail == null && !showLoginPage
     val miniPlayerBottomPadding by animateDpAsState(
         targetValue = when {
             !showNavBar -> 0.dp
@@ -1095,6 +1156,7 @@ fun AppScaffold(
                             title = {
                                 Text(
                                     if (selectedCollectionType == "favorites") stringResource(R.string.title_my_favorites)
+                                    else if (selectedCollectionType == "liked") "我喜欢的"
                                     else stringResource(R.string.title_playlist_detail)
                                 )
                             },
@@ -1106,6 +1168,11 @@ fun AppScaffold(
                             actions = {
                                 IconButton(onClick = { playlistLocateAction?.invoke() }) {
                                     Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
+                                }
+                                if (selectedCollectionType == "playlist") {
+                                    IconButton(onClick = { playlistMenuAction?.invoke() }) {
+                                        Icon(Icons.Default.MoreVert, contentDescription = "更多选项")
+                                    }
                                 }
                             },
                             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
@@ -1217,6 +1284,17 @@ fun AppScaffold(
                             actions = {
                                 IconButton(onClick = { playlistLocateAction?.invoke() }) {
                                     Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                        )
+                    } else if (currentTab == 17) {
+                        // 管理歌单页顶栏（与歌单详情页一致：标题 + 返回）
+                        TopAppBar(
+                            title = { Text("管理歌单") },
+                            navigationIcon = {
+                                IconButton(onClick = { selectedTab = previousTab }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                                 }
                             },
                             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
@@ -1460,11 +1538,20 @@ fun AppScaffold(
                             onLocalClick = { selectedTab = 3 },
                             onAvatarClick = { showLoginPage = true },
                             onManagePlaylists = { selectedTab = 15 },
+                            onManageKugouPlaylists = {
+                                previousTab = selectedTab
+                                selectedTab = 17
+                            },
                             onPlaylistDetailClick = { playlist ->
                                 selectedPlaylist = playlist
                                 selectedTab = when {
                                     playlist.listname == "默认收藏" -> 8
-                                    playlist.listname == "我喜欢" -> 9
+                                    playlist.listname == "我喜欢" ->
+                                        if (favoriteToKugou) {
+                                            // 官方模式：我喜欢的列表走本地「喜欢镜像」（读 liked_songs）
+                                            selectedCollectionType = "liked"
+                                            14
+                                        } else 9
                                     else -> 10
                                 }
                             },
@@ -1472,7 +1559,9 @@ fun AppScaffold(
                                 selectedCollectionType = type
                                 selectedCollectionPlaylistId = id
                                 selectedTab = 14
-                            }
+                            },
+                            listState = mineListState,
+                            initialScrollOffset = mineScrollY
                         )
                         3 -> LocalMusicPage(
                             currentPlayingPath = currentPlayingPath,
@@ -1516,7 +1605,8 @@ fun AppScaffold(
                             onPlaySong = { songs, index -> playOnlineSong(songs, index) },
                             currentPlayingPath = currentSong?.filePath,
                             isPlaying = isPlaying,
-                            onLocateReady = { playlistLocateAction = it }
+                            onLocateReady = { playlistLocateAction = it },
+                            onAddToQueueNext = { song -> addToQueueNext(song) }
                         )
                         6 -> {
                             val songInfos = remember(historySongsForList) {
@@ -1578,7 +1668,9 @@ fun AppScaffold(
                                     currentPlayingPath = currentSong?.filePath,
                                     isPlaying = isPlaying,
                                     onLocateReady = { playlistLocateAction = it },
-                                    onAddToQueueNext = { song -> addToQueueNext(song) }
+                                    onAddToQueueNext = { song -> addToQueueNext(song) },
+                                    onSelectionModeChange = { isSelectionModeActive = it },
+                                    listState = playlistDetailListState
                                 )
                             }
                         }
@@ -1589,7 +1681,10 @@ fun AppScaffold(
                             onPlaySong = { songs, index -> playOnlineSong(songs, index) },
                             currentPlayingPath = currentSong?.filePath,
                             isPlaying = isPlaying,
-                            onLocateReady = { playlistLocateAction = it }
+                            onLocateReady = { playlistLocateAction = it },
+                            onMenuReady = { playlistMenuAction = it },
+                            onAddToQueueNext = { song -> addToQueueNext(song) },
+                            onSelectionModeChange = { isSelectionModeActive = it }
                         )
                         15 -> PlaylistManagerPage(
                             onBack = { selectedTab = 2 }
@@ -1628,7 +1723,11 @@ fun AppScaffold(
                             currentPlayingPath = currentSong?.filePath,
                             isPlaying = isPlaying,
                             onLocateReady = { playlistLocateAction = it },
-                            onAddToQueueNext = { song -> addToQueueNext(song) }
+                            onAddToQueueNext = { song -> addToQueueNext(song) },
+                            onSelectionModeChange = { isSelectionModeActive = it }
+                        )
+                        17 -> PlaylistManagePage(
+                            onBack = { selectedTab = previousTab }
                         )
                         12 -> SettingsPage(
                             currentUri = backgroundImageUri,
@@ -1927,6 +2026,10 @@ fun AppScaffold(
                             onHapticEnabledChange = onHapticEnabledChange,
                             preferHighRefreshRate = preferHighRefreshRate,
                             onPreferHighRefreshRateChange = onPreferHighRefreshRateChange,
+                            favoriteToKugou = favoriteToKugou,
+                            onFavoriteToKugouChange = onFavoriteToKugouChange,
+                            favoriteSyncLocal = favoriteSyncLocal,
+                            onFavoriteSyncLocalChange = onFavoriteSyncLocalChange,
                             settingsSubPage = settingsSubPage,
                             onSettingsSubPageChange = { settingsSubPage = it }
                         )
@@ -1999,7 +2102,7 @@ fun AppScaffold(
     if (currentSong != null) lastValidSong.value = currentSong
     val displaySong = lastValidSong.value
     AnimatedVisibility(
-        visible = currentSong != null && !showPlayerPage && selectedTab != 12,
+        visible = currentSong != null && !showPlayerPage && selectedTab !in listOf(12, 15, 17) && !isSelectionModeActive,
         modifier = Modifier.align(Alignment.BottomCenter),
         enter = slideInVertically(initialOffsetY = { it }, animationSpec = tween(280)) + fadeIn(tween(220)),
         exit = slideOutVertically(targetOffsetY = { it }, animationSpec = tween(200)) + fadeOut(tween(150))
@@ -2266,6 +2369,63 @@ fun AppScaffold(
                                 val audioId = parts.getOrElse(1) { "0" }.toLongOrNull() ?: 0L
                                 if (hash.isBlank()) return@launch
                                 val key = "${hash}|${audioId}"
+                                // 开启「收藏到酷狗」：本地先写「喜欢镜像」（立即可见、不消失），酷狗后台慢慢同步；
+                                // “同步到本地收藏”开启时再额外复制一份到本地“我的收藏”
+                                if (favoriteToKugou) {
+                                    val target = !isCurrentSongFavorite
+                                    isCurrentSongFavorite = target
+                                    if (target) {
+                                        collectionDao.insertLikedSong(
+                                            com.example.lxmusic.LikedSongEntity(
+                                                filePath = key,
+                                                title = song.title,
+                                                artist = song.artist,
+                                                albumArtUri = song.albumArtUri,
+                                                duration = song.duration,
+                                                hash = hash,
+                                                audioId = audioId,
+                                                albumId = song.albumId,
+                                                mixsongid = song.mixsongid
+                                            )
+                                        )
+                                        if (favoriteSyncLocal) {
+                                            collectionDao.insertCollectedSong(
+                                                com.example.lxmusic.CollectedSongEntity(
+                                                    filePath = key,
+                                                    title = song.title,
+                                                    artist = song.artist,
+                                                    albumArtUri = song.albumArtUri,
+                                                    duration = song.duration,
+                                                    hash = hash,
+                                                    audioId = audioId,
+                                                    albumId = song.albumId,
+                                                    mixsongid = song.mixsongid
+                                                )
+                                            )
+                                        }
+                                    } else {
+                                        collectionDao.deleteLikedSong(key)
+                                        if (favoriteSyncLocal) collectionDao.deleteCollectedSong(key)
+                                    }
+                                    kugouLikeTick++
+                                    // 维护「我喜欢的」统一数量（官方∪本地）
+                                    if (target) KuGouApi.bumpLikedCount(1) else KuGouApi.bumpLikedCount(-1)
+                                    // 后台同步酷狗（失败不影响本地）
+                                    val kugouOk = if (KuGouApi.token.isNotBlank() && KuGouApi.userid.isNotBlank()) {
+                                        if (target) KuGouApi.addToKugouLike(song) else KuGouApi.removeFromKugouLike(song)
+                                    } else false
+                                    val msg = when {
+                                        target && kugouOk -> "已喜欢"
+                                        target && KuGouApi.token.isBlank() -> "已喜欢（未登录，暂未同步官方）"
+                                        target -> "已喜欢（官方同步失败）"
+                                        kugouOk -> "已取消喜欢"
+                                        else -> "已取消喜欢（官方同步失败）"
+                                    }
+                                    withContext(Dispatchers.Main) {
+                                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                    return@launch
+                                }
                                 if (isCurrentSongFavorite) {
                                     collectionDao.deleteCollectedSong(key)
                                     withContext(Dispatchers.Main) { isCurrentSongFavorite = false }
@@ -2366,7 +2526,7 @@ fun AppScaffold(
 
         // 导航栏叠加在底部
         AnimatedVisibility(
-            visible = selectedTab !in 3..16 && !showPlayerPage && showRankDetail == null && !showLoginPage,
+            visible = selectedTab !in 3..17 && !showPlayerPage && showRankDetail == null && !showLoginPage,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .onSizeChanged { bottomBarHeightPx = it.height },

@@ -50,7 +50,7 @@ data class UserPlaylistEntity(
 )
 data class PlaylistSongCrossRef(
     val playlistId: Long,
-    val songFilePath: String,       // "hash|audioId" 格式
+    val songFilePath: String,       // 本地歌曲为绝对路径，网络歌曲为 "hash|audioId"
     val title: String,
     val artist: String,
     val albumArtUri: String? = null,
@@ -58,15 +58,48 @@ data class PlaylistSongCrossRef(
     val hash: String = "",
     val audioId: Long = 0,
     val albumId: Long = 0,
-    val mixsongid: Long = 0
+    val mixsongid: Long = 0,
+    val lyrics: String? = null      // 本地歌曲歌词（.lrc/内嵌），保证歌单离线播放时歌词可用
 ) {
     fun toSongInfo() = com.example.lxmusic.model.SongInfo(
         title = title,
         artist = artist,
-        filePath = "$hash|$audioId",
+        // 本地歌曲存的是绝对路径（以 / 开头），原样返回；网络歌曲为 "hash|audioId"
+        filePath = if (songFilePath.startsWith("/")) songFilePath else "$hash|$audioId",
         albumArtUri = albumArtUri,
         duration = duration,
         albumId = albumId,
-        mixsongid = mixsongid
+        mixsongid = mixsongid,
+        lyrics = lyrics
     )
 }
+
+// ==================== 喜欢镜像（官方收藏模式的本地先写） ====================
+
+/** 官方收藏模式下「喜欢」歌曲的本地镜像：先写本地、后台同步酷狗（filePath = "hash|audioId"） */
+@Entity(tableName = "liked_songs")
+data class LikedSongEntity(
+    @PrimaryKey
+    val filePath: String,            // "hash|audioId" 作为唯一标识
+    val title: String,
+    val artist: String,
+    val albumArtUri: String? = null, // 封面 URL
+    val duration: Long = 0,
+    val hash: String,                // 酷狗 hash（播放用）
+    val audioId: Long = 0,           // 酷狗 audio_id（播放用）
+    val albumId: Long = 0,
+    val mixsongid: Long = 0,
+    val likedAt: Long = System.currentTimeMillis()
+)
+
+/** 官方收藏模式下「收藏的歌单」本地镜像（点开按 gid 在线拉歌播放/删除） */
+@Entity(tableName = "liked_playlists")
+data class LikedPlaylistEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val name: String,
+    val gid: String = "",
+    val coverUrl: String = "",
+    val songcount: Int = 0,
+    val createdAt: Long = System.currentTimeMillis()
+)

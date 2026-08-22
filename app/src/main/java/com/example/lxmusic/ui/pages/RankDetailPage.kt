@@ -26,9 +26,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
@@ -413,6 +419,7 @@ fun RankDetailPage(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun RankSongCard(
     rank: Int,
@@ -421,7 +428,10 @@ fun RankSongCard(
     isCurrentSong: Boolean = false,
     isPlaying: Boolean = false,
     onClick: () -> Unit,
-    onMenuClick: (() -> Unit)? = null
+    onMenuClick: (() -> Unit)? = null,
+    selectMode: Boolean = false,
+    isSelected: Boolean = false,
+    onLongClick: (() -> Unit)? = null
 ) {
     // 音阶动画
     val infiniteTransition = rememberInfiniteTransition(label = "eq")
@@ -441,14 +451,26 @@ fun RankSongCard(
         label = "bar3"
     )
 
+    val cardBg = when {
+        isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+        isCurrentSong -> MaterialTheme.colorScheme.primary.copy(alpha = 0.06f)
+        else -> Color.Transparent
+    }
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() },
-        color = if (isCurrentSong)
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.06f)
-        else
-            Color.Transparent
+            .then(
+                if (onLongClick != null) {
+                    Modifier.combinedClickable(
+                        onClick = onClick,
+                        onLongClick = onLongClick
+                    )
+                } else {
+                    Modifier.clickable { onClick() }
+                }
+            ),
+        color = cardBg
     ) {
         Row(
             modifier = Modifier
@@ -479,11 +501,17 @@ fun RankSongCard(
                     .clip(RoundedCornerShape(8.dp))
             ) {
                 val coverUrl = song.albumArtUri
-                if (!coverUrl.isNullOrBlank()) {
+                // 本地歌曲无封面时回退到音频文件本身（Coil 自动提取内嵌封面），与本地音乐列表一致
+                val coverModel: Any? = when {
+                    !coverUrl.isNullOrBlank() -> coverUrl
+                    song.filePath.startsWith("/") -> java.io.File(song.filePath)
+                    else -> null
+                }
+                if (coverModel != null) {
                     val painter = rememberAsyncImagePainter(
                         model = ImageRequest.Builder(LocalContext.current)
-                            .data(coverUrl)
-                            .memoryCacheKey(coverUrl)
+                            .data(coverModel)
+                            .memoryCacheKey(coverModel.toString())
                             .crossfade(150)
                             .size(200)
                             .build()
@@ -552,7 +580,8 @@ fun RankSongCard(
                 Text(
                     text = song.title,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = if (isCurrentSong) MaterialTheme.colorScheme.primary
+                    color = if (isSelected) MaterialTheme.colorScheme.primary
+                           else if (isCurrentSong) MaterialTheme.colorScheme.primary
                            else MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -560,15 +589,55 @@ fun RankSongCard(
                 Text(
                     text = song.artist,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (isCurrentSong) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                    color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                           else if (isCurrentSong) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
                            else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
 
-            // 菜单按钮
-            if (onMenuClick != null) {
+            // 选择模式：右侧显示圆润 Checkbox
+            if (selectMode) {
+                Box(
+                    modifier = Modifier.size(40.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val scale by androidx.compose.animation.core.animateFloatAsState(
+                        targetValue = if (isSelected) 1f else 0.9f,
+                        animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.6f),
+                        label = "checkScale"
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(22.dp)
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                            }
+                            .clip(CircleShape)
+                            .background(
+                                if (isSelected) MaterialTheme.colorScheme.primary
+                                else Color.Transparent
+                            )
+                            .then(
+                                if (!isSelected) Modifier.border(2.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                                else Modifier
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSelected) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "已选择",
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    }
+                }
+            } else if (onMenuClick != null) {
+                // 正常模式：菜单按钮
                 IconButton(
                     onClick = onMenuClick,
                     modifier = Modifier.size(40.dp)

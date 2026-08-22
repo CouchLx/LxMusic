@@ -33,9 +33,9 @@ import coil.request.ImageRequest
 import com.example.lxmusic.UserPlaylistItem
 
 @Composable
-fun PlaylistCard(playlist: UserPlaylistItem, onClick: () -> Unit = {}) {
+fun PlaylistCard(playlist: UserPlaylistItem, onClick: () -> Unit = {}, countOverride: Int? = null, countLabel: String? = null, modifier: Modifier = Modifier) {
     Surface(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable { onClick() },
         shape = RoundedCornerShape(12.dp),
@@ -94,7 +94,7 @@ fun PlaylistCard(playlist: UserPlaylistItem, onClick: () -> Unit = {}) {
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "${playlist.songcount} 首歌曲",
+                    text = countLabel ?: "${countOverride ?: playlist.songcount} 首歌曲",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

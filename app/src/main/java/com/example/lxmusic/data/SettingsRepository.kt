@@ -89,6 +89,10 @@ class SettingsRepository(context: Context) {
         // 通用设置（对齐 Neri：触感反馈 / 高刷新率 / UI 缩放 / 播放服务空闲退出 / USB DAC）
         const val HAPTIC_FEEDBACK = "haptic_feedback_enabled"
         const val PREFER_HIGH_REFRESH_RATE = "prefer_high_refresh_rate"
+        // 收藏：开启后「喜欢/收藏」写入酷狗官方歌单，关闭恢复本地收藏
+        const val FAVORITE_TO_KUGOU = "favorite_to_kugou"
+        // 收藏歌曲同步到本地：官方收藏开启后，喜欢/收藏的歌曲同时加入本地“我的收藏”
+        const val FAVORITE_SYNC_LOCAL = "favorite_sync_local"
         const val UI_DENSITY_SCALE = "ui_density_scale"
         const val PLAYBACK_SERVICE_IDLE_SHUTDOWN_MINUTES = "playback_service_idle_shutdown_minutes"
         const val MAX_CACHE_SIZE_BYTES = "max_cache_size_bytes"
@@ -730,6 +734,28 @@ class SettingsRepository(context: Context) {
         }
     private var _preferHighRefreshRate: Boolean by mutableStateOf(
         prefs.getBoolean(Keys.PREFER_HIGH_REFRESH_RATE, false)
+    )
+
+    // 收藏到酷狗官方列表：开启后「喜欢/收藏」写入酷狗账号的喜欢歌单，关闭恢复本地收藏
+    var favoriteToKugou: Boolean
+        get() = _favoriteToKugou
+        set(value) {
+            _favoriteToKugou = value
+            prefs.edit().putBoolean(Keys.FAVORITE_TO_KUGOU, value).apply()
+        }
+    private var _favoriteToKugou: Boolean by mutableStateOf(
+        prefs.getBoolean(Keys.FAVORITE_TO_KUGOU, false)
+    )
+
+    // 收藏歌曲同步到本地：开启官方收藏后，喜欢/收藏的歌曲同时加入本地“我的收藏”（默认关闭）
+    var favoriteSyncLocal: Boolean
+        get() = _favoriteSyncLocal
+        set(value) {
+            _favoriteSyncLocal = value
+            prefs.edit().putBoolean(Keys.FAVORITE_SYNC_LOCAL, value).apply()
+        }
+    private var _favoriteSyncLocal: Boolean by mutableStateOf(
+        prefs.getBoolean(Keys.FAVORITE_SYNC_LOCAL, false)
     )
 
     var uiDensityScale: Float

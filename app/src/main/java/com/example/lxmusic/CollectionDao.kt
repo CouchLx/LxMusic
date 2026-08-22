@@ -39,6 +39,12 @@ interface CollectionDao {
     @Insert
     suspend fun createPlaylist(playlist: UserPlaylistEntity): Long
 
+    @Query("UPDATE user_playlists SET name = :newName WHERE id = :playlistId")
+    suspend fun renamePlaylist(playlistId: Long, newName: String)
+
+    @Query("SELECT albumArtUri FROM playlist_songs WHERE playlistId = :playlistId AND albumArtUri IS NOT NULL AND albumArtUri != '' LIMIT 1")
+    suspend fun getPlaylistFirstCover(playlistId: Long): String?
+
     @Query("DELETE FROM user_playlists WHERE id = :playlistId")
     suspend fun deletePlaylist(playlistId: Long)
 
@@ -68,6 +74,53 @@ interface CollectionDao {
     @Query("SELECT COUNT(*) FROM playlist_songs WHERE playlistId = :playlistId")
     suspend fun getPlaylistSongCount(playlistId: Long): Int
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun addSongsToPlaylist(songs: List<PlaylistSongCrossRef>)
+
+    // ========== 喜欢镜像（官方收藏模式的本地先写） ==========
+
+    @Query("SELECT * FROM liked_songs ORDER BY likedAt DESC")
+    suspend fun getAllLikedSongs(): List<LikedSongEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLikedSong(song: LikedSongEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLikedSongs(songs: List<LikedSongEntity>)
+
+    @Query("DELETE FROM liked_songs WHERE filePath = :filePath")
+    suspend fun deleteLikedSong(filePath: String)
+
+    @Query("SELECT EXISTS(SELECT 1 FROM liked_songs WHERE filePath = :filePath)")
+    suspend fun isLikedSong(filePath: String): Boolean
+
+    @Query("SELECT COUNT(*) FROM liked_songs")
+    suspend fun getLikedSongCount(): Int
+
+    @Query("DELETE FROM liked_songs")
+    suspend fun clearAllLikedSongs()
+
+    @Query("SELECT * FROM liked_playlists ORDER BY createdAt ASC")
+    suspend fun getAllLikedPlaylists(): List<LikedPlaylistEntity>
+
+    @Query("SELECT * FROM liked_playlists WHERE gid = :gid LIMIT 1")
+    suspend fun getLikedPlaylistByGid(gid: String): LikedPlaylistEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLikedPlaylist(playlist: LikedPlaylistEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLikedPlaylists(playlists: List<LikedPlaylistEntity>)
+
+    @Query("DELETE FROM liked_playlists WHERE gid = :gid")
+    suspend fun deleteLikedPlaylistByGid(gid: String)
+
+    @Query("DELETE FROM liked_playlists WHERE id = :id")
+    suspend fun deleteLikedPlaylistById(id: Long)
+
+    @Query("DELETE FROM liked_playlists")
+    suspend fun clearAllLikedPlaylists()
+
     // ========== 清除所有数据 ==========
 
     @Query("DELETE FROM collected_songs")
@@ -84,5 +137,7 @@ interface CollectionDao {
         clearAllPlaylistSongs()
         clearAllUserPlaylists()
         clearAllCollectedSongs()
+        clearAllLikedSongs()
+        clearAllLikedPlaylists()
     }
 }

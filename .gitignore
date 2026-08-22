@@ -7,6 +7,7 @@
 /captures
 .externalNativeBuild
 .cxx
+.kotlin/
 local.properties
 
 # 个人备份与历史快照（含服务器地址等敏感信息）
