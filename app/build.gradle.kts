@@ -27,8 +27,8 @@ android {
         applicationId = "com.example.lxmusic"
         minSdk = 24
         targetSdk = 37
-        versionCode = 4
-        versionName = "3.7.57"
+        versionCode = 5
+        versionName = "3.7.58"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

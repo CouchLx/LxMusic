@@ -37,7 +37,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarToday
+import android.content.SharedPreferences
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -46,11 +51,14 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.CircularWavyProgressIndicator
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -85,6 +93,8 @@ import com.example.lxmusic.RankSong
 import com.example.lxmusic.ui.components.SongContextMenuActions
 import com.example.lxmusic.TopCardSong
 import com.example.lxmusic.model.SongInfo
+import com.example.lxmusic.CollectedSongEntity
+import com.example.lxmusic.MusicDatabase
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
@@ -93,6 +103,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 
@@ -101,6 +112,29 @@ private val homePagerStates = mutableMapOf<String, Int>()
 
 fun clearHomePagerStates() {
     homePagerStates.clear()
+}
+
+/**
+ * 为推页栏生成精致的推荐标签（如"万人收藏"、"非常喜欢的调调"等）
+ */
+private fun getSongRecommendationTag(title: String, artist: String): String? {
+    val tags = listOf(
+        "非常喜欢的调调",
+        "万人收藏",
+        "缓慢中不失温柔",
+        "超80%人收藏",
+        "宝藏旋律",
+        "治愈系私藏",
+        "单曲循环",
+        "近期热听",
+        "评论999+",
+        "经典回响",
+        "高分神作"
+    )
+    val hash = abs((title + artist).hashCode())
+    return if (hash % 3 != 0) {
+        tags[hash % tags.size]
+    } else null
 }
 
 /**
@@ -171,7 +205,22 @@ fun HomePage(
     val prefs = remember { context.getSharedPreferences("rank_cache", Context.MODE_PRIVATE) }
     val homePrefs = remember { context.getSharedPreferences("home_cache", Context.MODE_PRIVATE) }
     val authPrefs = remember { context.getSharedPreferences("auth", Context.MODE_PRIVATE) }
+    val settingsPrefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
     val imageLoader = LocalImageLoader.current
+
+    // 预览化推页栏开关（实时响应设置变更）
+    var previewPushPageBar by remember {
+        mutableStateOf(settingsPrefs.getBoolean("preview_push_page_bar", true))
+    }
+    DisposableEffect(settingsPrefs) {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == "preview_push_page_bar") {
+                previewPushPageBar = settingsPrefs.getBoolean("preview_push_page_bar", true)
+            }
+        }
+        settingsPrefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { settingsPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
 
     // ===== 数据状态（收敛为单一不可变对象：刷新完成后一次性替换，
     // 避免 13 个独立状态逐个更新导致多次重组与"逐个变新"的割裂感） =====
@@ -244,9 +293,9 @@ fun HomePage(
         }
     }
 
-    // 歌曲区块组件
+    // ===== 预览化推页栏歌曲区块组件（右侧露边预览 + 4首单列 + 胶囊标签 + 收藏爱心） =====
     @Composable
-    fun SongSection(
+    fun PreviewPushPageSongSection(
         title: String,
         sectionKey: String,
         refreshGeneration: Int,
@@ -255,14 +304,27 @@ fun HomePage(
         currentPlayingPath: String? = null,
         isPlaying: Boolean = false
     ) {
+        val database = remember { MusicDatabase.getDatabase(context) }
+        val collectionDao = remember { database.collectionDao() }
+
         Column(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 8.dp)
-            )
+            // 头部栏：标题
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 22.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontSize = 18.5.sp,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
             if (songs.isEmpty()) {
                 Column(modifier = Modifier.padding(horizontal = 16.dp)) {
                     repeat(4) { SongSkeletonCard() }
@@ -270,13 +332,6 @@ fun HomePage(
             } else {
                 val pageSize = 4
                 val pages = songs.chunked(pageSize)
-                // 翻页进度存全局 map（homePagerStates）：
-                // - 切到其他页面再回来：从 map 恢复上次翻页进度（Compose 的
-                //   rememberSaveable 依赖 SaveableStateHolder，切 Tab 回来时常失效；
-                //   map 是进程级，HomePage 组合销毁重建后依然可读）
-                // - 刷新时 clearHomePagerStates() 清空 map + key(refreshGeneration)
-                //   强制重建 Pager → 自动重置回第 1 页
-                // - 退出应用后内存 map 清空 → 重置（符合"每次打开默认第一页"）
                 key(refreshGeneration) {
                     val savedPage = (homePagerStates[sectionKey] ?: 0)
                         .coerceIn(0, (pages.size - 1).coerceAtLeast(0))
@@ -285,12 +340,11 @@ fun HomePage(
                         homePagerStates[sectionKey] = pagerState.currentPage
                     }
 
-                    // 原生 HorizontalPager 翻页（平滑跟手 + 自带吸附），外层方向锁定：
-                    // 上下滑动浏览页面时容易误触横向翻页（手指带一点水平分量就会翻页）。
-                    // 水平位移先超过 touchSlop 且大于垂直位移才放行给 Pager；
-                    // 垂直占优则直接结束手势，交给外层 LazyColumn 垂直滚动。
+                    // 露边滑动推页 Pager：end = 48.dp 露出右侧下一页边缘卡片
                     HorizontalPager(
                         state = pagerState,
+                        contentPadding = PaddingValues(start = 16.dp, end = 48.dp),
+                        pageSpacing = 14.dp,
                         modifier = Modifier
                             .fillMaxWidth()
                             .pointerInput(pages.size) {
@@ -312,106 +366,356 @@ fun HomePage(
                                                 if (abs(dx) > abs(dy)) {
                                                     horizontalLocked = true
                                                 } else {
-                                                    // 垂直滑动：放行给滚动容器，结束本手势
                                                     break
-                                            }
-                                        }
-                                    }
-                                    if (horizontalLocked) {
-                                        change.consume()
-                                    }
-                                }
-                            }
-                        }
-                ) { pageIndex ->
-                    val pageSongs = pages[pageIndex]
-                    Column {
-                        pageSongs.forEachIndexed { indexInPage, song ->
-                            val globalIndex = pageIndex * pageSize + indexInPage
-                            key(song.filePath ?: "song_${pageIndex}_$indexInPage") {
-                                var showSheet by remember { mutableStateOf(false) }
-
-                                RankSongCard(
-                                    rank = globalIndex + 1,
-                                    song = song,
-                                    showRank = false,
-                                    isCurrentSong = song.filePath == currentPlayingPath,
-                                    isPlaying = isPlaying && song.filePath == currentPlayingPath,
-                                    onClick = { onSongClick(globalIndex) },
-                                    onMenuClick = { showSheet = true }
-                                )
-
-                                if (showSheet) {
-                                    ModalBottomSheet(
-                                        onDismissRequest = { showSheet = false },
-                                        containerColor = MaterialTheme.colorScheme.surface,
-                                        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 20.dp, vertical = 12.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            val coverUrl = song.albumArtUri
-                                            if (!coverUrl.isNullOrBlank()) {
-                                val painter = rememberAsyncImagePainter(
-                                    model = ImageRequest.Builder(LocalContext.current)
-                                        .data(coverUrl)
-                                        .memoryCacheKey(coverUrl)
-                                        .crossfade(150)
-                                        .size(200)
-                                        .build()
-                                )
-                                                Image(painter, null, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
-                                            } else {
-                                                Box(Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
-                                                    Icon(Icons.Default.MusicNote, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                                 }
                                             }
-                                            Spacer(modifier = Modifier.width(12.dp))
-                                            Column {
-                                                Text(song.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                Text(song.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                        if (horizontalLocked) {
+                                            change.consume()
+                                        }
+                                    }
+                                }
+                            }
+                    ) { pageIndex ->
+                        val pageSongs = pages[pageIndex]
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            pageSongs.forEachIndexed { indexInPage, song ->
+                                val globalIndex = pageIndex * pageSize + indexInPage
+                                val isCurrent = song.filePath == currentPlayingPath
+                                key(song.filePath ?: "song_${pageIndex}_$indexInPage") {
+                                    var showSheet by remember { mutableStateOf(false) }
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .clickable { onSongClick(globalIndex) }
+                                            .padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // 封面图
+                                        val coverUrl = song.albumArtUri
+                                        if (!coverUrl.isNullOrBlank()) {
+                                            val painter = rememberAsyncImagePainter(
+                                                model = ImageRequest.Builder(LocalContext.current)
+                                                    .data(coverUrl)
+                                                    .memoryCacheKey(coverUrl)
+                                                    .crossfade(150)
+                                                    .size(200)
+                                                    .build()
+                                            )
+                                            Image(
+                                                painter = painter,
+                                                contentDescription = null,
+                                                modifier = Modifier
+                                                    .size(50.dp)
+                                                    .clip(RoundedCornerShape(10.dp)),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        } else {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(50.dp)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.MusicNote,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(24.dp),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
                                             }
                                         }
 
-                                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                                        Spacer(modifier = Modifier.width(12.dp))
 
-                                        SongContextMenuActions(song = song, onDismiss = { showSheet = false }, onAddToQueueNext = { onAddToQueueNext(song) })
+                                        // 中间信息列：歌名 + 标签；歌手名
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = song.title,
+                                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                                        fontSize = 15.sp,
+                                                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium
+                                                    ),
+                                                    color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f, fill = false)
+                                                )
+
+                                                val tag = remember(song.title, song.artist) {
+                                                    getSongRecommendationTag(song.title, song.artist)
+                                                }
+                                                if (!tag.isNullOrBlank()) {
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Surface(
+                                                        shape = RoundedCornerShape(4.dp),
+                                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                                    ) {
+                                                        Text(
+                                                            text = tag,
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            fontSize = 10.5.sp,
+                                                            fontWeight = FontWeight.Normal,
+                                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.5.dp),
+                                                            maxLines = 1
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            Spacer(modifier = Modifier.height(3.dp))
+
+                                            Text(
+                                                text = song.artist,
+                                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+
+                                        // 右侧更多操作菜单按钮
+                                        IconButton(
+                                            onClick = { showSheet = true },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.MoreVert,
+                                                contentDescription = "更多操作",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+
+                                    if (showSheet) {
+                                        ModalBottomSheet(
+                                            onDismissRequest = { showSheet = false },
+                                            containerColor = MaterialTheme.colorScheme.surface,
+                                            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                val sheetCoverUrl = song.albumArtUri
+                                                if (!sheetCoverUrl.isNullOrBlank()) {
+                                                    val painter = rememberAsyncImagePainter(
+                                                        model = ImageRequest.Builder(LocalContext.current)
+                                                            .data(sheetCoverUrl)
+                                                            .memoryCacheKey(sheetCoverUrl)
+                                                            .crossfade(150)
+                                                            .size(200)
+                                                            .build()
+                                                    )
+                                                    Image(painter, null, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
+                                                } else {
+                                                    Box(Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
+                                                        Icon(Icons.Default.MusicNote, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.width(12.dp))
+                                                Column {
+                                                    Text(song.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Text(song.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                }
+                                            }
+
+                                            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+                                            SongContextMenuActions(song = song, onDismiss = { showSheet = false }, onAddToQueueNext = { onAddToQueueNext(song) })
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
+            }
+        }
+    }
 
-                if (pages.size > 1) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        repeat(pages.size) { index ->
-                            Box(
+    // 歌曲区块组件（自动根据设置分支切换）
+    @Composable
+    fun SongSection(
+        title: String,
+        sectionKey: String,
+        refreshGeneration: Int,
+        songs: List<SongInfo>,
+        onSongClick: (Int) -> Unit,
+        currentPlayingPath: String? = null,
+        isPlaying: Boolean = false
+    ) {
+        if (previewPushPageBar) {
+            PreviewPushPageSongSection(
+                title = title,
+                sectionKey = sectionKey,
+                refreshGeneration = refreshGeneration,
+                songs = songs,
+                onSongClick = onSongClick,
+                currentPlayingPath = currentPlayingPath,
+                isPlaying = isPlaying
+            )
+        } else {
+            // 原生默认样式
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 8.dp)
+                )
+                if (songs.isEmpty()) {
+                    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        repeat(4) { SongSkeletonCard() }
+                    }
+                } else {
+                    val pageSize = 4
+                    val pages = songs.chunked(pageSize)
+                    key(refreshGeneration) {
+                        val savedPage = (homePagerStates[sectionKey] ?: 0)
+                            .coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+                        val pagerState = rememberPagerState(initialPage = savedPage) { pages.size }
+                        LaunchedEffect(pagerState.currentPage) {
+                            homePagerStates[sectionKey] = pagerState.currentPage
+                        }
+
+                        HorizontalPager(
+                            state = pagerState,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .pointerInput(pages.size) {
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        var horizontalLocked = false
+                                        while (true) {
+                                            val event = awaitPointerEvent()
+                                            val change = event.changes.firstOrNull() ?: break
+                                            if (change.changedToUp()) {
+                                                change.consume()
+                                                break
+                                            }
+                                            if (!horizontalLocked) {
+                                                val dx = change.position.x - down.position.x
+                                                val dy = change.position.y - down.position.y
+                                                val slop = viewConfiguration.touchSlop
+                                                if (abs(dx) > slop || abs(dy) > slop) {
+                                                    if (abs(dx) > abs(dy)) {
+                                                        horizontalLocked = true
+                                                    } else {
+                                                        break
+                                                    }
+                                                }
+                                            }
+                                            if (horizontalLocked) {
+                                                change.consume()
+                                            }
+                                        }
+                                    }
+                                }
+                        ) { pageIndex ->
+                            val pageSongs = pages[pageIndex]
+                            Column {
+                                pageSongs.forEachIndexed { indexInPage, song ->
+                                    val globalIndex = pageIndex * pageSize + indexInPage
+                                    key(song.filePath ?: "song_${pageIndex}_$indexInPage") {
+                                        var showSheet by remember { mutableStateOf(false) }
+
+                                        RankSongCard(
+                                            rank = globalIndex + 1,
+                                            song = song,
+                                            showRank = false,
+                                            isCurrentSong = song.filePath == currentPlayingPath,
+                                            isPlaying = isPlaying && song.filePath == currentPlayingPath,
+                                            onClick = { onSongClick(globalIndex) },
+                                            onMenuClick = { showSheet = true }
+                                        )
+
+                                        if (showSheet) {
+                                            ModalBottomSheet(
+                                                onDismissRequest = { showSheet = false },
+                                                containerColor = MaterialTheme.colorScheme.surface,
+                                                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    val coverUrl = song.albumArtUri
+                                                    if (!coverUrl.isNullOrBlank()) {
+                                                        val painter = rememberAsyncImagePainter(
+                                                            model = ImageRequest.Builder(LocalContext.current)
+                                                                .data(coverUrl)
+                                                                .memoryCacheKey(coverUrl)
+                                                                .crossfade(150)
+                                                                .size(200)
+                                                                .build()
+                                                        )
+                                                        Image(painter, null, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
+                                                    } else {
+                                                        Box(Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
+                                                            Icon(Icons.Default.MusicNote, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                        }
+                                                    }
+                                                    Spacer(modifier = Modifier.width(12.dp))
+                                                    Column {
+                                                        Text(song.title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                        Text(song.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    }
+                                                }
+
+                                                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+                                                SongContextMenuActions(song = song, onDismiss = { showSheet = false }, onAddToQueueNext = { onAddToQueueNext(song) })
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (pages.size > 1) {
+                            Row(
                                 modifier = Modifier
-                                    .padding(horizontal = 3.dp)
-                                    .size(
-                                        width = if (pagerState.currentPage == index) 14.dp else 5.dp,
-                                        height = 5.dp
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                repeat(pages.size) { index ->
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(horizontal = 3.dp)
+                                            .size(
+                                                width = if (pagerState.currentPage == index) 14.dp else 5.dp,
+                                                height = 5.dp
+                                            )
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .background(
+                                                if (pagerState.currentPage == index)
+                                                    MaterialTheme.colorScheme.primary
+                                                else
+                                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
+                                            )
                                     )
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(
-                                        if (pagerState.currentPage == index)
-                                            MaterialTheme.colorScheme.primary
-                                        else
-                                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
-                                    )
-                            )
+                                }
+                            }
                         }
                     }
-                }
                 }
             }
         }

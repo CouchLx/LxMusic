@@ -42,6 +42,12 @@ interface CollectionDao {
     @Query("UPDATE user_playlists SET name = :newName WHERE id = :playlistId")
     suspend fun renamePlaylist(playlistId: Long, newName: String)
 
+    @Query("UPDATE user_playlists SET coverUrl = :coverUrl WHERE id = :playlistId")
+    suspend fun updatePlaylistCover(playlistId: Long, coverUrl: String?)
+
+    @Query("SELECT * FROM user_playlists WHERE id = :playlistId LIMIT 1")
+    suspend fun getUserPlaylistById(playlistId: Long): UserPlaylistEntity?
+
     @Query("SELECT albumArtUri FROM playlist_songs WHERE playlistId = :playlistId AND albumArtUri IS NOT NULL AND albumArtUri != '' LIMIT 1")
     suspend fun getPlaylistFirstCover(playlistId: Long): String?
 

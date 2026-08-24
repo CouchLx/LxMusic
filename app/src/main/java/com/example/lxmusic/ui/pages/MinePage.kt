@@ -70,7 +70,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.example.lxmusic.ui.components.IOLoadingIndicator
@@ -142,6 +144,9 @@ fun MinePage(
     // 收藏功能状态
     var collectionExpanded by remember { mutableStateOf(minePrefs.getBoolean("collection_expanded", false)) }
     var userPlaylists by remember { mutableStateOf<List<UserPlaylistEntity>>(emptyList()) }
+    var userPlaylistSongCounts by remember { mutableStateOf<Map<Long, Int>>(emptyMap()) }
+    var userPlaylistCovers by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
+    var firstCollectedCover by remember { mutableStateOf<String?>(null) }
     var collectedSongCount by remember { mutableIntStateOf(0) }
     var showCreateDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
@@ -177,8 +182,26 @@ fun MinePage(
         if (collectionExpanded) {
             scope.launch(Dispatchers.IO) {
                 collectedSongCount = collectionDao.getCollectedSongCount()
+                val collected = collectionDao.getAllCollectedSongs()
+                val cCover = collected.firstOrNull { !it.albumArtUri.isNullOrBlank() }?.albumArtUri
                 val raw = collectionDao.getAllUserPlaylists()
-                userPlaylists = applyLocalUserPlaylistsOrder(raw)
+                val ordered = applyLocalUserPlaylistsOrder(raw)
+                val counts = mutableMapOf<Long, Int>()
+                val covers = mutableMapOf<Long, String>()
+                raw.forEach { pl ->
+                    val songs = collectionDao.getPlaylistSongs(pl.id)
+                    counts[pl.id] = songs.size
+                    val cover = pl.coverUrl ?: songs.firstOrNull { !it.albumArtUri.isNullOrBlank() }?.albumArtUri
+                    if (!cover.isNullOrBlank()) {
+                        covers[pl.id] = cover
+                    }
+                }
+                withContext(Dispatchers.Main) {
+                    userPlaylists = ordered
+                    userPlaylistSongCounts = counts
+                    userPlaylistCovers = covers
+                    firstCollectedCover = cCover
+                }
             }
         }
     }
@@ -453,30 +476,49 @@ fun MinePage(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 12.dp),
+                            .padding(horizontal = 4.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(MaterialTheme.colorScheme.primaryContainer),
-                            contentAlignment = Alignment.Center
+                        Surface(
+                            modifier = Modifier.size(64.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer
                         ) {
-                            Icon(
-                                Icons.Default.Favorite, null, Modifier.size(26.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            if (!firstCollectedCover.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = firstCollectedCover,
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Favorite,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(32.dp),
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
                         }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(stringResource(R.string.title_my_favorites), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
                             Text(
-                                "$collectedSongCount 首", style = MaterialTheme.typography.bodySmall,
+                                text = stringResource(R.string.title_my_favorites),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = "$collectedSongCount 首歌曲",
+                                style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 
@@ -491,29 +533,67 @@ fun MinePage(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    userPlaylists.forEach { pl ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onCollectionDetailClick("playlist", pl.id) }
-                                .padding(horizontal = 8.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        userPlaylists.forEach { pl ->
+                            val cover = pl.coverUrl ?: userPlaylistCovers[pl.id]
+                            val count = userPlaylistSongCounts[pl.id] ?: 0
+                            Surface(
                                 modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(MaterialTheme.colorScheme.primaryContainer),
-                                contentAlignment = Alignment.Center
+                                    .fillMaxWidth()
+                                    .clickable { onCollectionDetailClick("playlist", pl.id) },
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color.Transparent
                             ) {
-                                Icon(
-                                    Icons.Default.LibraryMusic, null, Modifier.size(26.dp),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        modifier = Modifier.size(64.dp),
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.primaryContainer
+                                    ) {
+                                        if (!cover.isNullOrBlank()) {
+                                            AsyncImage(
+                                                model = cover,
+                                                contentDescription = null,
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        } else {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    imageVector = Icons.Default.LibraryMusic,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(32.dp),
+                                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            text = pl.name,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            text = "$count 首歌曲",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                             }
-                            Spacer(Modifier.width(12.dp))
-                            Text(pl.name, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
-                            Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }

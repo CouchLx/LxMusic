@@ -125,7 +125,7 @@ fun PlaylistManagerPage(onBack: () -> Unit) {
             val covers = mutableMapOf<Long, String?>()
             ordered.forEach { pl ->
                 counts[pl.id] = collectionDao.getPlaylistSongCount(pl.id)
-                covers[pl.id] = collectionDao.getPlaylistFirstCover(pl.id)
+                covers[pl.id] = pl.coverUrl ?: collectionDao.getPlaylistFirstCover(pl.id)
             }
             withContext(Dispatchers.Main) {
                 userPlaylists = ordered

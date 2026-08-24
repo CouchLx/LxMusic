@@ -698,7 +698,7 @@ class SettingsRepository(context: Context) {
             _audioQuality = value
             prefs.edit().putString(Keys.AUDIO_QUALITY, value).apply()
         }
-    private var _audioQuality: String? by mutableStateOf(prefs.getString(Keys.AUDIO_QUALITY, null))
+    private var _audioQuality: String? by mutableStateOf(prefs.getString(Keys.AUDIO_QUALITY, "flac"))
 
     var serverUrl: String?
         get() = _serverUrl

@@ -18,10 +18,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -69,6 +71,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import coil.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.CoroutineStart
@@ -121,6 +124,7 @@ fun MiniPlayerBar(
     backdrop: Backdrop? = null,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val progressState by progress.collectAsState()
     val currentPosition = progressState.positionMs
     val totalDuration = progressState.durationMs
@@ -130,7 +134,7 @@ fun MiniPlayerBar(
     // 横滑跟手位移（歌名信息跟手平移；0 = 归位）
     val dragOffset = remember { Animatable(0f) }
     // 切换触发距离（跟手位移超过该值，松手即切换）
-    val switchThresholdPx = with(LocalDensity.current) { 32.dp.toPx() }
+    val switchThresholdPx = with(LocalDensity.current) { 48.dp.toPx() }
     // 横滑速度追踪：轻快滑动（位移小但速度快）也能触发切换
     val swipeVelocityTracker = remember { VelocityTracker() }
     // 拖动方向（-1=下一首左滑，1=上一首右滑，0=无）；derivedStateOf 只在方向变化时触发重组
@@ -178,42 +182,25 @@ fun MiniPlayerBar(
     val horizontalPadding = 14.dp
     val verticalPadding = if (isFloatingBottomBar) 4.dp else 8.dp
 
-    // 背景色计算
+    // 背景色计算：直接使用 MaterialTheme.colorScheme.secondaryContainer，随主题/专辑封面实时变色
     val barOpacity = playerBarOpacity.coerceIn(0f, 1f)
-    val backgroundColor = when {
-        // 现代化主题：底色参考原生主题播放条（secondaryContainer，随动态取色变化），
-        // 白色混合 0% = 原生色调，100% = 纯白；底栏保持白色由底栏组件固定（互不影响）
-        isFloatingBottomBar -> {
-            val baseColor = MaterialTheme.colorScheme.secondaryContainer
-            // 白色混合
-            Color(
-                red = baseColor.red + (1f - baseColor.red) * playerBarWhiteBlend,
-                green = baseColor.green + (1f - baseColor.green) * playerBarWhiteBlend,
-                blue = baseColor.blue + (1f - baseColor.blue) * playerBarWhiteBlend,
-                alpha = barOpacity
-            )
-        }
-        // 原生主题：Neri 风格（secondaryContainer，透明度直接由播放条不透明度控制）
-        else -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = barOpacity)
-    }
+    val backgroundColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = barOpacity)
 
     // 进度计算
     val progress = if (totalDuration > 0) {
         (currentPosition.toFloat() / totalDuration.toFloat()).coerceIn(0f, 1f)
     } else 0f
 
+    // 主题色
+    val primaryColor = MaterialTheme.colorScheme.primary
+
     // 液态玻璃：开启且背景层可用时启用（与导航栏保持一致的苹果风格）
     val isDarkTheme = isSystemInDarkTheme()
     val glassActive = liquidGlass && backdrop != null
-    // 玻璃容器色：半透明，深浅跟随主题（对齐导航栏 shell 容器色 alpha 0.4）
-    val glassContainerColor = if (isDarkTheme) {
-        Color(0xFF121212).copy(alpha = 0.4f)
-    } else {
-        Color.White.copy(alpha = 0.4f)
-    }
-
-    // 主题色
-    val primaryColor = MaterialTheme.colorScheme.primary
+    // 玻璃容器色：半透明材质并注入当前主题/专辑微光 tint
+    val glassContainerColor = MaterialTheme.colorScheme.surfaceContainer.copy(
+        alpha = (0.24f * barOpacity).coerceIn(0.08f, 1f)
+    )
 
     // 适配后的底部间距：直接使用调用方传入的实测值（已在 MainActivity 统一处理缩放）
     val adaptedBottomPadding = bottomPadding
@@ -222,70 +209,48 @@ fun MiniPlayerBar(
         modifier = modifier
             .then(
                 if (isFloatingBottomBar) {
-                    // 悬浮模式：全宽自适应（与原生主题一致，任意 UI 缩放/手机尺寸都不溢出），
-                    // 现代化样式（圆角/阴影/主题色）保留；内容在布局内自适应
                     Modifier.fillMaxWidth()
                 } else {
-                    // 原生主题：全宽贴底（对齐 Neri 的 fillMaxWidth）
                     Modifier.fillMaxWidth()
                 }
             )
             .navigationBarsPadding()
             .padding(
-                // 现代化悬浮：左右边距按屏宽 2% 等比例（任意屏幕大小视觉比例一致）；
-                // 原生主题：固定 6dp（贴边）
-                start = if (isFloatingBottomBar) {
-                    LocalConfiguration.current.screenWidthDp.dp * 0.02f
-                } else {
-                    6.dp
-                },
-                end = if (isFloatingBottomBar) {
-                    LocalConfiguration.current.screenWidthDp.dp * 0.02f
-                } else {
-                    6.dp
-                },
-                bottom = adaptedBottomPadding
+                start = if (isFloatingBottomBar) 16.dp else 6.dp,
+                end = if (isFloatingBottomBar) 16.dp else 6.dp,
+                bottom = if (adaptedBottomPadding == 0.dp && isFloatingBottomBar) 8.dp else adaptedBottomPadding
             )
     ) {
-        // 主容器 - 使用 drawBehind 绘制背景，避免 Surface 的额外渲染
-        Column(
+        // 主容器 - 使用 Box 包裹，进度条绝对贴在最底部，没有任何底部空隙/白边
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .height(if (isFloatingBottomBar) 64.dp else 58.dp)
                 .then(
                     if (glassActive) {
-                        // 液态玻璃背景：无割裂层感 + 纯净通透 + 柔和毛玻璃模糊 + 鲜艳度 + 纯净晶莹折射。
-                        // 移除内部包裹圈（InnerShadow），让封面、歌名文字与整个播放条融为一体，无包裹割裂感
+                        // NPatch 同款液态玻璃背景：鲜明度 + 4dp 柔和模糊 + 24dp 凸透镜晶莹折射 + 边缘高光
                         Modifier.drawBackdrop(
-                            backdrop = backdrop!!,
+                            backdrop = backdrop,
                             shape = { barShape },
                             effects = {
                                 vibrancy()
-                                blur(14f.dp.toPx())
-                                smoothLiquidLens(
-                                    refractionHeight = if (isFloatingBottomBar) 5f.dp.toPx() else 3.5f.dp.toPx(),
-                                    refractionAmount = if (isFloatingBottomBar) 2.5f.dp.toPx() else 1.5f.dp.toPx(),
-                                    chromaticAberration = true,
-                                    depthEffect = isFloatingBottomBar
+                                blur(4.dp.toPx())
+                                lens(24.dp.toPx(), 24.dp.toPx())
+                            },
+                            highlight = {
+                                Highlight.Default.copy(
+                                    alpha = if (isDarkTheme) 0.12f else 0.22f
                                 )
                             },
-                            innerShadow = null,
-                            highlight = {
-                                if (isFloatingBottomBar) {
-                                    Highlight.Default.copy(
-                                        width = 0.5.dp,
-                                        alpha = if (isDarkTheme) 0.10f else 0.18f
-                                    )
-                                } else {
-                                    Highlight.Plain.copy(
-                                        width = 0.5.dp,
-                                        alpha = if (isDarkTheme) 0.08f else 0.16f
-                                    )
-                                }
+                            shadow = {
+                                Shadow.Default.copy(
+                                    color = Color.Black.copy(if (isDarkTheme) 0.12f else 0.06f)
+                                )
                             },
-                            shadow = if (isFloatingBottomBar) {
-                                { Shadow.Default.copy(color = Color.Black.copy(alpha = 0.08f)) }
-                            } else null,
-                            onDrawSurface = { drawRect(glassContainerColor) }
+                            onDrawSurface = {
+                                drawRect(glassContainerColor)
+                                drawRect(primaryColor.copy(alpha = if (isDarkTheme) 0.10f else 0.08f))
+                            }
                         )
                     } else {
                         Modifier
@@ -323,8 +288,9 @@ fun MiniPlayerBar(
                                     val current = dragOffset.value
                                     val velocityX = swipeVelocityTracker.calculateVelocity().x
                                     val shouldSwitch =
-                                        abs(current) > switchThresholdPx || abs(velocityX) > 700f
+                                        abs(current) > switchThresholdPx * 0.65f || abs(velocityX) > 600f
                                     if (shouldSwitch) {
+                                        context.performHapticFeedback(HapticFeedbackEffect.Click)
                                         if (current < 0) {
                                             swipeDirection = -1
                                             onNext()
@@ -420,8 +386,13 @@ fun MiniPlayerBar(
             // 内容区域
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = horizontalPadding, vertical = verticalPadding),
+                    .fillMaxSize()
+                    .padding(
+                        start = if (isFloatingBottomBar) 10.dp else 12.dp,
+                        end = if (isFloatingBottomBar) 10.dp else 12.dp,
+                        top = 4.dp,
+                        bottom = 4.dp
+                    ),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // 专辑封面：切歌时自然淡入淡出刷新（不滑动，渐变过渡）
@@ -436,51 +407,50 @@ fun MiniPlayerBar(
                     AlbumCoverSimple(
                         filePath = targetSong.filePath,
                         albumArtUri = targetSong.albumArtUri,
-                        size = albumSize,
-                        cornerRadius = albumCornerRadius
+                        size = if (isFloatingBottomBar) 48.dp else 40.dp,
+                        cornerRadius = if (isFloatingBottomBar) 12.dp else 8.dp
                     )
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
 
-                // 中间"卡片窗口"：歌名/歌手在窗口内跟手平移，
-                // 超出卡片边界被 clip 裁切（视觉上被两侧图片/按钮遮挡）；
-                // 标签（上一首/下一首）在卡片边缘浮现
+                // 中间"卡片窗口"：歌名/歌手居中对齐，左右滑动时歌名被推挤出视野，下一首/上一首文本跟手推入
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(albumSize)
-                        .clipToBounds()
+                        .fillMaxHeight()
+                        .clipToBounds(),
+                    contentAlignment = Alignment.CenterStart
                 ) {
-                    // 标签：左滑（下一首）时显示在暂停键左侧；右滑（上一首）时从图片侧浮现
-                    val labelAlign = when (dragDirection) {
-                        -1 -> Alignment.CenterEnd
-                        1 -> Alignment.CenterStart
-                        else -> Alignment.Center
-                    }
+                    val currentDrag = dragOffset.value
+
+                    // 右滑时：从左侧推入"上一首"
                     Text(
-                        text = when (dragDirection) {
-                            -1 -> "下一首"
-                            1 -> "上一首"
-                            else -> ""
-                        },
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = titleColor,
+                        text = "上一首",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = primaryColor,
                         maxLines = 1,
                         modifier = Modifier
-                            .align(labelAlign)
+                            .align(Alignment.CenterStart)
                             .graphicsLayer {
-                                // 跟手浮现：位移越大越清晰
-                                alpha = (abs(dragOffset.value) / switchThresholdPx).coerceIn(0f, 1f)
+                                translationX = -switchThresholdPx + currentDrag
+                                alpha = if (currentDrag > 0f) {
+                                    (currentDrag / (switchThresholdPx * 0.6f)).coerceIn(0f, 1f)
+                                } else 0f
                             }
                     )
 
-                    // 歌名/歌手信息：跟手平移，切换后随 dragOffset 归位
+                    // 歌名/歌手信息：垂直居中，跟手平移被推挤出视野
                     AnimatedContent(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .offset { IntOffset(dragOffset.value.roundToInt(), 0) },
+                            .align(Alignment.CenterStart)
+                            .graphicsLayer {
+                                translationX = currentDrag
+                            },
                         targetState = song,
                         transitionSpec = {
                             if (swipeDirection <= 0) {
@@ -494,39 +464,59 @@ fun MiniPlayerBar(
                         contentKey = { it.filePath },
                         label = "textAnim"
                     ) { targetSong ->
-                        Column {
+                        Column(
+                            modifier = Modifier.fillMaxHeight(),
+                            verticalArrangement = Arrangement.Center
+                        ) {
                             Text(
                                 text = targetSong.title,
-                                style = if (isFloatingBottomBar) {
-                                    MaterialTheme.typography.titleSmall
-                                } else {
-                                    MaterialTheme.typography.titleMedium
-                                },
-                                fontWeight = if (isFloatingBottomBar) FontWeight.SemiBold else FontWeight.Normal,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontSize = if (isFloatingBottomBar) 14.5.sp else 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    lineHeight = 18.sp
+                                ),
                                 color = titleColor,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = targetSong.artist,
-                                style = if (isFloatingBottomBar) {
-                                    MaterialTheme.typography.bodySmall
-                                } else {
-                                    MaterialTheme.typography.bodyMedium
-                                },
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = 12.sp,
+                                    lineHeight = 15.sp
+                                ),
                                 color = artistColor,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
+
+                    // 左滑时：从右侧推入"下一首"
+                    Text(
+                        text = "下一首",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = primaryColor,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .graphicsLayer {
+                                translationX = switchThresholdPx + currentDrag
+                                alpha = if (currentDrag < 0f) {
+                                    (abs(currentDrag) / (switchThresholdPx * 0.6f)).coerceIn(0f, 1f)
+                                } else 0f
+                            }
+                    )
                 }
 
                 // 播放/暂停按钮
-                val context = LocalContext.current
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(44.dp)
                         .clickable(
                             indication = null,
                             interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
@@ -539,15 +529,15 @@ fun MiniPlayerBar(
                     Icon(
                         imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = if (isPlaying) stringResource(R.string.action_pause) else stringResource(R.string.action_play),
-                        modifier = Modifier.size(28.dp),
+                        modifier = Modifier.size(26.dp),
                         tint = titleColor
                     )
                 }
 
-                // 更多按钮
+                // 更多/播放列表按钮
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(44.dp)
                         .clickable(
                             indication = null,
                             interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
@@ -566,33 +556,28 @@ fun MiniPlayerBar(
                 }
             }
 
-            // 进度条（在内容下方，常驻不消失）
-            // 切歌或时长未加载（totalDuration == 0）时，进度为 0 只显示轨道，
-            // 避免进度条先消失再出现的闪烁。
+            // 进度条（绝对贴紧最底部边缘，裁切为胶囊圆角，无任何白边与间隙）
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(3.dp)
-                    .padding(horizontal = horizontalPadding)
+                    .align(Alignment.BottomCenter)
+                    .height(2.5.dp)
+                    .clip(barShape)
             ) {
                 // 背景轨道
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .clip(RoundedCornerShape(1.5.dp))
-                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f))
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f))
                 )
                 // 进度
                 Box(
                     modifier = Modifier
                         .fillMaxWidth(progress)
-                        .height(3.dp)
-                        .clip(RoundedCornerShape(1.5.dp))
+                        .fillMaxHeight()
                         .background(primaryColor)
                 )
             }
-            Spacer(modifier = Modifier.height(0.dp))
         }
     }
 }

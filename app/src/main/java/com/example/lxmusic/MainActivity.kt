@@ -373,16 +373,6 @@ class MainActivity : ComponentActivity() {
                     }
                     albumSeedColorHex = com.example.lxmusic.ui.effect.extractAlbumSeedHex(ctx, imageLoader, albumModel)
                 }
-                // 自定义主色仅现代化主题生效；原生主题一律走种子色/专辑取色路径，
-                // 避免 themeColorHex 残留值劫持种子色导致背景不跟随变化
-                val customColor = if (
-                    settingsRepository.themeMode == "modern" &&
-                    themeColorHex.isNotBlank() &&
-                    !dynamicColor
-                ) {
-                    try { Color(android.graphics.Color.parseColor(themeColorHex)) } catch (_: Exception) { null }
-                } else null
-
                 // 明暗模式：自动 / 浅色 / 深色
                 val resolvedDarkTheme = when (themeDarkMode) {
                     "light" -> false
@@ -406,7 +396,7 @@ class MainActivity : ComponentActivity() {
                     darkTheme = resolvedDarkTheme,
                     dynamicColor = dynamicColor,
                     albumSeedColorHex = albumSeedColorHex,
-                    customPrimaryColor = customColor,
+                    customPrimaryColor = null,
                     seedColorHex = themeSeedColor,
                     paletteStyle = themePaletteStyle,
                     colorAnimation = themeColorAnimation,
@@ -1213,7 +1203,12 @@ fun AppScaffold(
                                                 if (isThemeRevealing) return@ThemeModeToggleButton
                                                 isThemeRevealing = true
                                                 val activity = context as? android.app.Activity
-                                                val nextMode = if (isDark) "light" else "dark"
+                                                val nextMode = when (themeDarkMode) {
+                                                    "auto" -> if (isDark) "light" else "dark"
+                                                    "light" -> "dark"
+                                                    "dark" -> "auto"
+                                                    else -> "auto"
+                                                }
 
                                                 scope.launch {
                                                     val snapshot = activity?.let { captureActivitySnapshot(it) }
@@ -1230,7 +1225,7 @@ fun AppScaffold(
                                     Text(
                                         text = when (settingsSubPage) {
                                             "display" -> "主题设置"
-                                            "customize" -> "自定义个性化"
+                                            "customize" -> "壁纸风格"
                                             "motion" -> "动效设置"
                                             "player" -> "播放器设置"
                                             "playback" -> "播放设置"
@@ -2102,7 +2097,7 @@ fun AppScaffold(
     if (currentSong != null) lastValidSong.value = currentSong
     val displaySong = lastValidSong.value
     AnimatedVisibility(
-        visible = currentSong != null && !showPlayerPage && selectedTab !in listOf(12, 15, 17) && !isSelectionModeActive,
+        visible = currentSong != null && !showPlayerPage && selectedTab !in listOf(12, 15, 17) && !isSelectionModeActive && (!floatingBottomBar || !showNavBar),
         modifier = Modifier.align(Alignment.BottomCenter),
         enter = slideInVertically(initialOffsetY = { it }, animationSpec = tween(280)) + fadeIn(tween(220)),
         exit = slideOutVertically(targetOffsetY = { it }, animationSpec = tween(200)) + fadeOut(tween(150))
@@ -2547,11 +2542,30 @@ fun AppScaffold(
                     alpha = if (isMiniBarDragging) 1f - progress else 1f
                 }
             ) {
-                FloatingBottomBar(selectedTab, { index ->
-                    selectedTab = index
-                }, blurNavBar, floatingBottomBar, liquidGlass, glassBackdrop,
-                if (floatingBottomBar) floatingBarOpacity else navBarOpacity,
-                followThemeColor, playerBarWhiteBlend)
+                FloatingBottomBar(
+                    selectedTabIndex = selectedTab,
+                    onTabSelected = { index -> selectedTab = index },
+                    blurEnabled = blurNavBar,
+                    isFloating = floatingBottomBar,
+                    liquidGlass = liquidGlass,
+                    backdrop = glassBackdrop,
+                    navBarOpacity = if (floatingBottomBar) floatingBarOpacity else navBarOpacity,
+                    followThemeColor = followThemeColor,
+                    playerBarWhiteBlend = playerBarWhiteBlend,
+                    currentSong = if (selectedTab !in listOf(12, 15, 17) && !isSelectionModeActive) currentSong else null,
+                    isPlaying = isPlaying,
+                    progress = playerViewModel.progress,
+                    onPlayPause = { playerViewModel.playPause() },
+                    onNext = { playNext() },
+                    onPlayerClick = {
+                        scope.launch {
+                            isRevealAnimating = true
+                            playerRevealY.snapTo(screenHeightPx * 0.75f)
+                            animateRevealTo(0f, tween(350, easing = FastOutSlowInEasing))
+                            showPlayerPage = true
+                        }
+                    }
+                )
             }
         }
 

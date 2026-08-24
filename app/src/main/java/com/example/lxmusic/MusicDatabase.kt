@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [SongEntity::class, CollectedSongEntity::class, UserPlaylistEntity::class, PlaylistSongCrossRef::class, LikedSongEntity::class, LikedPlaylistEntity::class],
-    version = 8,
+    version = 9,
     exportSchema = true
 )
 abstract class MusicDatabase : RoomDatabase() {
@@ -47,6 +47,13 @@ abstract class MusicDatabase : RoomDatabase() {
             }
         }
 
+        // v8 → v9：user_playlists 增加 coverUrl 列（支持自定义歌单封面）
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `user_playlists` ADD COLUMN `coverUrl` TEXT")
+            }
+        }
+
         fun getDatabase(context: Context): MusicDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -54,7 +61,7 @@ abstract class MusicDatabase : RoomDatabase() {
                     MusicDatabase::class.java,
                     "lx_music_database"
                 )
-                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     .fallbackToDestructiveMigration().build()
                 INSTANCE = instance
                 instance

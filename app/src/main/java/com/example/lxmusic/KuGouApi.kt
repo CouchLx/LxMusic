@@ -1087,9 +1087,9 @@ object KuGouApi {
     @Volatile
     var useOwnerAuth: Boolean = false
 
-    // 播放音质: null=默认, "128", "320", "flac", "high"
+    // 播放音质: "flac"=无损(默认), "128", "320", "high"
     @Volatile
-    var audioQuality: String? = null
+    var audioQuality: String? = "flac"
 
     // 当前播放歌曲的音质信息（由 SongDataSource 更新）
     @Volatile

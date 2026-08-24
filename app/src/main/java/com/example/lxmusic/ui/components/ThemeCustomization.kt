@@ -3,15 +3,16 @@ package com.example.lxmusic.ui.components
 import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,35 +26,26 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.ViewHeadline
+import androidx.compose.material.icons.filled.Opacity
+import androidx.compose.material.icons.filled.Wallpaper
+import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,6 +53,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -68,60 +61,47 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
+import com.example.lxmusic.ui.components.wallpaper.WallpaperCropDialog
 import java.io.File
-import java.util.UUID
 
-// 主题预设数据模型（仅保存背景图，不再携带自定义颜色）
-data class ThemePreset(
+/**
+ * 壁纸条目
+ */
+data class WallpaperItem(
     val id: String,
-    val name: String,
-    val backgroundImageUri: String?
+    val filePath: String,
+    val timestamp: Long = System.currentTimeMillis()
 )
 
 /**
- * 将content:// URI的图片复制到应用内部存储
- * 返回内部存储的file://路径
+ * 加载所有已保存的壁纸
  */
-fun copyImageToInternalStorage(context: Context, sourceUri: String): String? {
-    return try {
-        val uri = Uri.parse(sourceUri)
-        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
-        
-        // 创建内部存储目录
-        val imagesDir = File(context.filesDir, "theme_images")
-        if (!imagesDir.exists()) imagesDir.mkdirs()
-        
-        // 生成唯一文件名
-        val fileName = "theme_${UUID.randomUUID()}.jpg"
-        val outputFile = File(imagesDir, fileName)
-        
-        // 复制文件
-        inputStream.use { input ->
-            outputFile.outputStream().use { output ->
-                input.copyTo(output)
-            }
-        }
-        
-        // 返回内部存储路径
-        outputFile.absolutePath
-    } catch (e: Exception) {
-        android.util.Log.e("LxMusic", "copyImageToInternalStorage failed", e)
-        null
-    }
+fun loadSavedWallpapers(context: Context): List<WallpaperItem> {
+    val dir = File(context.filesDir, "wallpapers")
+    if (!dir.exists()) return emptyList()
+    return dir.listFiles { file -> file.isFile && (file.name.endsWith(".jpg") || file.name.endsWith(".png") || file.name.endsWith(".jpeg")) }
+        ?.sortedByDescending { it.lastModified() }
+        ?.map { file ->
+            WallpaperItem(
+                id = file.name,
+                filePath = file.absolutePath,
+                timestamp = file.lastModified()
+            )
+        } ?: emptyList()
 }
 
 /**
- * 主题自定义组件 - 可折叠
+ * 重构后的「自定义个性化 - 手机标准壁纸相册」管理组件
  */
 @Composable
 fun ThemeCustomizationSection(
-    presets: List<ThemePreset>,
-    isExpanded: Boolean,
-    onExpandedChange: (Boolean) -> Unit,
-    onAddPreset: (ThemePreset, Boolean) -> Unit,       // (preset, applyNow)
-    onDeletePreset: (String) -> Unit,
-    onApplyPreset: (ThemePreset) -> Unit,
-    onEditPreset: (ThemePreset, Boolean) -> Unit,       // (preset, applyNow)
+    presets: List<Any> = emptyList(),
+    isExpanded: Boolean = true,
+    onExpandedChange: (Boolean) -> Unit = {},
+    onAddPreset: (Any, Boolean) -> Unit = { _, _ -> },
+    onDeletePreset: (String) -> Unit = {},
+    onApplyPreset: (Any) -> Unit = {},
+    onEditPreset: (Any, Boolean) -> Unit = { _, _ -> },
     appliedPresetId: String? = null,
     themeMode: String = "dynamic",
     currentBgImageUri: String? = null,
@@ -129,345 +109,366 @@ fun ThemeCustomizationSection(
     bgOpacity: Float = 0.5f,
     onOpacityChange: (Float) -> Unit = {},
     onResetDefaults: () -> Unit = {},
-    onClearBackgroundImage: () -> Unit = {}
+    onClearBackgroundImage: () -> Unit = {},
+    onRegisterPickAction: (() -> Unit) -> Unit = {}
 ) {
-    android.util.Log.d("LxMusic", "ThemeCustomizationSection: START render, presets=${presets.size}, expanded=$isExpanded")
-    var showAddDialog by remember { mutableStateOf(false) }
-    var editingPreset by remember { mutableStateOf<ThemePreset?>(null) }
-    var deletingPreset by remember { mutableStateOf<ThemePreset?>(null) }
+    val context = LocalContext.current
+    val settingsPrefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
+    
+    // 当前应用的壁纸 ID 跟踪
+    var appliedWallpaperId by remember {
+        mutableStateOf(settingsPrefs.getString("applied_wallpaper_id", null))
+    }
+    
+    var wallpapers by remember { mutableStateOf(loadSavedWallpapers(context)) }
+    var selectedCropUri by remember { mutableStateOf<Uri?>(null) }
+    var wallpaperToDelete by remember { mutableStateOf<WallpaperItem?>(null) }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // 标题栏 - 无点击特效
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { onExpandedChange(!isExpanded) },
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Palette,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "主题自定义",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Icon(
-                    imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (isExpanded) "收起" else "展开"
-                )
-            }
-
-            // 展开内容
-            AnimatedVisibility(
-                visible = isExpanded,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                Column {
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // 添加按钮
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        Button(
-                            onClick = { showAddDialog = true },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.primary
-                            )
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("添加预设")
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // 预设列表
-                    if (presets.isEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(100.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "暂无预设，点击上方按钮添加",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            presets.forEach { preset ->
-                                // 判断预设是否已应用：只看预设ID是否匹配
-                                val isApplied = appliedPresetId == preset.id
-                                ThemePresetCard(
-                                    preset = preset,
-                                    isApplied = isApplied,
-                                    onApply = { onApplyPreset(preset) },
-                                    onEdit = { editingPreset = preset },
-                                    onDelete = { deletingPreset = preset }
-                                )
-                            }
-                        }
-                    }
-
-                    // 背景不透明度滑块（仅在有背景图片时显示）
-                    if (hasBackgroundImage) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "背景不透明度: ${(bgOpacity * 100).toInt()}%",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Slider(
-                            value = bgOpacity,
-                            onValueChange = onOpacityChange,
-                            valueRange = 0f..1f,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                    
-                    // --- 恢复默认按钮区域 ---
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        // 恢复默认预设按钮
-                        OutlinedButton(
-                            onClick = onResetDefaults,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("恢复默认预设", style = MaterialTheme.typography.bodySmall)
-                        }
-                        
-                        // 仅清除背景图片按钮
-                        if (hasBackgroundImage) {
-                            OutlinedButton(
-                                onClick = onClearBackgroundImage,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = MaterialTheme.colorScheme.error
-                                )
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("清除背景图片", style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
-                    }
-                }
-            }
+    // 系统相册选择器
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            selectedCropUri = uri
         }
     }
 
-    // 添加预设对话框
-    if (showAddDialog) {
-        AddThemePresetDialog(
-            onDismiss = { showAddDialog = false },
-            onSave = { preset ->
-                onAddPreset(preset, false)
-                showAddDialog = false
-            },
-            onSaveAndApply = { preset ->
-                onAddPreset(preset, true)
-                showAddDialog = false
+    // 注册相册选择动作给外层悬浮按键
+    val triggerPickAction = remember {
+        {
+            photoPickerLauncher.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+            )
+        }
+    }
+    LaunchedEffect(triggerPickAction) {
+        onRegisterPickAction(triggerPickAction)
+    }
+
+    // 裁剪对话框
+    selectedCropUri?.let { uri ->
+        WallpaperCropDialog(
+            imageUri = uri,
+            onDismiss = { selectedCropUri = null },
+            onCropSuccess = { croppedFile ->
+                selectedCropUri = null
+                wallpapers = loadSavedWallpapers(context)
+                val newId = croppedFile.name
+                appliedWallpaperId = newId
+                settingsPrefs.edit().putString("applied_wallpaper_id", newId).apply()
+                onAddPreset(croppedFile.absolutePath, true)
             }
         )
     }
 
-    // 编辑预设对话框
-    editingPreset?.let { preset ->
-        EditThemePresetDialog(
-            preset = preset,
-            onDismiss = { editingPreset = null },
-            onSave = { editedPreset ->
-                onEditPreset(editedPreset, false)
-                editingPreset = null
-            },
-            onSaveAndApply = { editedPreset ->
-                onEditPreset(editedPreset, true)
-                editingPreset = null
-            }
-        )
+    // 清除壁纸操作
+    val handleClearWallpaper: () -> Unit = {
+        appliedWallpaperId = null
+        settingsPrefs.edit().remove("applied_wallpaper_id").apply()
+        onClearBackgroundImage()
     }
 
-    // 删除确认弹窗
-    deletingPreset?.let { preset ->
+    // 应用壁纸操作
+    val handleApplyWallpaper: (WallpaperItem) -> Unit = { wallpaper ->
+        appliedWallpaperId = wallpaper.id
+        settingsPrefs.edit().putString("applied_wallpaper_id", wallpaper.id).apply()
+        onAddPreset(wallpaper.filePath, true)
+    }
+
+    // 删除确认对话框
+    wallpaperToDelete?.let { item ->
         AlertDialog(
-            onDismissRequest = { deletingPreset = null },
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            titleContentColor = MaterialTheme.colorScheme.onSurface,
-            title = { Text("确认删除") },
-            text = { Text("确定要删除预设「${preset.name}」吗？") },
+            onDismissRequest = { wallpaperToDelete = null },
+            title = { Text("删除壁纸", fontWeight = FontWeight.Bold) },
+            text = { Text("确定要从壁纸库中移除此壁纸吗？") },
             confirmButton = {
-                Button(
+                TextButton(
                     onClick = {
-                        onDeletePreset(preset.id)
-                        deletingPreset = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
-                ) { Text("删除") }
+                        val file = File(item.filePath)
+                        if (file.exists()) file.delete()
+                        wallpapers = loadSavedWallpapers(context)
+                        // 如果删除的是当前应用的壁纸，取消壁纸
+                        if (appliedWallpaperId == item.id) {
+                            handleClearWallpaper()
+                        }
+                        wallpaperToDelete = null
+                    }
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                }
             },
             dismissButton = {
-                TextButton(onClick = { deletingPreset = null }) { Text("取消") }
+                TextButton(onClick = { wallpaperToDelete = null }) {
+                    Text("取消")
+                }
             }
         )
     }
-}
 
-/**
- * 主题预设卡片
- */
-@Composable
-fun ThemePresetCard(
-    preset: ThemePreset,
-    isApplied: Boolean = false,
-    onApply: () -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit
-) {
-    Card(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // ===== 1. 壁纸库标题与快捷取消操作 =====
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
+                .padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 背景图片预览 - 竖屏比例 9:16
-            Box(
-                modifier = Modifier
-                    .height(72.dp)
-                    .aspectRatio(9f / 16f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-            ) {
-                if (preset.backgroundImageUri != null) {
-                    // 支持内部存储绝对路径和content:// URI
-                    val imageModel: Any = if (preset.backgroundImageUri.startsWith("/")) {
-                        File(preset.backgroundImageUri)
-                    } else {
-                        Uri.parse(preset.backgroundImageUri)
-                    }
-                    val painter = rememberAsyncImagePainter(model = imageModel)
-                    Image(
-                        painter = painter,
-                        contentDescription = "背景预览",
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Wallpaper,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "手机壁纸库",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            if (currentBgImageUri != null) {
+                Surface(
+                    onClick = handleClearWallpaper,
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Palette,
+                            imageVector = Icons.Outlined.Block,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(24.dp)
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "取消当前壁纸",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onErrorContainer
                         )
                     }
                 }
             }
+        }
 
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // 名称
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = preset.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium
+        // ===== 2. 不透明度调节卡片（当应用了壁纸时展示） =====
+        AnimatedVisibility(
+            visible = currentBgImageUri != null,
+            enter = fadeIn(),
+            exit = fadeOut()
+        ) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                 )
-            }
-
-            // 编辑按钮
-            IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
-                Icon(
-                    imageVector = Icons.Default.Edit,
-                    contentDescription = "编辑",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            // 删除按钮
-            IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "删除",
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            // 应用按钮
-            if (isApplied) {
-                // 已应用状态
-                Button(
-                    onClick = {},
-                    modifier = Modifier.height(36.dp),
-                    contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
-                    enabled = false,
-                    colors = ButtonDefaults.buttonColors(
-                        disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                        disabledContentColor = MaterialTheme.colorScheme.primary
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Opacity,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "壁纸不透明度",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Text(
+                            text = "${(bgOpacity * 100).toInt()}%",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Slider(
+                        value = bgOpacity,
+                        onValueChange = onOpacityChange,
+                        valueRange = 0.1f..1.0f,
+                        steps = 18,
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary
+                        )
                     )
+                }
+            }
+        }
+
+        // ===== 3. 3 列标准手机屏幕比例壁纸网格 =====
+        // 标准高宽比：9 : 19.5 (0.4615)
+        val cardAspectRatio = 9f / 19.5f
+
+        val totalItems = 1 + wallpapers.size
+        val rows = (totalItems + 2) / 3
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            for (rowIndex in 0 until rows) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    for (colIndex in 0 until 3) {
+                        val itemIndex = rowIndex * 3 + colIndex
+                        if (itemIndex < totalItems) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                if (itemIndex == 0) {
+                                    // 第 0 项：默认无壁纸（纯色主题）
+                                    // 仅当当前没有壁纸或 appliedWallpaperId 为空时选中
+                                    val isSelected = currentBgImageUri == null || appliedWallpaperId == null
+                                    DefaultNoWallpaperCard(
+                                        isSelected = isSelected,
+                                        aspectRatio = cardAspectRatio,
+                                        onClick = handleClearWallpaper
+                                    )
+                                } else {
+                                    // 第 1..N 项：用户壁纸
+                                    val wallpaper = wallpapers[itemIndex - 1]
+                                    // 当前有壁纸且 appliedWallpaperId 匹配该壁纸时精准高亮
+                                    val isSelected = currentBgImageUri != null && appliedWallpaperId == wallpaper.id
+                                    WallpaperCard(
+                                        wallpaper = wallpaper,
+                                        isSelected = isSelected,
+                                        aspectRatio = cardAspectRatio,
+                                        onClick = {
+                                            handleApplyWallpaper(wallpaper)
+                                        },
+                                        onLongClick = {
+                                            wallpaperToDelete = wallpaper
+                                        }
+                                    )
+                                }
+                            }
+                        } else {
+                            // 占位空白
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+
+        // 底部提示
+        Text(
+            text = "提示：点击壁纸可一键应用，长按壁纸可删除；点击右下角加号选择相册图片进行标准裁剪添加。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+        )
+
+        Spacer(modifier = Modifier.height(80.dp))
+    }
+}
+
+/**
+ * 默认无壁纸（纯色主题）卡片
+ */
+@Composable
+private fun DefaultNoWallpaperCard(
+    isSelected: Boolean,
+    aspectRatio: Float,
+    onClick: () -> Unit
+) {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val borderModifier = if (isSelected) {
+        Modifier.border(3.dp, primaryColor, RoundedCornerShape(16.dp))
+    } else {
+        Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+    }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(aspectRatio)
+            .then(borderModifier)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            ),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.surfaceContainerHighest,
+                            MaterialTheme.colorScheme.surfaceContainer
+                        )
+                    )
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Block,
+                    contentDescription = null,
+                    tint = if (isSelected) primaryColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(30.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "纯色主题",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = if (isSelected) primaryColor else MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "无壁纸",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(0.7f),
+                    fontSize = 10.sp
+                )
+            }
+
+            // 选中对勾标记
+            if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .size(22.dp)
+                        .background(primaryColor, CircleShape),
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Check,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
+                        contentDescription = "已应用",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(14.dp)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("已应用")
-                }
-            } else {
-                // 未应用状态
-                Button(
-                    onClick = onApply,
-                    modifier = Modifier.height(36.dp),
-                    contentPadding = ButtonDefaults.ButtonWithIconContentPadding
-                ) {
-                    Text("应用")
                 }
             }
         }
@@ -475,440 +476,138 @@ fun ThemePresetCard(
 }
 
 /**
- * 添加主题预设对话框 - 保存 / 保存并应用 双按钮
+ * 手机壁纸预览卡片
  */
 @Composable
-fun AddThemePresetDialog(
-    onDismiss: () -> Unit,
-    onSave: (ThemePreset) -> Unit,
-    onSaveAndApply: (ThemePreset) -> Unit
+private fun WallpaperCard(
+    wallpaper: WallpaperItem,
+    isSelected: Boolean,
+    aspectRatio: Float,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
-    var presetName by remember { mutableStateOf("") }
-    var selectedImageUri by remember { mutableStateOf<String?>(null) }
-    val context = LocalContext.current
-
-    val imagePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.toString()?.let { contentUri ->
-            // 将content:// URI复制到内部存储，确保重启后仍可访问
-            val internalPath = copyImageToInternalStorage(context, contentUri)
-            selectedImageUri = internalPath ?: contentUri
-        }
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val borderModifier = if (isSelected) {
+        Modifier.border(3.dp, primaryColor, RoundedCornerShape(16.dp))
+    } else {
+        Modifier.border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
     }
 
-    val buildPreset: () -> ThemePreset? = {
-        if (presetName.isNotBlank()) {
-            ThemePreset(
-                id = System.currentTimeMillis().toString(),
-                name = presetName,
-                backgroundImageUri = selectedImageUri
-            )
-        } else null
-    }
-    
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        titleContentColor = MaterialTheme.colorScheme.onSurface,
-        title = { Text("添加主题预设") },
-        text = {
-            DialogContent(
-                presetName = presetName,
-                onPresetNameChange = { presetName = it },
-                selectedImageUri = selectedImageUri,
-                onImagePick = { imagePickerLauncher.launch("image/*") }
-            )
-        },
-        confirmButton = {
-            Row {
-                TextButton(onClick = onDismiss) { Text("取消") }
-                Spacer(modifier = Modifier.width(4.dp))
-                Button(
-                    onClick = { buildPreset()?.let { onSave(it) } },
-                    enabled = presetName.isNotBlank()
-                ) { Text("保存") }
-                Spacer(modifier = Modifier.width(4.dp))
-                Button(
-                    onClick = { buildPreset()?.let { onSaveAndApply(it) } },
-                    enabled = presetName.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    )
-                ) { Text("保存并应用") }
-            }
-        }
-    )
-}
+    val imageModel = remember(wallpaper.filePath) { File(wallpaper.filePath) }
 
-/**
- * 编辑主题预设对话框 - 保存 / 保存并应用 双按钮
- */
-@Composable
-fun EditThemePresetDialog(
-    preset: ThemePreset,
-    onDismiss: () -> Unit,
-    onSave: (ThemePreset) -> Unit,
-    onSaveAndApply: (ThemePreset) -> Unit
-) {
-    var presetName by remember { mutableStateOf(preset.name) }
-    var selectedImageUri by remember { mutableStateOf(preset.backgroundImageUri) }
-    val context = LocalContext.current
-
-    val imagePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.toString()?.let { contentUri ->
-            // 将content:// URI复制到内部存储，确保重启后仍可访问
-            val internalPath = copyImageToInternalStorage(context, contentUri)
-            selectedImageUri = internalPath ?: contentUri
-        }
-    }
-
-    val buildPreset: () -> ThemePreset? = {
-        if (presetName.isNotBlank()) {
-            preset.copy(
-                name = presetName,
-                backgroundImageUri = selectedImageUri
-            )
-        } else null
-    }
-    
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        titleContentColor = MaterialTheme.colorScheme.onSurface,
-        title = { Text("编辑主题预设") },
-        text = {
-            DialogContent(
-                presetName = presetName,
-                onPresetNameChange = { presetName = it },
-                selectedImageUri = selectedImageUri,
-                onImagePick = { imagePickerLauncher.launch("image/*") }
-            )
-        },
-        confirmButton = {
-            Row {
-                TextButton(onClick = onDismiss) { Text("取消") }
-                Spacer(modifier = Modifier.width(4.dp))
-                Button(
-                    onClick = { buildPreset()?.let { onSave(it) } },
-                    enabled = presetName.isNotBlank()
-                ) { Text("保存") }
-                Spacer(modifier = Modifier.width(4.dp))
-                Button(
-                    onClick = { buildPreset()?.let { onSaveAndApply(it) } },
-                    enabled = presetName.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary
-                    )
-                ) { Text("保存并应用") }
-            }
-        }
-    )
-}
-
-/**
- * 对话框共用内容
- */
-@Composable
-private fun DialogContent(
-    presetName: String,
-    onPresetNameChange: (String) -> Unit,
-    selectedImageUri: String?,
-    onImagePick: () -> Unit
-) {
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
+            .aspectRatio(aspectRatio)
+            .clip(RoundedCornerShape(16.dp))
+            .then(borderModifier)
+            .combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
     ) {
-        // 名称输入
-        OutlinedTextField(
-            value = presetName,
-            onValueChange = onPresetNameChange,
-            label = { Text("预设名称") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
+        Image(
+            painter = rememberAsyncImagePainter(model = imageModel),
+            contentDescription = "壁纸预览",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // 图片预览框
-        Text(
-            text = "背景图片（可选）",
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(150.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .clickable { onImagePick() },
-            contentAlignment = Alignment.Center
-        ) {
-            if (selectedImageUri != null) {
-                // 支持内部存储绝对路径和content:// URI
-                val imageModel: Any = if (selectedImageUri.startsWith("/")) {
-                    File(selectedImageUri)
-                } else {
-                    Uri.parse(selectedImageUri)
-                }
-                val painter = rememberAsyncImagePainter(model = imageModel)
-                Image(
-                    painter = painter,
-                    contentDescription = "预览",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
+        // 选中对勾徽章
+        if (isSelected) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(6.dp)
+                    .size(22.dp)
+                    .background(primaryColor, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = "已应用",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(14.dp)
                 )
-            } else {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "选择图片",
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "点击选择图片（可选）",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
         }
     }
 }
 
 /**
- * 导航栏自定义组件 - 可折叠
+ * 兼容旧版的预设模型
+ */
+data class ThemePreset(
+    val id: String = "",
+    val name: String = "",
+    val backgroundImageUri: String? = null
+)
+
+/**
+ * 导航栏/底栏透明度高级自定义组件
  */
 @Composable
 fun NavBarCustomizationSection(
     isExpanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
-    isModernTheme: Boolean = false,
+    isModernTheme: Boolean,
     navBarOpacity: Float,
     onNavBarOpacityChange: (Float) -> Unit,
-    playerBarOpacity: Float = 1f,
-    onPlayerBarOpacityChange: (Float) -> Unit = {},
-    playerBarWhiteBlend: Float = 0.8f,
-    onPlayerBarWhiteBlendChange: (Float) -> Unit = {},
-    floatingBarOpacity: Float = 1f,
-    onFloatingBarOpacityChange: (Float) -> Unit = {},
-    clickAnimationSpeed: Float = 700f,
-    onClickAnimationSpeedChange: (Float) -> Unit = {},
-    onResetDefaults: () -> Unit = {},
+    playerBarOpacity: Float,
+    onPlayerBarOpacityChange: (Float) -> Unit,
+    playerBarWhiteBlend: Float,
+    onPlayerBarWhiteBlendChange: (Float) -> Unit,
+    floatingBarOpacity: Float,
+    onFloatingBarOpacityChange: (Float) -> Unit,
+    clickAnimationSpeed: Float,
+    onClickAnimationSpeedChange: (Float) -> Unit,
+    onResetDefaults: () -> Unit,
     onAutoBalance: () -> Unit = {}
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // 标题栏 - 无点击特效
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { onExpandedChange(!isExpanded) },
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.ViewHeadline,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "导航栏自定义",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                Icon(
-                    imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = if (isExpanded) "收起" else "展开"
-                )
-            }
+            Text(
+                text = "底栏与播放条透明度",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(12.dp))
 
-            // 展开内容
-            AnimatedVisibility(
-                visible = isExpanded,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                Column {
-                    Spacer(modifier = Modifier.height(12.dp))
+            // 悬浮底栏不透明度
+            val currentNavOpacity = if (isModernTheme) floatingBarOpacity else navBarOpacity
+            Text(
+                text = "底栏不透明度: ${(currentNavOpacity * 100).toInt()}%",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Slider(
+                value = currentNavOpacity,
+                onValueChange = {
+                    if (isModernTheme) onFloatingBarOpacityChange(it) else onNavBarOpacityChange(it)
+                },
+                valueRange = 0.1f..1f,
+                colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary)
+            )
 
-                    // --- 顶部按钮 ---
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = onResetDefaults,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("还原默认", fontSize = 12.sp)
-                        }
-                        OutlinedButton(
-                            onClick = onAutoBalance,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("自动平衡", fontSize = 12.sp)
-                        }
-                    }
+            Spacer(modifier = Modifier.height(8.dp))
 
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // --- 导航栏颜色调节（仅原生主题显示）---
-                    if (!isModernTheme) {
-                        Text(
-                            text = "导航栏颜色调节",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // 不透明度调节
-                        Text(
-                            text = "不透明度: ${(navBarOpacity * 100).toInt()}%",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Slider(
-                            value = navBarOpacity,
-                            onValueChange = onNavBarOpacityChange,
-                            valueRange = 0f..1f,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // --- 播放条透明度调节（与导航栏调节一致：100% 纯色，0% 全透明）---
-                        Text(
-                            text = "播放条透明度: ${(playerBarOpacity * 100).toInt()}%",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            text = "100% 为纯色，0% 为全透明",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Slider(
-                            value = playerBarOpacity,
-                            onValueChange = onPlayerBarOpacityChange,
-                            valueRange = 0f..1f,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // --- 隔离条 ---
-                        Spacer(modifier = Modifier.height(12.dp))
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
-
-                    // --- 音乐播放条颜色调节（仅现代化主题显示；原生主题播放条为 Neri 风格）---
-                    if (isModernTheme) {
-                        Text(
-                            text = "音乐播放条颜色调节",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // 白色混合调节
-                        Text(
-                            text = "白色混合: ${(playerBarWhiteBlend * 100).toInt()}%",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            text = "叠加白色使播放条颜色更柔和",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Slider(
-                            value = playerBarWhiteBlend,
-                            onValueChange = onPlayerBarWhiteBlendChange,
-                            valueRange = 0f..1f,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        // --- 隔离条 ---
-                        Spacer(modifier = Modifier.height(12.dp))
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
-
-                    // --- 悬浮底栏颜色调节（仅现代化主题显示）---
-                    if (isModernTheme) {
-                        Text(
-                            text = "悬浮底栏颜色调节",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = "不透明度: ${(floatingBarOpacity * 100).toInt()}%",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Slider(
-                            value = floatingBarOpacity,
-                            onValueChange = onFloatingBarOpacityChange,
-                            valueRange = 0f..1f,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        // --- 隔离条 ---
-                        Spacer(modifier = Modifier.height(12.dp))
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // --- 指示器点击切换动画速率（仅现代化主题显示）---
-                        Text(
-                            text = "指示器切换动画速率",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = "当前: ${clickAnimationSpeed.toInt()}",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            text = "数值越大切换越快：260（最慢）~ 1000（最快），默认 700",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Slider(
-                            value = clickAnimationSpeed,
-                            onValueChange = onClickAnimationSpeedChange,
-                            valueRange = 260f..1000f,
-                            steps = 73, // (1000-260)/10 - 1 ≈ 73，每步约 10
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-            }
+            // 播放条不透明度
+            Text(
+                text = "播放条不透明度: ${(playerBarOpacity * 100).toInt()}%",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Slider(
+                value = playerBarOpacity,
+                onValueChange = onPlayerBarOpacityChange,
+                valueRange = 0.1f..1f,
+                colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary)
+            )
         }
     }
 }

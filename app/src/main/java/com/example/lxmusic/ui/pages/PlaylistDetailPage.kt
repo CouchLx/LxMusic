@@ -17,9 +17,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,6 +29,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -42,6 +47,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
@@ -49,7 +55,9 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.SelectAll
+import coil.compose.AsyncImage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -493,7 +501,7 @@ fun PlaylistDetailPage(
                     RankSongCard(
                         rank = index + 1,
                         song = song,
-                        showRank = !selectMode,
+                        showRank = false,
                         isCurrentSong = song.filePath == currentPlayingPath,
                         isPlaying = isPlaying && song.filePath == currentPlayingPath,
                         selectMode = selectMode,
@@ -1255,7 +1263,7 @@ fun SearchPlaylistDetailPage(
                     RankSongCard(
                         rank = index + 1,
                         song = song,
-                        showRank = !selectMode,
+                        showRank = false,
                         isCurrentSong = song.filePath == currentPlayingPath,
                         isPlaying = isPlaying && song.filePath == currentPlayingPath,
                         selectMode = selectMode,
@@ -1552,6 +1560,9 @@ fun CollectionDetailPage(
     var movePlaylists by remember { mutableStateOf<List<UserPlaylistEntity>>(emptyList()) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameInput by remember { mutableStateOf("") }
+    var showPlaylistMenuSheet by remember { mutableStateOf(false) }
+    var showCoverPickerSheet by remember { mutableStateOf(false) }
+    var playlistCoverUrl by remember { mutableStateOf<String?>(null) }
 
     // 通知外部多选状态变化（用于隐藏底部 MiniPlayer 播放条，避免遮挡底部操作栏）
     LaunchedEffect(selectMode) {
@@ -1581,7 +1592,9 @@ fun CollectionDetailPage(
                     albumId = entity.albumId, mixsongid = entity.mixsongid
                 )
             }
+            val firstCover = mapped.firstOrNull { !it.albumArtUri.isNullOrBlank() }?.albumArtUri
             withContext(Dispatchers.Main) {
+                playlistCoverUrl = firstCover
                 songs.clear(); songs.addAll(mapped); totalSongs = mapped.size
             }
         } else if (type == "liked") {
@@ -1597,13 +1610,31 @@ fun CollectionDetailPage(
             }
             val favPrefs = context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
             val officialFavOn = favPrefs.getBoolean("favorite_to_kugou", false)
+
+            // 标题去备注（去掉括号内容）：官方接口的歌名常带「（备注）」，与本地纯净歌名视为同一首
+            fun normTitle(t: String?): String =
+                t?.replace(Regex("[（(].*?[）)]"), "")?.trim()?.lowercase() ?: ""
+            fun sameSong(a: SongInfo, b: SongInfo): Boolean {
+                val hashEq = a.filePath.substringBefore("|").uppercase() ==
+                    b.filePath.substringBefore("|").uppercase()
+                if (hashEq) return true
+                val ta = normTitle(a.title)
+                return ta.isNotBlank() && ta == normTitle(b.title) &&
+                    a.artist.trim().lowercase() == b.artist.trim().lowercase()
+            }
+
+            // 本地优先：官方歌曲若与本地任一重复（hash 或 歌名去备注+歌手），丢弃官方版本；否则补充显示（官方新喜欢）
             val merged = if (officialFavOn) {
                 val official = KuGouApi.fetchKugouLikeSongs()
-                val officialHashes = official.mapTo(HashSet()) { it.filePath.substringBefore("|").uppercase() }
-                val localOnly = localMapped.filter { it.filePath.substringBefore("|").uppercase() !in officialHashes }
-                localOnly + official
+                val list = localMapped.toMutableList()
+                official.forEach { ofSong ->
+                    if (list.none { sameSong(it, ofSong) }) list.add(ofSong)
+                }
+                list
             } else localMapped
+            val firstCover = merged.firstOrNull { !it.albumArtUri.isNullOrBlank() }?.albumArtUri
             withContext(Dispatchers.Main) {
+                playlistCoverUrl = firstCover
                 songs.clear(); songs.addAll(merged); totalSongs = merged.size
             }
             KuGouApi.recordLikedCount(merged.size)
@@ -1612,8 +1643,10 @@ fun CollectionDetailPage(
             val resolvedName = pl?.name ?: "自建歌单"
             val playlistSongs = collectionDao.getPlaylistSongs(playlistId)
             val mapped = playlistSongs.map { it.toSongInfo() }
+            val firstCover = mapped.firstOrNull { !it.albumArtUri.isNullOrBlank() }?.albumArtUri
             withContext(Dispatchers.Main) {
                 playlistName = resolvedName
+                playlistCoverUrl = pl?.coverUrl ?: firstCover
                 songs.clear(); songs.addAll(mapped); totalSongs = mapped.size
             }
         }
@@ -1659,8 +1692,7 @@ fun CollectionDetailPage(
     LaunchedEffect(type, playlistId, playlistName) {
         if (type == "playlist") {
             onMenuReady {
-                renameInput = playlistName
-                showRenameDialog = true
+                showPlaylistMenuSheet = true
             }
         }
     }
@@ -1709,13 +1741,27 @@ fun CollectionDetailPage(
                             color = MaterialTheme.colorScheme.surfaceContainerHighest,
                             tonalElevation = 4.dp
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = if (type == "liked" || type == "favorites") Icons.Default.Favorite else Icons.Default.LibraryMusic,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(64.dp),
-                                    tint = if (type == "liked") Color(0xFFE57373) else MaterialTheme.colorScheme.primary
+                            val displayCover = if (type == "playlist") {
+                                playlistCoverUrl ?: songs.firstOrNull { !it.albumArtUri.isNullOrBlank() }?.albumArtUri
+                            } else {
+                                songs.firstOrNull { !it.albumArtUri.isNullOrBlank() }?.albumArtUri
+                            }
+                            if (!displayCover.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = displayCover,
+                                    contentDescription = playlistName,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
                                 )
+                            } else {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = if (type == "liked" || type == "favorites") Icons.Default.Favorite else Icons.Default.LibraryMusic,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(64.dp),
+                                        tint = if (type == "liked") Color(0xFFE57373) else MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                         }
                         Spacer(Modifier.height(16.dp))
@@ -1867,7 +1913,7 @@ fun CollectionDetailPage(
                     RankSongCard(
                         rank = index + 1,
                         song = song,
-                        showRank = !selectMode,
+                        showRank = false,
                         isCurrentSong = song.filePath == currentPlayingPath,
                         isPlaying = isPlaying && song.filePath == currentPlayingPath,
                         selectMode = selectMode,
@@ -2230,5 +2276,348 @@ fun CollectionDetailPage(
                 }
             }
         )
+    }
+
+    // 歌单右上角更多操作半屏菜单（重命名、设置封面）
+    if (showPlaylistMenuSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showPlaylistMenuSheet = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                // 歌单预览信息条
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier.size(52.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+                        val displayCover = playlistCoverUrl ?: songs.firstOrNull { !it.albumArtUri.isNullOrBlank() }?.albumArtUri
+                        if (!displayCover.isNullOrBlank()) {
+                            AsyncImage(
+                                model = displayCover,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.LibraryMusic,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(26.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = playlistName,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "$totalSongs 首歌曲",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
+
+                // 选项 1：重命名
+                Surface(
+                    onClick = {
+                        showPlaylistMenuSheet = false
+                        renameInput = playlistName
+                        showRenameDialog = true
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.Transparent,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 14.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DriveFileRenameOutline,
+                                contentDescription = "重命名歌单",
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "重命名歌单",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "修改歌单显示名称",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // 选项 2：设置歌单封面图片
+                Surface(
+                    onClick = {
+                        showPlaylistMenuSheet = false
+                        showCoverPickerSheet = true
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.Transparent,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 14.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Image,
+                                contentDescription = "设置歌单封面图片",
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "设置歌单封面图片",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "选择歌曲专辑图片设为封面（默认第 1 首歌封面）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(28.dp))
+            }
+        }
+    }
+
+    // 设置歌单封面半屏面板
+    if (showCoverPickerSheet) {
+        val songsWithCover = remember(songs.toList()) {
+            songs.filter { !it.albumArtUri.isNullOrBlank() }
+                .distinctBy { it.albumArtUri }
+        }
+        val defaultCover = songs.firstOrNull { !it.albumArtUri.isNullOrBlank() }?.albumArtUri
+
+        ModalBottomSheet(
+            onDismissRequest = { showCoverPickerSheet = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+            ) {
+                Text(
+                    text = "设置歌单封面",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "点击选择本歌单中的任意歌曲专辑图片作为封面",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(Modifier.height(16.dp))
+
+                // 默认/重置选项
+                Surface(
+                    onClick = {
+                        scope.launch(Dispatchers.IO) {
+                            collectionDao.updatePlaylistCover(playlistId, null)
+                            withContext(Dispatchers.Main) {
+                                playlistCoverUrl = defaultCover
+                                showCoverPickerSheet = false
+                                Toast.makeText(context, "已恢复为默认封面（第 1 首歌封面）", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (playlistCoverUrl == null || playlistCoverUrl == defaultCover) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceContainerLow,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.RestartAlt,
+                            contentDescription = null,
+                            modifier = Modifier.size(24.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "默认封面（第 1 首歌封面）",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "自动跟随歌单首首歌的专辑封面更新",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (playlistCoverUrl == null || playlistCoverUrl == defaultCover) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "当前选中",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                if (songsWithCover.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("歌单内暂无可用的歌曲专辑封面", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    Text(
+                        text = "本歌单歌曲封面 (${songsWithCover.size} 张)",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 340.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
+                    ) {
+                        items(songsWithCover.size, key = { songsWithCover[it].filePath }) { idx ->
+                            val songItem = songsWithCover[idx]
+                            val isSelected = playlistCoverUrl == songItem.albumArtUri
+                            Surface(
+                                onClick = {
+                                    val newCover = songItem.albumArtUri
+                                    scope.launch(Dispatchers.IO) {
+                                        collectionDao.updatePlaylistCover(playlistId, newCover)
+                                        withContext(Dispatchers.Main) {
+                                            playlistCoverUrl = newCover
+                                            showCoverPickerSheet = false
+                                            Toast.makeText(context, "歌单封面已设置", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+                                modifier = Modifier.aspectRatio(1f)
+                            ) {
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    AsyncImage(
+                                        model = songItem.albumArtUri,
+                                        contentDescription = songItem.title,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    if (isSelected) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(6.dp)
+                                                .size(22.dp)
+                                                .clip(CircleShape)
+                                                .background(MaterialTheme.colorScheme.primary),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onPrimary,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(24.dp))
+            }
+        }
     }
 }
