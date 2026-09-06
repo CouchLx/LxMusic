@@ -293,19 +293,19 @@ fun SettingsPage(
     onPlayerBlurChange: (Boolean) -> Unit = {},
     playerDynamicBg: Boolean = false,
     onPlayerDynamicBgChange: (Boolean) -> Unit = {},
-    playerRoundAlbum: Boolean = false,
+    playerRoundAlbum: Boolean = true,
     onPlayerRoundAlbumChange: (Boolean) -> Unit = {},
-    playerRotate: Boolean = false,
+    playerRotate: Boolean = true,
     onPlayerRotateChange: (Boolean) -> Unit = {},
-    playerVinylStyle: Boolean = false,
+    playerVinylStyle: Boolean = true,
     onPlayerVinylStyleChange: (Boolean) -> Unit = {},
-    playerVinylPointer: Boolean = false,
+    playerVinylPointer: Boolean = true,
     onPlayerVinylPointerChange: (Boolean) -> Unit = {},
     playerVinylBase: Boolean = false,
     onPlayerVinylBaseChange: (Boolean) -> Unit = {},
     playerBgEnhance: Boolean = false,
     onPlayerBgEnhanceChange: (Boolean) -> Unit = {},
-    playerHyperBg: Boolean = false,
+    playerHyperBg: Boolean = true,
     onPlayerHyperBgChange: (Boolean) -> Unit = {},
     playerWaveformSlider: Boolean = false,
     onPlayerWaveformSliderChange: (Boolean) -> Unit = {},
@@ -747,8 +747,13 @@ fun SettingsPage(
                         favoriteToKugou = favoriteToKugou,
                         onFavoriteToKugouChange = onFavoriteToKugouChange,
                         favoriteSyncLocal = favoriteSyncLocal,
-                        onFavoriteSyncLocalChange = onFavoriteSyncLocalChange
+                        onFavoriteSyncLocalChange = onFavoriteSyncLocalChange,
+                        onOpenHomeOrder = { onSettingsSubPageChange("home_order") }
                     )
+                }
+
+                "home_order" -> {
+                    HomeOrderSortPage(settingsPrefs = settingsPrefs)
                 }
 
                 "storage" -> {
@@ -1544,7 +1549,8 @@ internal fun SettingsGeneralContent(
     favoriteToKugou: Boolean = false,
     onFavoriteToKugouChange: (Boolean) -> Unit = {},
     favoriteSyncLocal: Boolean = false,
-    onFavoriteSyncLocalChange: (Boolean) -> Unit = {}
+    onFavoriteSyncLocalChange: (Boolean) -> Unit = {},
+    onOpenHomeOrder: () -> Unit = {}
 ) {
     val settingsContext = LocalContext.current
     Column {
@@ -1663,6 +1669,50 @@ internal fun SettingsGeneralContent(
                 }
             }
         )
+    }
+
+    Spacer(modifier = Modifier.height(24.dp))
+
+    // --- 首页排序 ---
+    Text(
+        text = "首页排序",
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    Surface(
+        onClick = onOpenHomeOrder,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.Tune, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "首页推荐排序",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = "顶部推荐栏、下面歌曲推荐的显示顺序（长按拖动）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                null,
+                Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 
     Spacer(modifier = Modifier.height(24.dp))
@@ -2716,9 +2766,9 @@ fun SettingsPlayerContent(
     onPlayerRoundAlbumChange: (Boolean) -> Unit,
     playerRotate: Boolean,
     onPlayerRotateChange: (Boolean) -> Unit,
-    playerVinylStyle: Boolean = false,
+    playerVinylStyle: Boolean = true,
     onPlayerVinylStyleChange: (Boolean) -> Unit = {},
-    playerVinylPointer: Boolean = false,
+    playerVinylPointer: Boolean = true,
     onPlayerVinylPointerChange: (Boolean) -> Unit = {},
     playerVinylBase: Boolean = false,
     onPlayerVinylBaseChange: (Boolean) -> Unit = {},
@@ -2865,7 +2915,7 @@ fun SettingsPlayerContent(
         ) {
             PlayerSettingSwitchRow(
                 title = "圆形专辑封面",
-                subtitle = "将专辑封面显示为圆形",
+                subtitle = "将专辑封面显示为圆形，开启时自动开启旋转",
                 checked = playerRoundAlbum,
                 onCheckedChange = { enabled ->
                     onPlayerRoundAlbumChange(enabled)

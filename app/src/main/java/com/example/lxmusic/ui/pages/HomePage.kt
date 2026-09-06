@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -29,8 +30,14 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -90,6 +97,7 @@ import com.example.lxmusic.DailyRecommendSong
 import com.example.lxmusic.KuGouApi
 import com.example.lxmusic.RankItem
 import com.example.lxmusic.RankSong
+import com.example.lxmusic.fetchIpZoneBatch
 import com.example.lxmusic.ui.components.SongContextMenuActions
 import com.example.lxmusic.TopCardSong
 import com.example.lxmusic.model.SongInfo
@@ -138,6 +146,40 @@ private fun getSongRecommendationTag(title: String, artist: String): String? {
 }
 
 /**
+ * 首页排序模型：顶部推荐栏 6 张卡 + 下面 8 个歌曲分区。
+ * 顺序存在 settings prefs（home_top_order / home_section_order，逗号分隔 id）；
+ * 解析时过滤非法 id 并补齐新增项，保证向前兼容。
+ */
+val HOME_TOP_IDS = listOf("daily", "vip", "million", "network", "style", "history")
+val HOME_SECTION_IDS = listOf("personal", "collect", "surge", "hotpick", "new", "niche", "concept", "trend")
+
+val HOME_TOP_TITLES = mapOf(
+    "daily" to "每日30首",
+    "vip" to "雷达模式",
+    "million" to "百万收藏",
+    "network" to "热歌推荐",
+    "style" to "风格推荐",
+    "history" to "历史推荐"
+)
+
+val HOME_SECTION_TITLES = mapOf(
+    "personal" to "私人专属好歌",
+    "collect" to "热门好歌精选",
+    "surge" to "精选好歌",
+    "hotpick" to "热门精选",
+    "new" to "经典怀旧金曲",
+    "niche" to "小众宝藏佳作",
+    "concept" to "概念er新推",
+    "trend" to "潮流尝鲜"
+)
+
+fun homeOrderedIds(raw: String?, defaults: List<String>): List<String> {
+    if (raw.isNullOrBlank()) return defaults
+    val ids = raw.split(",").map { it.trim() }.filter { it in defaults }.distinct()
+    return ids + defaults.filter { it !in ids }
+}
+
+/**
  * 首页全部区块数据的单一不可变状态：
  * 刷新时所有请求并行，完成后一次性替换整个对象（而非 13 个独立状态逐个更新），
  * 避免多次重组与"逐区块变新"的割裂感；也便于缓存一次性恢复。
@@ -145,6 +187,8 @@ private fun getSongRecommendationTag(title: String, artist: String): String? {
 data class HomeFeedState(
     val dailySongs: List<DailyRecommendSong> = emptyList(),
     val vipSongs: List<SongInfo> = emptyList(),
+    val millionSongs: List<SongInfo> = emptyList(),
+    val networkSongs: List<SongInfo> = emptyList(),
     val historySongs: List<DailyRecommendSong> = emptyList(),
     val styleSongs: List<DailyRecommendSong> = emptyList(),
     val surgeSongs: List<SongInfo> = emptyList(),
@@ -189,12 +233,16 @@ fun HomePage(
     onRankClick: (RankItem) -> Unit,
     onDailyClick: (List<DailyRecommendSong>) -> Unit,
     onVipClick: (List<SongInfo>) -> Unit = {},
+    onMillionClick: (List<SongInfo>) -> Unit = {},
+    onNetworkClick: (List<SongInfo>) -> Unit = {},
     onHistoryClick: (List<DailyRecommendSong>) -> Unit = {},
     onStyleClick: (List<DailyRecommendSong>) -> Unit = {},
     currentPlayingPath: String? = null,
     isPlaying: Boolean = false,
     onAllSongsReady: ((List<SongInfo>) -> Unit)? = null,
     listState: LazyListState = rememberLazyListState(),
+    // 顶部推荐栏横滑状态由 MainActivity 持有（跟首页外层列表、我的页同一套：只建一次，切页不丢）
+    recommendListState: LazyListState = rememberLazyListState(),
     onClickRefresh: (((() -> Unit)) -> Unit)? = null,
     onRefreshStateChange: ((Boolean) -> Unit)? = null,
     onAddToQueueNext: (SongInfo) -> Unit = {},
@@ -204,6 +252,8 @@ fun HomePage(
     val gson = remember { Gson() }
     val prefs = remember { context.getSharedPreferences("rank_cache", Context.MODE_PRIVATE) }
     val homePrefs = remember { context.getSharedPreferences("home_cache", Context.MODE_PRIVATE) }
+    // 百万收藏跟乐库共用同一个轮转游标（yueku_cache），首页/乐库互相接着轮，不重复
+    val yuekuPrefs = remember { context.getSharedPreferences("yueku_cache", Context.MODE_PRIVATE) }
     val authPrefs = remember { context.getSharedPreferences("auth", Context.MODE_PRIVATE) }
     val settingsPrefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
     val imageLoader = LocalImageLoader.current
@@ -212,10 +262,23 @@ fun HomePage(
     var previewPushPageBar by remember {
         mutableStateOf(settingsPrefs.getBoolean("preview_push_page_bar", true))
     }
+    // 首页排序（设置页改完实时生效，不用刷新）
+    var topOrderRaw by remember {
+        mutableStateOf(settingsPrefs.getString("home_top_order", null))
+    }
+    var sectionOrderRaw by remember {
+        mutableStateOf(settingsPrefs.getString("home_section_order", null))
+    }
     DisposableEffect(settingsPrefs) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == "preview_push_page_bar") {
                 previewPushPageBar = settingsPrefs.getBoolean("preview_push_page_bar", true)
+            }
+            if (key == "home_top_order") {
+                topOrderRaw = settingsPrefs.getString("home_top_order", null)
+            }
+            if (key == "home_section_order") {
+                sectionOrderRaw = settingsPrefs.getString("home_section_order", null)
             }
         }
         settingsPrefs.registerOnSharedPreferenceChangeListener(listener)
@@ -243,7 +306,8 @@ fun HomePage(
             feed.surgeSongs.isNotEmpty() || feed.hotPickSongs.isNotEmpty() || feed.newSongs.isNotEmpty() ||
             feed.collectSongs.isNotEmpty() || feed.nicheSongs.isNotEmpty() || feed.personalSongs.isNotEmpty() ||
             feed.conceptSongs.isNotEmpty() || feed.trendSongs.isNotEmpty() ||
-            feed.dailySongs.isNotEmpty() || feed.vipSongs.isNotEmpty()
+            feed.dailySongs.isNotEmpty() || feed.vipSongs.isNotEmpty() || feed.millionSongs.isNotEmpty() ||
+            feed.networkSongs.isNotEmpty()
         }
     }
 
@@ -306,6 +370,23 @@ fun HomePage(
     ) {
         val database = remember { MusicDatabase.getDatabase(context) }
         val collectionDao = remember { database.collectionDao() }
+
+        val infiniteTransition = rememberInfiniteTransition(label = "push_page_eq")
+        val bar1 by infiniteTransition.animateFloat(
+            initialValue = 0.2f, targetValue = 0.9f,
+            animationSpec = infiniteRepeatable(tween(420, easing = LinearEasing), RepeatMode.Reverse),
+            label = "push_bar1"
+        )
+        val bar2 by infiniteTransition.animateFloat(
+            initialValue = 0.8f, targetValue = 0.3f,
+            animationSpec = infiniteRepeatable(tween(560, easing = LinearEasing), RepeatMode.Reverse),
+            label = "push_bar2"
+        )
+        val bar3 by infiniteTransition.animateFloat(
+            initialValue = 0.4f, targetValue = 1.0f,
+            animationSpec = infiniteRepeatable(tween(380, easing = LinearEasing), RepeatMode.Reverse),
+            label = "push_bar3"
+        )
 
         Column(modifier = Modifier.fillMaxWidth()) {
             // 头部栏：标题
@@ -385,50 +466,99 @@ fun HomePage(
                             pageSongs.forEachIndexed { indexInPage, song ->
                                 val globalIndex = pageIndex * pageSize + indexInPage
                                 val isCurrent = song.filePath == currentPlayingPath
-                                key(song.filePath ?: "song_${pageIndex}_$indexInPage") {
+                                key(song.filePath.ifEmpty { "song_${pageIndex}_$indexInPage" }) {
                                     var showSheet by remember { mutableStateOf(false) }
 
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(10.dp))
+                                            .background(
+                                                if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                                                else Color.Transparent
+                                            )
                                             .clickable { onSongClick(globalIndex) }
-                                            .padding(vertical = 4.dp),
+                                            .padding(horizontal = if (isCurrent) 8.dp else 4.dp, vertical = 4.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        // 封面图
-                                        val coverUrl = song.albumArtUri
-                                        if (!coverUrl.isNullOrBlank()) {
-                                            val painter = rememberAsyncImagePainter(
-                                                model = ImageRequest.Builder(LocalContext.current)
-                                                    .data(coverUrl)
-                                                    .memoryCacheKey(coverUrl)
-                                                    .crossfade(150)
-                                                    .size(200)
-                                                    .build()
-                                            )
-                                            Image(
-                                                painter = painter,
-                                                contentDescription = null,
-                                                modifier = Modifier
-                                                    .size(50.dp)
-                                                    .clip(RoundedCornerShape(10.dp)),
-                                                contentScale = ContentScale.Crop
-                                            )
-                                        } else {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(50.dp)
-                                                    .clip(RoundedCornerShape(10.dp))
-                                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    Icons.Default.MusicNote,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(24.dp),
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        // 封面图 + 正在播放动效遮罩
+                                        Box(
+                                            modifier = Modifier
+                                                .size(50.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                        ) {
+                                            val coverUrl = song.albumArtUri
+                                            val coverModel: Any? = when {
+                                                !coverUrl.isNullOrBlank() -> coverUrl
+                                                song.filePath.startsWith("/") -> java.io.File(song.filePath)
+                                                else -> null
+                                            }
+                                            if (coverModel != null) {
+                                                val painter = rememberAsyncImagePainter(
+                                                    model = ImageRequest.Builder(LocalContext.current)
+                                                        .data(coverModel)
+                                                        .memoryCacheKey(coverModel.toString())
+                                                        .crossfade(150)
+                                                        .size(200)
+                                                        .build()
                                                 )
+                                                Image(
+                                                    painter = painter,
+                                                    contentDescription = null,
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .then(if (isCurrent) Modifier.graphicsLayer { alpha = 0.55f } else Modifier),
+                                                    contentScale = ContentScale.Crop
+                                                )
+                                            } else {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.MusicNote,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(24.dp),
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+
+                                            // 当前播放曲目覆盖层：音律跳动动效 或 暂停图标
+                                            if (isCurrent) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .background(Color.Black.copy(alpha = 0.35f)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    if (isPlaying) {
+                                                        Row(
+                                                            modifier = Modifier.height(18.dp),
+                                                            verticalAlignment = Alignment.Bottom,
+                                                            horizontalArrangement = Arrangement.spacedBy(2.5.dp)
+                                                        ) {
+                                                            listOf(bar1, bar2, bar3).forEach { h ->
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .width(3.dp)
+                                                                        .fillMaxHeight(h)
+                                                                        .clip(RoundedCornerShape(1.dp))
+                                                                        .background(Color.White)
+                                                                )
+                                                            }
+                                                        }
+                                                    } else {
+                                                        Icon(
+                                                            Icons.Default.PlayArrow,
+                                                            contentDescription = "暂停中",
+                                                            modifier = Modifier.size(22.dp),
+                                                            tint = Color.White
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
 
@@ -478,7 +608,7 @@ fun HomePage(
                                             Text(
                                                 text = song.artist,
                                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                                color = if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.75f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis
                                             )
@@ -631,7 +761,7 @@ fun HomePage(
                             Column {
                                 pageSongs.forEachIndexed { indexInPage, song ->
                                     val globalIndex = pageIndex * pageSize + indexInPage
-                                    key(song.filePath ?: "song_${pageIndex}_$indexInPage") {
+                                    key(song.filePath.ifEmpty { "song_${pageIndex}_$indexInPage" }) {
                                         var showSheet by remember { mutableStateOf(false) }
 
                                         RankSongCard(
@@ -777,6 +907,28 @@ fun HomePage(
                             )
                         }
                     },
+                    // 百万收藏：跟乐库同一套备货（游标共用），首页每次刷新 50 首新的
+                    async {
+                        val (list, _) = fetchIpZoneBatch(
+                            99070L, 2, 30, 50,
+                            getCursor = { yuekuPrefs.getInt("zone_page_99070", 1) },
+                            setCursor = { yuekuPrefs.edit().putInt("zone_page_99070", it).apply() }
+                        )
+                        if (list.isNotEmpty()) {
+                            feed = feed.copy(millionSongs = list)
+                        }
+                    },
+                    // 热歌推荐（网络专区）：同上，首页每次刷新 50 首新的
+                    async {
+                        val (list, _) = fetchIpZoneBatch(
+                            87634L, 2, 30, 50,
+                            getCursor = { yuekuPrefs.getInt("zone_page_87634", 1) },
+                            setCursor = { yuekuPrefs.edit().putInt("zone_page_87634", it).apply() }
+                        )
+                        if (list.isNotEmpty()) {
+                            feed = feed.copy(networkSongs = list)
+                        }
+                    },
                     async {
                         val list = fetchWithinBudget {
                             KuGouApi.service.getStyleRecommend(token, userid, timestamp = ts).data?.list
@@ -851,6 +1003,8 @@ fun HomePage(
                             putString("daily_songs_json", gson.toJson(feed.dailySongs))
                             putString("history_songs_json", gson.toJson(feed.historySongs))
                             putString("vip_songs_json", gson.toJson(feed.vipSongs))
+                            putString("million_songs_json", gson.toJson(feed.millionSongs))
+                            putString("network_songs_json", gson.toJson(feed.networkSongs))
                             putString("style_songs_json", gson.toJson(feed.styleSongs))
                             putString("home_surge", gson.toJson(feed.surgeSongs))
                             putString("home_hot", gson.toJson(feed.hotPickSongs))
@@ -877,7 +1031,8 @@ fun HomePage(
     // 向父组件报告所有歌曲（用于一键播放）
     LaunchedEffect(feed) {
         val all = (feed.personalSongs + feed.collectSongs + feed.surgeSongs + feed.hotPickSongs +
-            feed.newSongs + feed.nicheSongs + feed.conceptSongs + feed.trendSongs)
+            feed.newSongs + feed.nicheSongs + feed.conceptSongs + feed.trendSongs + feed.millionSongs +
+            feed.networkSongs)
             .distinctBy { it.filePath }
         if (all.isNotEmpty()) onAllSongsReady?.invoke(all)
     }
@@ -887,6 +1042,8 @@ fun HomePage(
         val cachedDaily = homePrefs.getString("daily_songs_json", null)
         val cachedHistory = homePrefs.getString("history_songs_json", null)
         val cachedVip = homePrefs.getString("vip_songs_json", null)
+        val cachedMillion = homePrefs.getString("million_songs_json", null)
+        val cachedNetwork = homePrefs.getString("network_songs_json", null)
         val cachedStyle = homePrefs.getString("style_songs_json", null)
         val cachedSurge = homePrefs.getString("home_surge", null)
         val cachedHot = homePrefs.getString("home_hot", null)
@@ -904,6 +1061,8 @@ fun HomePage(
             dailySongs = cachedDaily?.let { gson.fromJson(it, typeDaily) } ?: emptyList(),
             historySongs = cachedHistory?.let { gson.fromJson(it, typeDaily) } ?: emptyList(),
             vipSongs = cachedVip?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
+            millionSongs = cachedMillion?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
+            networkSongs = cachedNetwork?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
             styleSongs = cachedStyle?.let { gson.fromJson(it, typeDaily) } ?: emptyList(),
             surgeSongs = cachedSurge?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
             hotPickSongs = cachedHot?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
@@ -1005,6 +1164,38 @@ fun HomePage(
             onPlay = { if (feed.vipSongs.isNotEmpty()) onPlaySong(feed.vipSongs, 0) }
         ),
         RecommendCardData(
+            id = "million",
+            enTitle = "Million\nSaved",
+            zhTag = "百万收藏",
+            subtitle = if (feed.millionSongs.isNotEmpty()) {
+                val first = feed.millionSongs.first()
+                "${first.title} - ${first.artist}"
+            } else {
+                "加载中..."
+            },
+            coverUrl = feed.millionSongs.firstOrNull()?.albumArtUri ?: "",
+            gradientColors = listOf(Color(0xFFB388EB), Color(0xFF9A6FD6)),
+            songs = feed.millionSongs,
+            onClick = { if (feed.millionSongs.isNotEmpty()) onMillionClick(feed.millionSongs) },
+            onPlay = { if (feed.millionSongs.isNotEmpty()) onPlaySong(feed.millionSongs, 0) }
+        ),
+        RecommendCardData(
+            id = "network",
+            enTitle = "Hot\nHits",
+            zhTag = "热歌推荐",
+            subtitle = if (feed.networkSongs.isNotEmpty()) {
+                val first = feed.networkSongs.first()
+                "${first.title} - ${first.artist}"
+            } else {
+                "加载中..."
+            },
+            coverUrl = feed.networkSongs.firstOrNull()?.albumArtUri ?: "",
+            gradientColors = listOf(Color(0xFF4DD0E1), Color(0xFF26A69A)),
+            songs = feed.networkSongs,
+            onClick = { if (feed.networkSongs.isNotEmpty()) onNetworkClick(feed.networkSongs) },
+            onPlay = { if (feed.networkSongs.isNotEmpty()) onPlaySong(feed.networkSongs, 0) }
+        ),
+        RecommendCardData(
             id = "style",
             enTitle = "Style\nMix",
             zhTag = "风格推荐",
@@ -1038,6 +1229,26 @@ fun HomePage(
         )
     )
 
+    // 顶部卡片按设置里的顺序排（新卡自动追加到末尾）
+    val topOrder = remember(topOrderRaw) { homeOrderedIds(topOrderRaw, HOME_TOP_IDS) }
+    val cardById = remember(recommendCards) { recommendCards.associateBy { it.id } }
+    val orderedCards = remember(topOrder, cardById) { topOrder.mapNotNull { cardById[it] } }
+
+    // 下面 8 个歌曲分区：id + 标题 + 数据，按设置里的顺序渲染
+    val sectionDefs = remember(feed) {
+        listOf(
+            Triple("personal", "私人专属好歌", feed.personalSongs),
+            Triple("collect", "热门好歌精选", feed.collectSongs),
+            Triple("surge", "精选好歌", feed.surgeSongs),
+            Triple("hotpick", "热门精选", feed.hotPickSongs),
+            Triple("new", "经典怀旧金曲", feed.newSongs),
+            Triple("niche", "小众宝藏佳作", feed.nicheSongs),
+            Triple("concept", "概念er新推", feed.conceptSongs),
+            Triple("trend", "潮流尝鲜", feed.trendSongs)
+        )
+    }
+    val sectionOrder = remember(sectionOrderRaw) { homeOrderedIds(sectionOrderRaw, HOME_SECTION_IDS) }
+
     // 内容可见性动画状态 - 刷新时隐藏，完成后显示
     val contentAlpha by animateFloatAsState(
         targetValue = if (isRefreshing) 0f else 1f,
@@ -1062,9 +1273,8 @@ fun HomePage(
                 .alpha(contentAlpha),
             contentPadding = PaddingValues(bottom = 180.dp)
         ) {
-            // ===== 顶部横向推荐栏（吸附对齐固定显示完整卡片） =====
+            // ===== 顶部横向推荐栏（吸附对齐固定显示完整卡片，滑动进度切页不丢） =====
             item {
-                val recommendListState = rememberLazyListState()
                 val snapFlingBehavior = rememberSnapFlingBehavior(lazyListState = recommendListState)
 
                 LazyRow(
@@ -1075,10 +1285,10 @@ fun HomePage(
                     modifier = Modifier.padding(top = 12.dp, bottom = 10.dp)
                 ) {
                     items(
-                        count = recommendCards.size,
-                        key = { recommendCards[it].id }
+                        count = orderedCards.size,
+                        key = { orderedCards[it].id }
                     ) { index ->
-                        val card = recommendCards[index]
+                        val card = orderedCards[index]
                         val isThisCardPlaying = isPlaying && card.songs.any { it.filePath == currentPlayingPath }
 
                         Box(
@@ -1204,74 +1414,12 @@ fun HomePage(
                 }
             }
 
-            // ===== 私人专属好歌 =====
-            item {
+            // ===== 下面歌曲分区（顺序在设置 → 通用设置 → 首页排序里调） =====
+            items(sectionOrder, key = { "home_section_$it" }) { key ->
+                val def = sectionDefs.firstOrNull { it.first == key } ?: return@items
                 SongSection(
-                    title = "私人专属好歌", sectionKey = "section_personal", refreshGeneration = refreshGeneration, songs = feed.personalSongs,
-                    onSongClick = { index -> onPlaySong(feed.personalSongs, index) },
-                    currentPlayingPath = currentPlayingPath, isPlaying = isPlaying
-                )
-            }
-
-            // ===== 热门好歌精选 =====
-            item {
-                SongSection(
-                    title = "热门好歌精选", sectionKey = "section_collect", refreshGeneration = refreshGeneration, songs = feed.collectSongs,
-                    onSongClick = { index -> onPlaySong(feed.collectSongs, index) },
-                    currentPlayingPath = currentPlayingPath, isPlaying = isPlaying
-                )
-            }
-
-            // ===== 精选好歌 =====
-            item {
-                SongSection(
-                    title = "精选好歌", sectionKey = "section_surge", refreshGeneration = refreshGeneration, songs = feed.surgeSongs,
-                    onSongClick = { index -> onPlaySong(feed.surgeSongs, index) },
-                    currentPlayingPath = currentPlayingPath, isPlaying = isPlaying
-                )
-            }
-
-            // ===== 热门精选 =====
-            item {
-                SongSection(
-                    title = "热门精选", sectionKey = "section_hotpick", refreshGeneration = refreshGeneration, songs = feed.hotPickSongs,
-                    onSongClick = { index -> onPlaySong(feed.hotPickSongs, index) },
-                    currentPlayingPath = currentPlayingPath, isPlaying = isPlaying
-                )
-            }
-
-            // ===== 经典怀旧金曲 =====
-            item {
-                SongSection(
-                    title = "经典怀旧金曲", sectionKey = "section_new", refreshGeneration = refreshGeneration, songs = feed.newSongs,
-                    onSongClick = { index -> onPlaySong(feed.newSongs, index) },
-                    currentPlayingPath = currentPlayingPath, isPlaying = isPlaying
-                )
-            }
-
-            // ===== 小众宝藏佳作 =====
-            item {
-                SongSection(
-                    title = "小众宝藏佳作", sectionKey = "section_niche", refreshGeneration = refreshGeneration, songs = feed.nicheSongs,
-                    onSongClick = { index -> onPlaySong(feed.nicheSongs, index) },
-                    currentPlayingPath = currentPlayingPath, isPlaying = isPlaying
-                )
-            }
-
-            // ===== 概念er新推 =====
-            item {
-                SongSection(
-                    title = "概念er新推", sectionKey = "section_concept", refreshGeneration = refreshGeneration, songs = feed.conceptSongs,
-                    onSongClick = { index -> onPlaySong(feed.conceptSongs, index) },
-                    currentPlayingPath = currentPlayingPath, isPlaying = isPlaying
-                )
-            }
-
-            // ===== 潮流尝鲜 =====
-            item {
-                SongSection(
-                    title = "潮流尝鲜", sectionKey = "section_trend", refreshGeneration = refreshGeneration, songs = feed.trendSongs,
-                    onSongClick = { index -> onPlaySong(feed.trendSongs, index) },
+                    title = def.second, sectionKey = "section_${def.first}", refreshGeneration = refreshGeneration, songs = def.third,
+                    onSongClick = { index -> onPlaySong(def.third, index) },
                     currentPlayingPath = currentPlayingPath, isPlaying = isPlaying
                 )
             }

@@ -265,7 +265,7 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PLAYER_ROUND_ALBUM, value).apply()
         }
     private var _playerRoundAlbum: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_ROUND_ALBUM, false)
+        prefs.getBoolean(Keys.PLAYER_ROUND_ALBUM, true)
     )
 
     var playerRotate: Boolean
@@ -274,7 +274,7 @@ class SettingsRepository(context: Context) {
             _playerRotate = value
             prefs.edit().putBoolean(Keys.PLAYER_ROTATE, value).apply()
         }
-    private var _playerRotate: Boolean by mutableStateOf(prefs.getBoolean(Keys.PLAYER_ROTATE, false))
+    private var _playerRotate: Boolean by mutableStateOf(prefs.getBoolean(Keys.PLAYER_ROTATE, true))
 
     var playerVinylStyle: Boolean
         get() = _playerVinylStyle
@@ -283,7 +283,7 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PLAYER_VINYL_STYLE, value).apply()
         }
     private var _playerVinylStyle: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_VINYL_STYLE, false)
+        prefs.getBoolean(Keys.PLAYER_VINYL_STYLE, true)
     )
 
     var playerVinylPointer: Boolean
@@ -293,7 +293,7 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PLAYER_VINYL_POINTER, value).apply()
         }
     private var _playerVinylPointer: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_VINYL_POINTER, false)
+        prefs.getBoolean(Keys.PLAYER_VINYL_POINTER, true)
     )
 
     var playerVinylBase: Boolean
@@ -323,7 +323,7 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PLAYER_HYPER_BG, value).apply()
         }
     private var _playerHyperBg: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_HYPER_BG, false)
+        prefs.getBoolean(Keys.PLAYER_HYPER_BG, true)
     )
 
     var playerWaveformSlider: Boolean
@@ -658,6 +658,14 @@ class SettingsRepository(context: Context) {
         if (oldPrefs.contains("background_enhance") && !prefs.contains(Keys.PLAYER_BG_ENHANCE)) {
             playerBgEnhance = oldPrefs.getBoolean("background_enhance", false)
         }
+        // 新版默认配置迁移：圆形封面 / 旋转 / 黑胶唱片 / 指针 / 流体动态背景默认开启。
+        // 只补写用户从未动过的项（无 key 才写 true），用户明确关过的保持不动；
+        // 新装用户 key 本来就不存在，读默认值即 true，老用户升级同样生效。
+        if (!prefs.contains(Keys.PLAYER_ROUND_ALBUM)) playerRoundAlbum = true
+        if (!prefs.contains(Keys.PLAYER_ROTATE)) playerRotate = true
+        if (!prefs.contains(Keys.PLAYER_VINYL_STYLE)) playerVinylStyle = true
+        if (!prefs.contains(Keys.PLAYER_VINYL_POINTER)) playerVinylPointer = true
+        if (!prefs.contains(Keys.PLAYER_HYPER_BG)) playerHyperBg = true
     }
 
     var bgOpacity: Float

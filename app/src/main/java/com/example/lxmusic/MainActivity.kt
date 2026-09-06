@@ -1,4 +1,4 @@
-@file:OptIn(androidx.media3.common.util.UnstableApi::class)
+@file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 
 package com.example.lxmusic
 
@@ -32,8 +32,12 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -43,6 +47,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.ScrollState
@@ -529,6 +534,63 @@ private suspend fun captureActivitySnapshot(activity: android.app.Activity): and
 
 // ==================== 主框架 ====================
 
+/**
+ * 顶栏胶囊左侧的迷你律动条：播放时跳动，暂停时静止为三根小矮条。
+ * 暂停分支不建 infiniteTransition，不耗电。
+ */
+@Composable
+private fun HomeEqBars(heights: List<Float>, alpha: Float, tint: Color) {
+    Row(
+        modifier = Modifier.height(16.dp),
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        heights.forEach { h ->
+            Box(
+                modifier = Modifier
+                    .width(2.5.dp)
+                    .fillMaxHeight(h.coerceIn(0.05f, 1f))
+                    .clip(RoundedCornerShape(1.dp))
+                    .background(tint.copy(alpha = alpha))
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomePlayEqIcon(
+    playing: Boolean,
+    tint: Color = MaterialTheme.colorScheme.primary
+) {
+    if (playing) {
+        val transition = rememberInfiniteTransition(label = "home_eq")
+        val b1 by transition.animateFloat(
+            initialValue = 0.25f, targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(420, easing = LinearEasing), RepeatMode.Reverse),
+            label = "eq1"
+        )
+        val b2 by transition.animateFloat(
+            initialValue = 0.9f, targetValue = 0.3f,
+            animationSpec = infiniteRepeatable(tween(560, easing = LinearEasing), RepeatMode.Reverse),
+            label = "eq2"
+        )
+        val b3 by transition.animateFloat(
+            initialValue = 0.45f, targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(380, easing = LinearEasing), RepeatMode.Reverse),
+            label = "eq3"
+        )
+        HomeEqBars(listOf(b1, b2, b3), 1f, tint)
+    } else {
+        // 未播放：显示音符图标（固定尺寸，不参与自适应）
+        Icon(
+            Icons.Default.MusicNote,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = tint.copy(alpha = 0.9f)
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun AppScaffold(
@@ -593,6 +655,8 @@ fun AppScaffold(
     LaunchedEffect(Unit) {
         when (selectedTab) {
             in 4..7 -> selectedTab = 0
+            13 -> selectedTab = 0
+            18 -> selectedTab = 0
             in 8..10 -> selectedTab = 2
         }
     }
@@ -641,18 +705,27 @@ fun AppScaffold(
     var searchPlaylistGid by rememberSaveable { mutableStateOf("") }
     var dailySongsForList by remember { mutableStateOf<List<DailyRecommendSong>>(emptyList()) }
     var vipSongsForList by remember { mutableStateOf<List<SongInfo>>(emptyList()) }
+    var millionSongsForList by remember { mutableStateOf<List<SongInfo>>(emptyList()) }
+    var networkSongsForList by remember { mutableStateOf<List<SongInfo>>(emptyList()) }
     var historySongsForList by remember { mutableStateOf<List<DailyRecommendSong>>(emptyList()) }
     var styleSongsForList by remember { mutableStateOf<List<DailyRecommendSong>>(emptyList()) }
     var selectedPlaylist by remember { mutableStateOf<UserPlaylistItem?>(null) }
     var selectedCollectionType by rememberSaveable { mutableStateOf("") }  // "favorites" 或 "playlist"
     var homeAllSongs by remember { mutableStateOf<List<SongInfo>>(emptyList()) }
-    var showPlayModePopup by remember { mutableStateOf(false) }
     var homeScrollIndex by rememberSaveable { mutableIntStateOf(0) }
     var homeScrollOffset by rememberSaveable { mutableIntStateOf(0) }
     val homeListState = rememberLazyListState(initialFirstVisibleItemIndex = homeScrollIndex, initialFirstVisibleItemScrollOffset = homeScrollOffset)
+    // 首页顶部推荐栏横滑进度（与首页外层列表一致：状态对象只建一次，切 tab 复用同一对象）
+    var homeRecommendIndex by rememberSaveable { mutableIntStateOf(0) }
+    var homeRecommendOffset by rememberSaveable { mutableIntStateOf(0) }
+    val homeRecommendListState = rememberLazyListState(homeRecommendIndex, homeRecommendOffset)
     var discoverScrollIndex by rememberSaveable { mutableIntStateOf(0) }
     var discoverScrollOffset by rememberSaveable { mutableIntStateOf(0) }
     val discoverListState = rememberLazyListState(initialFirstVisibleItemIndex = discoverScrollIndex, initialFirstVisibleItemScrollOffset = discoverScrollOffset)
+    // 发现页推荐子页滚动进度（与排行榜列表一致：状态对象只建一次，切底栏 tab 复用同一对象）
+    var discoverRecommendScrollIndex by rememberSaveable { mutableIntStateOf(0) }
+    var discoverRecommendScrollOffset by rememberSaveable { mutableIntStateOf(0) }
+    val discoverRecommendListState = rememberLazyListState(initialFirstVisibleItemIndex = discoverRecommendScrollIndex, initialFirstVisibleItemScrollOffset = discoverRecommendScrollOffset)
     // 我的页滚动进度（与发现页一致：LazyListState 提升到外层只建一次，切 tab 复用同一对象）
     var mineScrollY by rememberSaveable { mutableIntStateOf(0) }
     val mineListState = rememberLazyListState(
@@ -682,13 +755,8 @@ fun AppScaffold(
     }
     var homeClickRefresh by remember { mutableStateOf<(() -> Unit)?>(null) }
     var isHomeRefreshing by remember { mutableStateOf(false) }
-    // 滚动或切页时自动收回播放模式弹窗
-    LaunchedEffect(homeListState.isScrollInProgress) {
-        if (homeListState.isScrollInProgress && showPlayModePopup) showPlayModePopup = false
-    }
     var isSelectionModeActive by remember { mutableStateOf(false) }
     LaunchedEffect(selectedTab) {
-        if (showPlayModePopup) showPlayModePopup = false
         isSelectionModeActive = false
     }
     var selectedCollectionPlaylistId by rememberSaveable { mutableLongStateOf(0L) }
@@ -911,8 +979,8 @@ fun AppScaffold(
     // 手机返回键：统一的返回处理，替代原先散落的多个 BackHandler
     val backEnabled = showLoginPage || showRankDetail != null || showPlayerPage ||
         selectedTab == 3 || selectedTab in 4..7 || selectedTab in 8..10 ||
-        selectedTab == 11 || selectedTab == 12 || selectedTab == 14 ||
-        selectedTab == 15 || selectedTab == 16 || selectedTab == 17
+        selectedTab == 11 || selectedTab == 12 || selectedTab == 13 || selectedTab == 14 ||
+        selectedTab == 15 || selectedTab == 16 || selectedTab == 17 || selectedTab == 18
     androidx.activity.compose.BackHandler(enabled = backEnabled) {
         when {
             showLoginPage -> showLoginPage = false
@@ -938,6 +1006,8 @@ fun AppScaffold(
             }
             selectedTab == 3 -> selectedTab = 2
             selectedTab in 4..7 -> selectedTab = 0
+            selectedTab == 13 -> selectedTab = 0
+            selectedTab == 18 -> selectedTab = 0
             selectedTab in 8..10 -> selectedTab = 2
             selectedTab == 11 -> {
                 selectedTab = previousTab
@@ -969,7 +1039,7 @@ fun AppScaffold(
 
     // 迷你播放条底部间距：原生主题下用实测底栏高度（含导航栏 inset 的差值），
     // 保证与底栏严丝合缝；悬浮主题保持胶囊悬浮间距
-    val showNavBar = selectedTab !in 3..17 && showRankDetail == null && !showLoginPage
+    val showNavBar = selectedTab !in 3..18 && showRankDetail == null && !showLoginPage
     val miniPlayerBottomPadding by animateDpAsState(
         targetValue = when {
             !showNavBar -> 0.dp
@@ -1109,6 +1179,36 @@ fun AppScaffold(
                     } else if (currentTab == 7) {
                         TopAppBar(
                             title = { Text(stringResource(R.string.title_style_recommend)) },
+                            navigationIcon = {
+                                IconButton(onClick = { selectedTab = 0 }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                                }
+                            },
+                            actions = {
+                                IconButton(onClick = { playlistLocateAction?.invoke() }) {
+                                    Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                        )
+                    } else if (currentTab == 13) {
+                        TopAppBar(
+                            title = { Text("百万收藏") },
+                            navigationIcon = {
+                                IconButton(onClick = { selectedTab = 0 }) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
+                                }
+                            },
+                            actions = {
+                                IconButton(onClick = { playlistLocateAction?.invoke() }) {
+                                    Icon(Icons.Default.MyLocation, contentDescription = stringResource(R.string.action_locate))
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                        )
+                    } else if (currentTab == 18) {
+                        TopAppBar(
+                            title = { Text("热歌推荐") },
                             navigationIcon = {
                                 IconButton(onClick = { selectedTab = 0 }) {
                                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
@@ -1297,89 +1397,182 @@ fun AppScaffold(
                     } else {
                         TopAppBar(
                             title = {
-                                if (currentTab == 0 && homeAllSongs.isNotEmpty()) {
+                                if (currentTab == 0) {
                                     var homePlayMode by remember { mutableIntStateOf(settingsRepository.homePlayMode) }
-                                    // "Lx Music" + 音符 整体可点击/长按
+                                    var showModeSheet by remember { mutableStateOf(false) }
+                                    val modeLabel = when (homePlayMode) { 1 -> "随机"; 2 -> "心动"; else -> "顺序" }
+                                    val isThisPlaying = isPlaying && currentSong != null
+                                    // 胶囊常驻：首帧即显示，不再依赖 homeAllSongs 是否就绪，
+                                    // 避免冷启动时先闪一下“Lx Music”再跳成胶囊。数据未就绪时置灰不可点。
+                                    val hasSongs = homeAllSongs.isNotEmpty()
+                                    // 一体式液态胶囊：模式名 + 播放键 + 切换键（播放行为与原来完全一致）
+                                    // 点模式名/图标都是按当前模式从头开播，图标只反映播放中/暂停状态
+                                    val doPlayAll = {
+                                        if (hasSongs) {
+                                            if (homePlayMode == 0) {
+                                                playOnlineSong(homeAllSongs, 0)
+                                            } else {
+                                                playOnlineSong(homeAllSongs.shuffled(), 0)
+                                            }
+                                        }
+                                    }
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .pointerInput(Unit) {
-                                                detectTapGestures(
-                                                    onTap = {
-                                                        when (homePlayMode) {
-                                                            0 -> playOnlineSong(homeAllSongs, 0)
-                                                            1 -> playOnlineSong(homeAllSongs.shuffled(), 0)
-                                                            2 -> playOnlineSong(homeAllSongs.shuffled(), 0)
-                                                        }
-                                                    },
-                                                    onLongPress = { showPlayModePopup = !showPlayModePopup }
-                                                )
-                                            }
-                                            .background(
-                                                if (showPlayModePopup) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)
-                                                else Color.Transparent,
-                                                RoundedCornerShape(12.dp)
-                                            )
-                                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.75f))
+                                            .alpha(if (hasSongs) 1f else 0.45f)
+                                            .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
                                     ) {
-                                        Text(stringResource(R.string.app_name))
-                                        Spacer(modifier = Modifier.width(2.dp))
-                                        Icon(
-                                            Icons.Default.MusicNote,
-                                            contentDescription = stringResource(R.string.action_play_all),
-                                            modifier = Modifier.size(18.dp),
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                        // 展开的模式选择条
-                                        AnimatedVisibility(
-                                            visible = showPlayModePopup,
-                                            enter = expandHorizontally(tween(200)) + fadeIn(tween(200)),
-                                            exit = shrinkHorizontally(tween(150)) + fadeOut(tween(150))
+                                        // 左侧固定槽：律动条/音符都在 20dp 里居中，切换不改变胶囊尺寸
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier.size(20.dp)
                                         ) {
-                                            Row(
-                                                modifier = Modifier.padding(start = 6.dp),
-                                                horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                            ) {
-                                                val modes = listOf(
-                                                    Triple(Icons.Default.QueueMusic, "顺序", 0),
-                                                    Triple(Icons.Default.Shuffle, "随机", 1),
-                                                    Triple(Icons.Default.Favorite, "心动", 2)
-                                                )
-                                                modes.forEach { (icon, label, mode) ->
-                                                    val isSelected = homePlayMode == mode
-                                                    Column(
-                                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                                        modifier = Modifier
-                                                            .clip(RoundedCornerShape(10.dp))
-                                                            .background(
-                                                                if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                                                                else Color.Transparent
-                                                            )
+                                            HomePlayEqIcon(playing = isThisPlaying)
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = modeLabel,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable(
+                                                    interactionSource = remember { MutableInteractionSource() },
+                                                    indication = null
+                                                ) { doPlayAll() }
+                                                .padding(vertical = 6.dp)
+                                        )
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .clip(CircleShape)
+                                                .clickable(
+                                                    interactionSource = remember { MutableInteractionSource() },
+                                                    indication = null
+                                                ) { doPlayAll() }
+                                        ) {
+                                            Icon(
+                                                if (isThisPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                                contentDescription = if (isThisPlaying) "暂停" else stringResource(R.string.action_play_all),
+                                                modifier = Modifier.size(22.dp),
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .width(1.dp)
+                                                .height(18.dp)
+                                                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
+                                        )
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier
+                                                .size(30.dp)
+                                                .clip(CircleShape)
+                                                .clickable(
+                                                    interactionSource = remember { MutableInteractionSource() },
+                                                    indication = null
+                                                ) { showModeSheet = true }
+                                        ) {
+                                            Icon(
+                                                Icons.Default.ExpandMore,
+                                                contentDescription = "切换播放模式",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                    // 3 种模式切换页：点选即保存（settingsRepository 持久化）
+                                    if (showModeSheet) {
+                                        ModalBottomSheet(
+                                            onDismissRequest = { showModeSheet = false },
+                                            containerColor = MaterialTheme.colorScheme.surface,
+                                            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+                                        ) {
+                                            Text(
+                                                text = "一键播放模式",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                                            )
+                                            val modes = listOf(
+                                                Triple(Icons.Default.QueueMusic, "顺序", "按当前列表顺序播放"),
+                                                Triple(Icons.Default.Shuffle, "随机", "打乱列表顺序播放"),
+                                                Triple(Icons.Default.Favorite, "心动", "随机播放，遇见心动的歌")
+                                            )
+                                            modes.forEachIndexed { mode, (icon, label, desc) ->
+                                                val isSelected = homePlayMode == mode
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                                                        .clip(RoundedCornerShape(12.dp))
+                                                        .background(
+                                                            if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                                            else Color.Transparent
+                                                        )
                                                             .clickable {
                                                                 homePlayMode = mode
                                                                 settingsRepository.homePlayMode = mode
-                                                                showPlayModePopup = false
+                                                                showModeSheet = false
+                                                                // 切完即按新模式开播（无数据时只保存模式，不开播）
+                                                                if (!hasSongs) return@clickable
+                                                                if (mode == 0) playOnlineSong(homeAllSongs, 0)
+                                                                else playOnlineSong(homeAllSongs.shuffled(), 0)
                                                             }
-                                                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                                                        .padding(12.dp)
+                                                ) {
+                                                    Surface(
+                                                        shape = CircleShape,
+                                                        color = if (isSelected) MaterialTheme.colorScheme.primary
+                                                        else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                                        modifier = Modifier.size(40.dp)
                                                     ) {
-                                                        Icon(
-                                                            icon,
-                                                            contentDescription = label,
-                                                            modifier = Modifier.size(20.dp),
-                                                            tint = if (isSelected) MaterialTheme.colorScheme.primary
-                                                                   else MaterialTheme.colorScheme.onSurface
+                                                        Box(
+                                                            contentAlignment = Alignment.Center,
+                                                            modifier = Modifier.fillMaxSize()
+                                                        ) {
+                                                            Icon(
+                                                                icon,
+                                                                contentDescription = null,
+                                                                modifier = Modifier.size(22.dp),
+                                                                tint = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                                                else MaterialTheme.colorScheme.onSurfaceVariant
+                                                            )
+                                                        }
+                                                    }
+                                                    Spacer(modifier = Modifier.width(12.dp))
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = label,
+                                                            style = MaterialTheme.typography.bodyLarge,
+                                                            fontWeight = FontWeight.Medium,
+                                                            color = if (isSelected) MaterialTheme.colorScheme.primary
+                                                            else MaterialTheme.colorScheme.onSurface
                                                         )
                                                         Text(
-                                                            label,
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            fontSize = 10.sp,
-                                                            color = if (isSelected) MaterialTheme.colorScheme.primary
-                                                                    else MaterialTheme.colorScheme.onSurface
+                                                            text = desc,
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                    if (isSelected) {
+                                                        Icon(
+                                                            Icons.Default.Check,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.primary,
+                                                            modifier = Modifier.size(22.dp)
                                                         )
                                                     }
                                                 }
                                             }
+                                            Spacer(modifier = Modifier.height(28.dp))
                                         }
                                     }
                                 } else {
@@ -1466,6 +1659,10 @@ fun AppScaffold(
                                 homeScrollIndex = homeListState.firstVisibleItemIndex
                                 homeScrollOffset = homeListState.firstVisibleItemScrollOffset
                             }
+                            LaunchedEffect(homeRecommendListState.firstVisibleItemIndex, homeRecommendListState.firstVisibleItemScrollOffset) {
+                                homeRecommendIndex = homeRecommendListState.firstVisibleItemIndex
+                                homeRecommendOffset = homeRecommendListState.firstVisibleItemScrollOffset
+                            }
                             HomePage(
                                 onPlaySong = { songs, index -> playOnlineSong(songs, index) },
                                 onAddToQueueNext = { song -> addToQueueNext(song) },
@@ -1477,6 +1674,14 @@ fun AppScaffold(
                                 onVipClick = { songs ->
                                     vipSongsForList = songs
                                     selectedTab = 5
+                                },
+                                onMillionClick = { songs ->
+                                    millionSongsForList = songs
+                                    selectedTab = 13
+                                },
+                                onNetworkClick = { songs ->
+                                    networkSongsForList = songs
+                                    selectedTab = 18
                                 },
                                 onHistoryClick = { songs ->
                                     historySongsForList = songs
@@ -1490,6 +1695,7 @@ fun AppScaffold(
                                 isPlaying = isPlaying,
                                 onAllSongsReady = { homeAllSongs = it },
                                 listState = homeListState,
+                                recommendListState = homeRecommendListState,
                                 onClickRefresh = { homeClickRefresh = it },
                                 onRefreshStateChange = { isHomeRefreshing = it }
                             )
@@ -1498,6 +1704,10 @@ fun AppScaffold(
                             LaunchedEffect(discoverListState.firstVisibleItemIndex, discoverListState.firstVisibleItemScrollOffset) {
                                 discoverScrollIndex = discoverListState.firstVisibleItemIndex
                                 discoverScrollOffset = discoverListState.firstVisibleItemScrollOffset
+                            }
+                            LaunchedEffect(discoverRecommendListState.firstVisibleItemIndex, discoverRecommendListState.firstVisibleItemScrollOffset) {
+                                discoverRecommendScrollIndex = discoverRecommendListState.firstVisibleItemIndex
+                                discoverRecommendScrollOffset = discoverRecommendListState.firstVisibleItemScrollOffset
                             }
                             AnimatedContent(
                                 targetState = showRankDetail,
@@ -1523,7 +1733,21 @@ fun AppScaffold(
                                 } else {
                                     DiscoverPage(
                                         onRankClick = { showRankDetail = it },
-                                        listState = discoverListState
+                                        onPlaySong = { songs, index -> playOnlineSong(songs, index) },
+                                        onPlaylistClick = { playlist ->
+                                            searchPlaylistId = playlist.specialid
+                                            searchPlaylistName = playlist.specialname ?: "未知歌单"
+                                            searchPlaylistCover = playlist.coverUrl
+                                            searchPlaylistAuthor = playlist.nickname ?: ""
+                                            searchPlaylistGid = playlist.gid ?: ""
+                                            previousTab = selectedTab
+                                            selectedTab = 16
+                                        },
+                                        currentPlayingPath = currentSong?.filePath,
+                                        isPlaying = isPlaying,
+                                        onAddToQueueNext = { song -> addToQueueNext(song) },
+                                        listState = discoverListState,
+                                        recommendListState = discoverRecommendListState
                                     )
                                 }
                             }
@@ -1649,8 +1873,27 @@ fun AppScaffold(
                                 onAddToQueueNext = { song -> addToQueueNext(song) }
                             )
                         }
-                        8, 9, 10 -> {
-                            val playlist = when (tab) {
+                        13 -> SongListPage(
+                            title = "百万收藏",
+                            songs = millionSongsForList,
+                            onBack = { selectedTab = 0 },
+                            onPlaySong = { songs, index -> playOnlineSong(songs, index) },
+                            currentPlayingPath = currentSong?.filePath,
+                            isPlaying = isPlaying,
+                            onLocateReady = { playlistLocateAction = it },
+                            onAddToQueueNext = { song -> addToQueueNext(song) }
+                        )
+                        18 -> SongListPage(
+                            title = "热歌推荐",
+                            songs = networkSongsForList,
+                            onBack = { selectedTab = 0 },
+                            onPlaySong = { songs, index -> playOnlineSong(songs, index) },
+                            currentPlayingPath = currentSong?.filePath,
+                            isPlaying = isPlaying,
+                            onLocateReady = { playlistLocateAction = it },
+                            onAddToQueueNext = { song -> addToQueueNext(song) }
+                        )
+                        8, 9, 10 -> {                            val playlist = when (tab) {
                                 8 -> selectedPlaylist
                                 9 -> selectedPlaylist
                                 else -> selectedPlaylist
@@ -1825,7 +2068,11 @@ fun AppScaffold(
                             onPlayerRoundAlbumChange = { enabled ->
                                 playerRoundAlbum = enabled
                                 settingsRepository.playerRoundAlbum = enabled
-                                if (!enabled) {
+                                if (enabled) {
+                                    // 开启圆形封面时默认连同开启播放旋转（用户仍可手动关闭旋转）
+                                    playerRotate = true
+                                    settingsRepository.playerRotate = true
+                                } else {
                                     playerRotate = false
                                     settingsRepository.playerRotate = false
                                     playerVinylStyle = false
@@ -2521,7 +2768,7 @@ fun AppScaffold(
 
         // 导航栏叠加在底部
         AnimatedVisibility(
-            visible = selectedTab !in 3..17 && !showPlayerPage && showRankDetail == null && !showLoginPage,
+            visible = selectedTab !in 3..18 && !showPlayerPage && showRankDetail == null && !showLoginPage,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .onSizeChanged { bottomBarHeightPx = it.height },

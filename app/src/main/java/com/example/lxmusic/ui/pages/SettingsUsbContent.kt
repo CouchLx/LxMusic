@@ -590,7 +590,7 @@ fun SettingsUsbContent(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = device.deviceName ?: "USB 设备",
+                                        text = device.deviceName.ifEmpty { "USB 设备" },
                                         style = MaterialTheme.typography.bodyMedium
                                     )
                                     Text(

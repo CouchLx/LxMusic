@@ -413,6 +413,417 @@ data class TopSongData(
     val list: List<TopCardSong>? = null
 )
 
+// ==================== 乐库 ====================
+// 数据来自后端 /yueku 系接口（2026-09-03 实测结构）
+
+data class YuekuResponse(
+    val status: Int = 0,
+    val errcode: Int = 0,
+    val data: YuekuData? = null
+)
+
+data class YuekuData(
+    val timestamp: Long = 0,
+    val info: YuekuInfo? = null,
+    @com.google.gson.annotations.SerializedName("vip_music")
+    val vipMusic: YuekuVipMusic? = null,
+    @com.google.gson.annotations.SerializedName("category_area")
+    val categoryArea: List<YuekuArea>? = null,
+    // rank 数组字段与 RankItem 一致（多余字段 Gson 自动忽略），直接复用
+    val rank: List<RankItem>? = null,
+    val album: List<YuekuAlbum>? = null,
+    val recommend: List<YuekuRecommend>? = null
+)
+
+data class YuekuInfo(
+    val song: List<YuekuSong>? = null
+)
+
+data class YuekuTransParam(
+    val union_cover: String? = null
+)
+
+/** 乐库播放量格式化：兼容数字与字符串（"2.0千万" 这类直接透传） */
+fun yuekuCountText(v: Any?): String = when (v) {
+    is Number -> {
+        val n = v.toLong()
+        when {
+            n >= 100_000_000 -> String.format(java.util.Locale.US, "%.1f亿", n / 100_000_000.0)
+            n >= 10_000 -> String.format(java.util.Locale.US, "%.1f万", n / 10_000.0)
+            else -> n.toString()
+        }
+    }
+    is String -> v
+    else -> ""
+}
+
+/** 乐库新歌（info.song）：duration 单位为秒；无 album_audio_id，播放时传 0 即可 */
+data class YuekuSong(
+    val songname: String? = null,
+    val singername: String? = null,
+    val filename: String? = null,
+    val hash: String? = null,
+    @com.google.gson.annotations.SerializedName("320hash")
+    val hash320: String? = null,
+    val duration: Int = 0,
+    val trans_param: YuekuTransParam? = null
+) {
+    val playHash: String get() = hash ?: hash320 ?: ""
+    val title: String
+        get() {
+            if (!songname.isNullOrBlank()) return songname
+            val fn = filename ?: return "未知歌曲"
+            return fn.substringAfter(" - ", fn).trim().ifBlank { fn }
+        }
+    val artist: String
+        get() {
+            if (!singername.isNullOrBlank()) return singername
+            val fn = filename ?: return "未知艺术家"
+            return if (fn.contains(" - ")) fn.substringBefore(" - ").trim().ifBlank { "未知艺术家" } else "未知艺术家"
+        }
+    val coverUrl: String
+        get() {
+            val raw = trans_param?.union_cover ?: ""
+            if (raw.isBlank()) return ""
+            return raw.replace("{size}", "240").replace("http://", "https://")
+        }
+    fun toSongInfo(): SongInfo? {
+        if (playHash.isBlank()) return null
+        return SongInfo(
+            title = title,
+            artist = artist,
+            filePath = "$playHash|0",
+            albumArtUri = coverUrl,
+            duration = duration.toLong() * 1000L
+        )
+    }
+}
+
+/** VIP 音乐（vip_music.list）：duration 单位为毫秒 */
+data class YuekuVipMusic(
+    val list: List<YuekuVipSong>? = null,
+    val total: Int = 0
+)
+
+data class YuekuVipSong(
+    val filename: String? = null,
+    @com.google.gson.annotations.SerializedName("singer_name")
+    val singerName: String? = null,
+    val hash: String? = null,
+    @com.google.gson.annotations.SerializedName("320hash")
+    val hash320: String? = null,
+    @com.google.gson.annotations.SerializedName("album_audio_id")
+    val albumAudioId: Long = 0,
+    @com.google.gson.annotations.SerializedName("album_cover")
+    val albumCover: String? = null,
+    @com.google.gson.annotations.SerializedName("singer_avatar")
+    val singerAvatar: String? = null,
+    val duration: Int = 0,
+    val remark: String? = null
+) {
+    val playHash: String get() = hash ?: hash320 ?: ""
+    val title: String
+        get() {
+            val fn = filename ?: return "未知歌曲"
+            return fn.substringAfter(" - ", fn).trim().ifBlank { fn }
+        }
+    val artist: String get() = singerName?.takeIf { it.isNotBlank() } ?: "未知艺术家"
+    val coverUrl: String
+        get() {
+            val raw = albumCover ?: singerAvatar ?: ""
+            if (raw.isBlank()) return ""
+            return raw.replace("{size}", "240").replace("http://", "https://")
+        }
+    fun toSongInfo(): SongInfo? {
+        if (playHash.isBlank()) return null
+        return SongInfo(
+            title = title,
+            artist = artist,
+            filePath = "$playHash|$albumAudioId",
+            albumArtUri = coverUrl,
+            duration = duration.toLong()
+        )
+    }
+}
+
+/** 分类专区（category_area）：DJ/车载/儿童/影视/游戏/韩流/电音/抖音/纯音乐/情歌/欧美/国风/二次元…… */
+data class YuekuArea(
+    val id: String? = null,
+    val name: String? = null,
+    val content: String? = null,
+    val images: String? = null,
+    @com.google.gson.annotations.SerializedName("song_list")
+    val songList: List<YuekuAreaSong>? = null
+)
+
+data class YuekuAreaSong(
+    val id: Long = 0,
+    val name: String? = null,
+    val images: String? = null,
+    @com.google.gson.annotations.SerializedName("data_img")
+    val dataImg: String? = null,
+    // 播放量文本（一般为字符串，防御性兼容数字）
+    val extend: Any? = null,
+    @com.google.gson.annotations.SerializedName("global_specialid")
+    val globalSpecialId: String? = null
+) {
+    val coverUrl: String
+        get() {
+            val raw = images ?: dataImg ?: ""
+            if (raw.isBlank()) return ""
+            return raw.replace("{size}", "240").replace("http://", "https://")
+        }
+    /** 只有 gid（无 specialid），靠歌单详情页的 gid 直开链路打开 */
+    fun toSearchPlaylistItem() = SearchPlaylistItem(
+        specialid = 0,
+        specialname = name,
+        img = images ?: dataImg,
+        play_count = yuekuCountText(extend),
+        gid = globalSpecialId
+    )
+}
+
+/** 推荐歌单（recommend）：extra 里同时有 specialid 与 global_specialid，双保险 */
+data class YuekuRecommend(
+    val title: String? = null,
+    val imgurl: String? = null,
+    val extra: YuekuRecommendExtra? = null
+) {
+    fun toSearchPlaylistItem() = SearchPlaylistItem(
+        specialid = extra?.specialid ?: 0,
+        specialname = extra?.specialname ?: title,
+        song_count = extra?.songcount ?: 0,
+        img = imgurl,
+        nickname = extra?.userName,
+        play_count = yuekuCountText(extra?.playCount),
+        intro = extra?.intro,
+        gid = extra?.globalSpecialId
+    )
+}
+
+data class YuekuRecommendExtra(
+    val specialid: Long = 0,
+    val specialname: String? = null,
+    val songcount: Int = 0,
+    @com.google.gson.annotations.SerializedName("global_specialid")
+    val globalSpecialId: String? = null,
+    @com.google.gson.annotations.SerializedName("user_name")
+    val userName: String? = null,
+    @com.google.gson.annotations.SerializedName("play_count")
+    val playCount: Any? = null,
+    val intro: String? = null
+)
+
+/** 新专辑（album）：v1 只解析，详情页待 /album/songs 探明后再做 */
+data class YuekuAlbum(
+    val albumid: Long = 0,
+    val albumname: String? = null,
+    val singername: String? = null,
+    val imgurl: String? = null,
+    val publishtime: String? = null,
+    val intro: String? = null
+)
+
+// ==================== 乐库 banner / 电台 ====================
+
+data class YuekuBannerResponse(
+    val status: Int = 0,
+    val data: YuekuBannerData? = null
+)
+
+data class YuekuBannerData(
+    val timestamp: Long = 0,
+    val ads: List<YuekuAd>? = null
+)
+
+data class YuekuAd(
+    val id: Long = 0,
+    val title: String? = null,
+    @com.google.gson.annotations.SerializedName("img_url")
+    val imgUrl: String? = null
+) {
+    val coverUrl: String
+        get() {
+            val raw = imgUrl ?: ""
+            if (raw.isBlank()) return ""
+            return raw.replace("http://", "https://")
+        }
+}
+
+data class YuekuFmResponse(
+    val status: Int = 0,
+    val data: List<YuekuFmGroup>? = null
+)
+
+data class YuekuFmGroup(
+    @com.google.gson.annotations.SerializedName("time_fm_cn")
+    val timeCn: String? = null,
+    @com.google.gson.annotations.SerializedName("rcm_text")
+    val rcmText: String? = null,
+    @com.google.gson.annotations.SerializedName("fm_list")
+    val fmList: List<YuekuFm>? = null
+)
+
+data class YuekuFm(
+    @com.google.gson.annotations.SerializedName("fm_id")
+    val fmId: Long = 0,
+    @com.google.gson.annotations.SerializedName("fm_name")
+    val fmName: String? = null,
+    val banner: String? = null,
+    val imgUrl480: String? = null,
+    @com.google.gson.annotations.SerializedName("song_info")
+    val songInfo: YuekuFmSong? = null
+) {
+    val coverUrl: String
+        get() {
+            val raw = banner ?: imgUrl480 ?: ""
+            if (raw.isBlank()) return ""
+            return raw.replace("http://", "https://")
+        }
+}
+
+data class YuekuFmSong(
+    val hash: String? = null,
+    @com.google.gson.annotations.SerializedName("320hash")
+    val hash320: String? = null,
+    // 格式 "歌手 - 歌名"
+    val name: String? = null,
+    @com.google.gson.annotations.SerializedName("album_audio_id")
+    val albumAudioId: Long = 0,
+    // 毫秒
+    val time: Int = 0
+) {
+    val playHash: String get() = hash ?: hash320 ?: ""
+    val title: String
+        get() {
+            val n = name ?: return "未知歌曲"
+            return n.substringAfter(" - ", n).trim().ifBlank { n }
+        }
+    val artist: String
+        get() {
+            val n = name ?: return "未知艺术家"
+            return if (n.contains(" - ")) n.substringBefore(" - ").trim().ifBlank { "未知艺术家" } else "未知艺术家"
+        }
+    fun toSongInfo(cover: String = ""): SongInfo? {
+        if (playHash.isBlank()) return null
+        return SongInfo(
+            title = title,
+            artist = artist,
+            filePath = "$playHash|$albumAudioId",
+            albumArtUri = cover,
+            duration = time.toLong()
+        )
+    }
+}
+
+// ==================== 编辑精选 ====================
+// 数据来自后端 /ip（2026-09-03 实测：id=99070 百万收藏歌曲汇总，total=9161，分页）
+// type=audios 返回歌曲列表；albums/videos/author_list 结构不同，探针另抓后再接。
+
+data class IpResponse(
+    val status: Int = 0,
+    @com.google.gson.annotations.SerializedName("error_code")
+    val errorCode: Int = 0,
+    val total: Int = 0,
+    val data: List<IpSong>? = null
+)
+
+data class IpSong(
+    val base: IpSongBase? = null,
+    @com.google.gson.annotations.SerializedName("audio_info")
+    val audioInfo: IpAudioInfo? = null,
+    @com.google.gson.annotations.SerializedName("album_info")
+    val albumInfo: IpAlbumInfo? = null,
+    val cover: IpCover? = null
+) {
+    val playHash: String get() = audioInfo?.hash ?: audioInfo?.hash320 ?: ""
+    val title: String get() = base?.songname?.takeIf { it.isNotBlank() } ?: "未知歌曲"
+    val artist: String get() = base?.authorName?.takeIf { it.isNotBlank() } ?: "未知艺术家"
+    val coverUrl: String
+        get() {
+            val raw = cover?.unionCover ?: albumInfo?.cover ?: ""
+            if (raw.isBlank()) return ""
+            return raw.replace("{size}", "240").replace("http://", "https://")
+        }
+    fun toSongInfo(): SongInfo? {
+        if (playHash.isBlank()) return null
+        return SongInfo(
+            title = title,
+            artist = artist,
+            filePath = "$playHash|${base?.albumAudioId ?: 0}",
+            albumArtUri = coverUrl,
+            duration = (audioInfo?.timelength ?: 0).toLong()
+        )
+    }
+}
+
+data class IpSongBase(
+    @com.google.gson.annotations.SerializedName("album_audio_id")
+    val albumAudioId: Long = 0,
+    @com.google.gson.annotations.SerializedName("audio_id")
+    val audioId: Long = 0,
+    val songname: String? = null,
+    @com.google.gson.annotations.SerializedName("author_name")
+    val authorName: String? = null,
+    @com.google.gson.annotations.SerializedName("album_name")
+    val albumName: String? = null
+)
+
+data class IpAudioInfo(
+    val hash: String? = null,
+    @com.google.gson.annotations.SerializedName("hash_320")
+    val hash320: String? = null,
+    // 毫秒
+    val timelength: Int = 0
+)
+
+data class IpAlbumInfo(
+    val cover: String? = null
+)
+
+data class IpCover(
+    @com.google.gson.annotations.SerializedName("union_cover")
+    val unionCover: String? = null
+)
+
+/** 编辑精选专区批量备货（乐库卡片/详情/首页卡片三处共用）：
+ * 按游标顺序拿 pageCount 页（空页回绕到开头），汇总打散取 targetCount 首。
+ * 游标读写由调用方提供——都读写同一份 prefs 的 zone_page_<id> 即可全局轮转不重复。
+ * 返回 Pair(歌曲, 专区总数)。单页请求最稳，extra 并行由调用方组织。 */
+suspend fun fetchIpZoneBatch(
+    ipId: Long,
+    pageCount: Int = 2,
+    pageSize: Int = 30,
+    targetCount: Int = 50,
+    getCursor: () -> Int,
+    setCursor: (Int) -> Unit
+): Pair<List<SongInfo>, Int> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    var next = getCursor().coerceAtLeast(1)
+    val pool = mutableListOf<SongInfo>()
+    var fetched = 0
+    var guard = 0
+    var total = 0
+    while (pool.size < targetCount && fetched < pageCount && guard < pageCount + 2) {
+        guard++
+        val resp = runCatching {
+            KuGouApi.service.getIpSongs(ipId, "audios", next, pageSize, System.currentTimeMillis())
+        }.getOrNull()
+        val list = resp?.data.orEmpty().mapNotNull { it.toSongInfo() }
+        if (resp != null && resp.total > 0) total = resp.total
+        if (list.isEmpty()) {
+            if (next == 1) break // 连第一页都空，真没网
+            next = 1 // 疑似到头，回绕
+            continue
+        }
+        fetched++
+        list.filter { s -> pool.none { it.filePath == s.filePath } }.forEach { pool.add(it) }
+        next++
+    }
+    setCursor(next)
+    android.util.Log.d("LxMusic_IpZone", "[备货] ip=$ipId 拉${fetched}页 → ${pool.size}首（游标→$next，总数$total）")
+    Pair(pool.shuffled().take(targetCount), total)
+}
+
 // ==================== 用户歌单 ====================
 
 data class UserPlaylistResponse(
@@ -868,6 +1279,84 @@ interface KuGouService {
     // 新歌速递
     @GET("top/song")
     suspend fun getTopSong(): TopSongResponse
+
+    // 乐库正式接口（typed 解析）
+    @GET("yueku")
+    suspend fun getYueku(
+        @Query("timestamp") timestamp: Long = 0
+    ): YuekuResponse
+
+    @GET("yueku/banner")
+    suspend fun getYuekuBanner(
+        @Query("timestamp") timestamp: Long = 0
+    ): YuekuBannerResponse
+
+    @GET("yueku/fm")
+    suspend fun getYuekuFm(
+        @Query("timestamp") timestamp: Long = 0
+    ): YuekuFmResponse
+
+    // 乐库探针（原始返回，用于查看真实结构；结构确定后再换 typed 解析）
+    // 后端对相同 URL 缓存 2 分钟，调用时请传 timestamp 打散缓存
+    @GET("yueku")
+    suspend fun getYuekuRaw(
+        @Query("timestamp") timestamp: Long = 0
+    ): okhttp3.ResponseBody
+
+    @GET("yueku/banner")
+    suspend fun getYuekuBannerRaw(
+        @Query("timestamp") timestamp: Long = 0
+    ): okhttp3.ResponseBody
+
+    @GET("yueku/fm")
+    suspend fun getYuekuFmRaw(
+        @Query("timestamp") timestamp: Long = 0
+    ): okhttp3.ResponseBody
+
+    // 编辑精选探针（原始返回，用于查看真实结构；结构确定后再换 typed 解析）
+    // /ip、/ip/playlist、/ip/zone/home 需要填 id（示例：87473、329，见文档调用例子）
+    @GET("top/ip")
+    suspend fun getTopIpRaw(
+        @Query("timestamp") timestamp: Long = 0
+    ): okhttp3.ResponseBody
+
+    @GET("ip")
+    suspend fun getIpRaw(
+        @Query("id") id: Long,
+        @Query("type") type: String? = null,
+        @Query("page") page: Int = 1,
+        @Query("pagesize") pageSize: Int = 30,
+        @Query("timestamp") timestamp: Long = 0
+    ): okhttp3.ResponseBody
+
+    @GET("ip/playlist")
+    suspend fun getIpPlaylistRaw(
+        @Query("id") id: Long,
+        @Query("page") page: Int = 1,
+        @Query("pagesize") pageSize: Int = 30,
+        @Query("timestamp") timestamp: Long = 0
+    ): okhttp3.ResponseBody
+
+    @GET("ip/zone")
+    suspend fun getIpZoneRaw(
+        @Query("timestamp") timestamp: Long = 0
+    ): okhttp3.ResponseBody
+
+    @GET("ip/zone/home")
+    suspend fun getIpZoneHomeRaw(
+        @Query("id") id: Long,
+        @Query("timestamp") timestamp: Long = 0
+    ): okhttp3.ResponseBody
+
+    // 编辑精选歌曲正式接口（type=audios，分页：total 可达 9000+，务必分页拉）
+    @GET("ip")
+    suspend fun getIpSongs(
+        @Query("id") id: Long,
+        @Query("type") type: String = "audios",
+        @Query("page") page: Int = 1,
+        @Query("pagesize") pageSize: Int = 30,
+        @Query("timestamp") timestamp: Long = 0
+    ): IpResponse
 
     @GET("user/playlist")
     suspend fun getUserPlaylist(

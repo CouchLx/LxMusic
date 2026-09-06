@@ -1,3 +1,11 @@
+@file:androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@file:OptIn(
+    androidx.compose.foundation.ExperimentalFoundationApi::class,
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+    androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class
+)
+@file:Suppress("DEPRECATION")
+
 package com.example.lxmusic.ui.pages
 
 /*
@@ -46,7 +54,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
@@ -110,7 +117,9 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
 import com.example.lxmusic.ui.components.VinylPlayerCover
+import androidx.annotation.OptIn as AndroidXOptIn
 import androidx.media3.common.C
+import androidx.media3.common.util.UnstableApi
 import com.example.lxmusic.KuGouApi
 import com.example.lxmusic.PlayerProgress
 import com.example.lxmusic.R
@@ -146,6 +155,7 @@ private val LYRIC_TIME_OFFSET_MS = 300L
  * 播放器单页面：顶栏 / 进度条 / 控制栏固定，中间卡片区 HorizontalPager（0=封面卡 1=歌词卡）。
  * 拖动进度条时封面卡与歌词卡的歌词预览实时联动（共享 isSeeking/sliderPosition）。
  */
+@AndroidXOptIn(UnstableApi::class)
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerStage(
@@ -360,7 +370,7 @@ fun PlayerStage(
                     color = uiTint
                 )
                 Text(
-                    text = song.artist ?: "未知歌手",
+                    text = song.artist.ifEmpty { "未知歌手" },
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -1318,6 +1328,7 @@ private fun formatBitRateText(bitrateInBps: Int): String? {
     }
 }
 
+@AndroidXOptIn(UnstableApi::class)
 private fun formatBitDepthText(pcmEncoding: Int, isLossless: Boolean, sampleRate: Int): String? {
     return when (pcmEncoding) {
         C.ENCODING_PCM_16BIT -> "16bit"
@@ -1332,6 +1343,7 @@ private fun formatBitDepthText(pcmEncoding: Int, isLossless: Boolean, sampleRate
     }
 }
 
+@AndroidXOptIn(UnstableApi::class)
 private fun buildAudioInfoText(
     audioFormat: androidx.media3.common.Format?,
     extName: String?,
@@ -1373,6 +1385,7 @@ private fun buildAudioInfoText(
 }
 
 /** 将 LyricEntry 列表还原为 LRC 文本（用于回退样式显示） */
+@Suppress("unused")
 private fun lyricsToText(lyrics: List<LyricEntry>): String {
     return lyrics.joinToString("\n") { line ->
         val m = line.startTimeMs
@@ -1387,6 +1400,7 @@ private fun lyricsToText(lyrics: List<LyricEntry>): String {
 /**
  * 歌词显示组件 - 高亮当前行（关闭逐字卡拉OK时的回退样式）
  */
+@Suppress("unused")
 @Composable
 internal fun LyricsDisplay(
     lyrics: String,
