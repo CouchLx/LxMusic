@@ -267,6 +267,24 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ==================== 睡眠定时 ====================
+
+    /**
+     * 启动睡眠定时：直调 PlayerService 静态入口（定时逻辑在服务内，
+     * 播放中场景退出 App / Activity 销毁后仍随播放继续生效）。
+     */
+    fun startSleepTimer(minutes: Int, extendOnSongEnd: Boolean) {
+        val armed = PlayerService.startSleepTimerStatic(minutes, extendOnSongEnd)
+        if (!armed) {
+            Toast.makeText(getApplication(), "播放服务未就绪，请稍后重试", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** 手动停止定时：只清定时不动播放 */
+    fun cancelSleepTimer() {
+        PlayerService.cancelSleepTimerStatic()
+    }
+
     fun playNext() {
         val c = controller ?: return
         if (c.mediaItemCount == 0) return

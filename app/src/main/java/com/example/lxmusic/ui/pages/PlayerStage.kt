@@ -75,6 +75,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -122,8 +123,12 @@ import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import com.example.lxmusic.KuGouApi
 import com.example.lxmusic.PlayerProgress
+import com.example.lxmusic.PlayerService
 import com.example.lxmusic.R
+import com.example.lxmusic.SleepTimerUiState
 import com.example.lxmusic.model.SongInfo
+import com.example.lxmusic.ui.components.SleepTimerContent
+import com.example.lxmusic.ui.components.formatSleepRemain
 import com.example.lxmusic.ui.components.WaveformSlider
 import com.example.lxmusic.ui.components.MinimalistProgressSection
 import com.example.lxmusic.ui.components.MinimalistFullControls
@@ -174,6 +179,9 @@ fun PlayerStage(
     onPlayModeChange: (Int) -> Unit = {},
     isFavorite: Boolean = false,
     onFavoriteClick: () -> Unit = {},
+    // 睡眠定时（菜单-睡眠定时；状态由 PlayerService.sleepTimerFlow 提供，服务内存活）
+    onStartSleepTimer: (minutes: Int, extendOnSongEnd: Boolean) -> Unit = { _, _ -> },
+    onStopSleepTimer: () -> Unit = {},
     // 封面/背景旋转相位（由 MainActivity 舞台层统一驱动）
     rotationAngle: Float = 0f,
     isRoundAlbum: Boolean = false,
@@ -219,6 +227,8 @@ fun PlayerStage(
     val currentPosition = progressState.positionMs
     val totalDuration = progressState.durationMs
     val scope = rememberCoroutineScope()
+    // 睡眠定时状态（PlayerService 静态流：退出页面/重开仍持续显示，任务结束或手动关闭才消失）
+    val sleepTimerState by PlayerService.sleepTimerFlow.collectAsState()
 
     // 切歌方向追踪（用于黑胶唱片飞入/飞出物理动效方向判定）
     var lastSongIndex by remember { mutableIntStateOf(songIndex) }
@@ -242,6 +252,8 @@ fun PlayerStage(
     val pendingPreviewState = remember { mutableStateOf<Long?>(null) }
     var pendingSeekPreviewPositionMs by pendingPreviewState
     var showPlayerMenu by remember { mutableStateOf(false) }
+    // 菜单直达子页：null = 主菜单；点击顶栏定时图标可直接进睡眠定时页
+    var playerMenuSubPage by remember { mutableStateOf<String?>(null) }
 
     // 歌曲音频规格信息（原子缓存 + 单向锁定，杜绝异步多源竞争和二次跳动）
     val audioInfoCache = remember { mutableMapOf<String, String>() }
@@ -378,6 +390,44 @@ fun PlayerStage(
                     color = uiTintVariant
                 )
             }
+            // 睡眠定时进行中：在喜欢按钮左侧显示秒表图标 + 实时倒计时（延长态显示 +分:秒），
+            // 任务结束或手动关闭才消失；点击直达睡眠定时页。
+            // 对齐：容器与三点按钮同高(48dp)，秒表与心形/三点图标同一水平中心线，倒计时贴底缘不占图标行高
+            if (sleepTimerState.active) {
+                val sleepRemainMs = if (sleepTimerState.extending) {
+                    (totalDuration - currentPosition).coerceAtLeast(0L)
+                } else {
+                    sleepTimerState.remainingMs
+                }
+                Box(
+                    modifier = Modifier
+                        .padding(end = 4.dp)
+                        .clickable {
+                            playerMenuSubPage = "sleep"
+                            showPlayerMenu = true
+                        }
+                        .size(48.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Timer,
+                        contentDescription = "睡眠定时",
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(22.dp),
+                        tint = uiTint
+                    )
+                    Text(
+                        text = formatSleepRemain(sleepRemainMs, plus = sleepTimerState.extending),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 10.sp,
+                            lineHeight = 12.sp
+                        ),
+                        color = uiTintVariant,
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                    )
+                }
+            }
             // 顶栏右侧：主页 = 收藏按钮常驻（音质标签移除，收藏移至菜单旁）；
             // 歌词页 = 设置决定收藏/音质标签（淡入淡出过渡）
             Box(
@@ -453,7 +503,10 @@ fun PlayerStage(
             }
             // 菜单按钮（主页/歌词页分别弹各自的菜单；歌词设置两套独立）
             IconButton(
-                onClick = { showPlayerMenu = true }
+                onClick = {
+                    playerMenuSubPage = null
+                    showPlayerMenu = true
+                }
             ) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,
@@ -627,6 +680,11 @@ fun PlayerStage(
         val onCoverPage = pagerState.currentPage == 0
         PlayerMenuSheet(
             onDismiss = { showPlayerMenu = false },
+            initialSubPage = playerMenuSubPage,
+            sleepTimer = sleepTimerState,
+            sleepProgress = progressState,
+            onStartSleepTimer = onStartSleepTimer,
+            onStopSleepTimer = onStopSleepTimer,
             targetLabel = if (onCoverPage) "封面卡歌词" else "歌词页歌词",
             lyricFontSize = if (onCoverPage) coverLyricFontSize else lyricFontSize,
             onLyricFontSizeChange = if (onCoverPage) onCoverLyricFontSizeChange else onLyricFontSizeChange,
@@ -1464,6 +1522,13 @@ internal fun LyricsDisplay(
 @Composable
 private fun PlayerMenuSheet(
     onDismiss: () -> Unit,
+    // 直达子页（null = 主菜单）：顶栏睡眠定时图标点击时直达 "sleep"
+    initialSubPage: String? = null,
+    // 睡眠定时（"sleep" 子页用；状态由 PlayerService 提供）
+    sleepTimer: SleepTimerUiState = SleepTimerUiState(),
+    sleepProgress: PlayerProgress = PlayerProgress(),
+    onStartSleepTimer: (minutes: Int, extendOnSongEnd: Boolean) -> Unit = { _, _ -> },
+    onStopSleepTimer: () -> Unit = {},
     // 当前菜单对应的歌词对象（封面卡歌词 / 歌词页歌词），两套设置独立
     targetLabel: String,
     lyricFontSize: Float,
@@ -1474,8 +1539,8 @@ private fun PlayerMenuSheet(
     onLyricAlignmentChange: (String) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
-    // null = 主菜单；"lyrics" = 歌词设置子页（子页退出直接关闭菜单）
-    var subPage by remember { mutableStateOf<String?>(null) }
+    // null = 主菜单；"lyrics" = 歌词设置子页；"sleep" = 睡眠定时节（子页退出直接关闭菜单）
+    var subPage by remember { mutableStateOf(initialSubPage) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1537,8 +1602,59 @@ private fun PlayerMenuSheet(
                         )
                     }
                 }
+
+                // 睡眠定时入口
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { subPage = "sleep" }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Timer,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "睡眠定时",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "定时暂停播放，可自动延长到整首播完",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.height(16.dp))
             }
+        } else if (subPage == "sleep") {
+            // ===== 睡眠定时（未定时=设置视图；定时中=倒计时视图，由 sleepTimer.active 驱动） =====
+            SleepTimerContent(
+                sleepTimer = sleepTimer,
+                progress = sleepProgress,
+                onStart = { minutes, extend -> onStartSleepTimer(minutes, extend) },
+                // 停止 = 清定时 + 关闭弹窗回播放器页面
+                onStop = {
+                    onStopSleepTimer()
+                    onDismiss()
+                }
+            )
         } else {
             // ===== 歌词设置子页（退出 = 关闭菜单，直接回播放器主页） =====
             Column(

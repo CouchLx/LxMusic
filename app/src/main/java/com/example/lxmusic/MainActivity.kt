@@ -2600,6 +2600,10 @@ fun AppScaffold(
                         onPrevious = { playPrevious() },
                         onSeek = { position -> playerViewModel.seekTo(position) },
                         onPlaylistClick = { showPlaylistSheet = true },
+                        onStartSleepTimer = { minutes, extend ->
+                            playerViewModel.startSleepTimer(minutes, extend)
+                        },
+                        onStopSleepTimer = { playerViewModel.cancelSleepTimer() },
                         playMode = playMode,
                         onPlayModeChange = { newMode -> playerViewModel.setPlayMode(newMode) },
                         isFavorite = isCurrentSongFavorite,

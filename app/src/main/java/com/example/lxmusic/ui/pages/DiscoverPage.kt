@@ -44,7 +44,8 @@ import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
@@ -92,6 +93,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.example.lxmusic.KuGouApi
+import com.example.lxmusic.fetchIpZoneBatch
 import com.example.lxmusic.RankItem
 import com.example.lxmusic.SearchPlaylistItem
 import com.example.lxmusic.model.SongInfo
@@ -136,7 +138,8 @@ fun DiscoverPage(
         listOf(
             DiscoverSubTab("推荐", Icons.Default.AutoAwesome),
             DiscoverSubTab("排行榜", Icons.Default.Leaderboard),
-            DiscoverSubTab("精选", Icons.Default.Star),
+            DiscoverSubTab("专区", Icons.Default.GridView),
+            DiscoverSubTab("频道", Icons.Default.Radio),
             DiscoverSubTab("探针", Icons.Default.Science)
         )
     }
@@ -186,9 +189,21 @@ fun DiscoverPage(
                     )
                 }
                 2 -> {
-                    // 精选子页面（编辑精选 /ip 歌曲列表，默认百万收藏）
+                    // 专区子页面（48 专区列表，点播随机 50 首）
                     JingxuanTabContent(
                         onPlaySong = onPlaySong,
+                        currentPlayingPath = currentPlayingPath,
+                        onAddToQueueNext = onAddToQueueNext
+                    )
+                }
+                3 -> {
+                    // 频道子页面（zone/home 系专区完整页，v1 先做 Hi-Res）
+                    PindaoTabContent(
+                        zoneId = 21L,
+                        channelName = "Hi-Res专区",
+                        channelDesc = "无损音质 · 歌曲 + 相关歌单",
+                        onPlaySong = onPlaySong,
+                        onPlaylistClick = onPlaylistClick,
                         currentPlayingPath = currentPlayingPath,
                         onAddToQueueNext = onAddToQueueNext
                     )
@@ -911,14 +926,56 @@ private fun YuekuSongRow(
     }
 }
 
-// ==================== 精选子页面（编辑精选 /ip 歌曲列表） ====================
-// 默认百万收藏（99070）；预设+手填 ip_id 任意切（banner/歌曲 ips 里抠到的 id 都能直接听）。
-// total 可达 9000+，分页追加加载。
+// ==================== 专区子页面（48 个编辑精选专区） ====================
+// 每行一个专区（封面+名），点行或点播放键：用共用备货 helper 随机备 50 首即播。
+// 游标与首页/乐库共用同一份（yueku_cache），全局轮转不重复。
+// 无 ip_id 的 4 个专区（Hi-Res/青春/音乐人/热门自制）暂只支持详情页，行内提示。
 
-private val JINGXUAN_PRESETS = listOf(
-    "百万收藏" to 99070L,
-    "抖音专区" to 88104L,
-    "网络专区" to 87634L
+private data class ZoneEntry(val name: String, val ipId: Long?, val iconUrl: String, val altZoneId: Long? = null)
+
+private val ZONE_ENTRIES = listOf(
+    ZoneEntry("DJ", 87641L, "https://imgessl.kugou.com/quickentry/20230704/20230704233204541061.jpg"),
+    ZoneEntry("抖音", 88104L, "https://imgessl.kugou.com/quickentry/20230704/20230704233232980023.jpg"),
+    ZoneEntry("经典老歌", 88226L, "https://imgessl.kugou.com/quickentry/20230704/20230704235426413521.jpg"),
+    ZoneEntry("儿童", 87639L, "https://imgessl.kugou.com/quickentry/20230704/20230704232229905515.jpg"),
+    ZoneEntry("车载", 87963L, "https://imgessl.kugou.com/quickentry/20230704/20230704232328671616.jpg"),
+    ZoneEntry("纯音乐", 87747L, "https://imgessl.kugou.com/quickentry/20230704/20230704224558479280.jpg"),
+    ZoneEntry("广场舞", 87992L, "https://imgessl.kugou.com/quickentry/20230704/20230704224319462864.jpg"),
+    ZoneEntry("网络", 87634L, "https://imgessl.kugou.com/quickentry/20230704/20230704223003901012.jpg"),
+    ZoneEntry("粤语", 87899L, "https://imgessl.kugou.com/quickentry/20230704/20230704222858744159.jpg"),
+    ZoneEntry("80后", 88257L, "https://imgessl.kugou.com/quickentry/20230704/20230704222656156172.jpg"),
+    ZoneEntry("90后", 88254L, "https://imgessl.kugou.com/quickentry/20230704/20230704222623938557.jpg"),
+    ZoneEntry("欧美", 87780L, "https://imgessl.kugou.com/quickentry/20230704/20230704223719978571.jpg"),
+    ZoneEntry("国风", 87715L, "https://imgessl.kugou.com/quickentry/20230704/20230704222315324865.jpg"),
+    ZoneEntry("商铺", 87985L, "https://imgessl.kugou.com/quickentry/20230704/20230704222027689293.jpg"),
+    ZoneEntry("伤感", 98934L, "https://imgessl.kugou.com/quickentry/20230704/20230704221932706154.jpg"),
+    ZoneEntry("放松", 88103L, "https://imgessl.kugou.com/quickentry/20230704/20230704220928163940.jpg"),
+    ZoneEntry("70后", 87977L, "https://imgessl.kugou.com/quickentry/20230704/20230704220631916317.jpg"),
+    ZoneEntry("快乐", 88098L, "https://imgessl.kugou.com/quickentry/20230704/20230704220513691102.jpg"),
+    ZoneEntry("睡前", 87990L, "https://imgessl.kugou.com/quickentry/20230704/20230704220413666683.jpg"),
+    ZoneEntry("闽南语", 87900L, "https://imgessl.kugou.com/quickentry/20230704/20230704215606692913.jpg"),
+    ZoneEntry("电音", 87746L, "https://imgessl.kugou.com/quickentry/20230704/20230704215446482578.jpg"),
+    ZoneEntry("K歌必听", 87986L, "https://imgessl.kugou.com/quickentry/20230704/20230704215346999862.jpg"),
+    ZoneEntry("健身", 87988L, "https://imgessl.kugou.com/quickentry/20230704/20230704221436255868.jpg"),
+    ZoneEntry("影视", 88213L, "https://imgessl.kugou.com/quickentry/20230704/20230704215016764606.jpg"),
+    ZoneEntry("游戏", 87952L, "https://imgessl.kugou.com/quickentry/20230704/20230704214615547779.jpg"),
+    ZoneEntry("韩流", 87782L, "https://imgessl.kugou.com/quickentry/20230704/20230704213846185586.jpg"),
+    ZoneEntry("咖啡馆", 87984L, "https://imgessl.kugou.com/quickentry/20230704/20230704213343318463.jpg"),
+    ZoneEntry("00后", 88268L, "https://imgessl.kugou.com/quickentry/20230704/20230704212744775191.jpg"),
+    ZoneEntry("解压", 88089L, "https://imgessl.kugou.com/quickentry/20230704/20230704212607857996.jpg"),
+    ZoneEntry("甜蜜", 88093L, "https://imgessl.kugou.com/quickentry/20230704/20230704212112107046.jpg"),
+    ZoneEntry("舞曲", 87749L, "https://imgessl.kugou.com/quickentry/20230704/20230704190657380671.jpg"),
+    ZoneEntry("国语", 87898L, "https://imgessl.kugou.com/quickentry/20230704/20230704190506111298.jpg"),
+    ZoneEntry("戏曲", 87964L, "https://imgessl.kugou.com/quickentry/20230704/20230704190205555372.jpg"),
+    ZoneEntry("民谣", 87744L, "https://imgessl.kugou.com/quickentry/20230704/20230704175555940771.jpg"),
+    ZoneEntry("流行", 87473L, "https://imgessl.kugou.com/quickentry/20230704/20230704185939164073.jpg"),
+    ZoneEntry("青春专区", null, "https://imgessl.kugou.com/quickentry/20220507/20220507122307361033.jpg"),
+    ZoneEntry("综艺专区", 89714L, "https://imgessl.kugou.com/quickentry/20220310/20220310175729970544.jpg"),
+    ZoneEntry("首发专区", 94940L, "https://imgessl.kugou.com/quickentry/20220310/20220310175942769122.jpg"),
+    ZoneEntry("音乐人专区", null, "https://imgessl.kugou.com/quickentry/20220310/20220310175926259503.jpg"),
+    ZoneEntry("厂牌音乐", 91473L, "https://imgessl.kugou.com/quickentry/20221013/20221013152725767975.png"),
+    ZoneEntry("热门自制节目专区", null, "https://imgessl.kugou.com/quickentry/20220424/20220424181308236196.jpg"),
+    ZoneEntry("情歌", 88208L, "https://imgessl.kugou.com/quickentry/20230704/20230704224425990324.jpg")
 )
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -930,85 +987,30 @@ private fun JingxuanTabContent(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val gson = remember { Gson() }
-    val prefs = remember { context.getSharedPreferences("jingxuan_cache", Context.MODE_PRIVATE) }
-    val pageSize = 30
+    val prefs = remember { context.getSharedPreferences("yueku_cache", Context.MODE_PRIVATE) }
 
-    var ipIdText by remember { mutableStateOf("99070") }
-    var songs by remember { mutableStateOf<List<SongInfo>>(emptyList()) }
-    var total by remember { mutableIntStateOf(0) }
-    var page by remember { mutableIntStateOf(1) }
-    var isLoading by remember { mutableStateOf(true) }
-    var isLoadingMore by remember { mutableStateOf(false) }
-    var loadError by remember { mutableStateOf<String?>(null) }
+    var loadingId by remember { mutableStateOf<Long?>(null) }
 
-    fun currentIpId(): Long = ipIdText.trim().toLongOrNull() ?: 0L
-    fun noMore(): Boolean = total > 0 && songs.size >= total
-    val presetName = JINGXUAN_PRESETS.firstOrNull { it.second == currentIpId() }?.first
-
-    fun loadPage(targetPage: Int, append: Boolean) {
-        val id = currentIpId()
-        if (id <= 0) {
-            loadError = "请先填写有效的 ip_id"
-            isLoading = false
-            return
-        }
-        if (append) isLoadingMore = true else {
-            isLoading = true
-            loadError = null
-        }
-        scope.launch(Dispatchers.IO) {
-            try {
-                val resp = KuGouApi.service.getIpSongs(id, "audios", targetPage, pageSize, System.currentTimeMillis())
-                val list = resp.data.orEmpty().mapNotNull { it.toSongInfo() }
-                withContext(Dispatchers.Main) {
-                    songs = if (append) songs + list else list
-                    total = resp.total
-                    page = targetPage
-                    if (!append && list.isNotEmpty()) {
-                        prefs.edit()
-                            .putString("songs_$id", gson.toJson(list))
-                            .putInt("total_$id", total)
-                            .apply()
-                    }
-                    isLoading = false
-                    isLoadingMore = false
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("LxMusic_Jingxuan", "/ip?id=$id 请求失败: ${e.message}")
-                withContext(Dispatchers.Main) {
-                    if (!append && songs.isEmpty()) loadError = e.message ?: "未知错误"
-                    isLoading = false
-                    isLoadingMore = false
-                }
+    fun playZone(ipId: Long) {
+        if (loadingId != null) return
+        scope.launch {
+            loadingId = ipId
+            val (list, _) = fetchIpZoneBatch(
+                ipId, 2, 30, 50,
+                getCursor = { prefs.getInt("zone_page_$ipId", 1) },
+                setCursor = { prefs.edit().putInt("zone_page_$ipId", it).apply() }
+            )
+            loadingId = null
+            if (list.isNotEmpty()) {
+                onPlaySong?.invoke(list, 0)
+            } else {
+                android.widget.Toast.makeText(context, "没备到歌，换一个专区试试", android.widget.Toast.LENGTH_SHORT).show()
             }
         }
-    }
-
-    fun reload() {
-        songs = emptyList()
-        total = 0
-        page = 1
-        loadPage(1, false)
-    }
-
-    LaunchedEffect(Unit) {
-        // 默认 id 的第一页缓存秒开
-        try {
-            prefs.getString("songs_99070", null)?.let { json ->
-                gson.fromJson<List<SongInfo>>(json, object : TypeToken<List<SongInfo>>() {}.type)?.let { l ->
-                    if (l.isNotEmpty()) {
-                        songs = l
-                        total = prefs.getInt("total_99070", 0)
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-        loadPage(1, false)
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // 头部：标题 + 播放全部
+        // 头部
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1017,146 +1019,350 @@ private fun JingxuanTabContent(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = presetName ?: "编辑精选",
+                    text = "专区",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = if (total > 0) "ip ${ipIdText.trim()} · 共 $total 首" else "ip ${ipIdText.trim()}",
+                    text = "42个专区 · 点播随机50首",
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        }
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 4.dp, bottom = 180.dp)
+        ) {
+            items(ZONE_ENTRIES, key = { it.name }) { zone ->
+                ZoneRow(
+                    zone = zone,
+                    loading = loadingId == zone.ipId,
+                    onPlay = {
+                        val id = zone.ipId
+                        if (id != null) {
+                            playZone(id)
+                        } else {
+                            android.widget.Toast.makeText(context, "该专区暂只支持详情页，开发中", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+/** 专区行（歌单选项样式：封面 + 名 + 右侧播放键） */
+@Composable
+private fun ZoneRow(
+    zone: ZoneEntry,
+    loading: Boolean,
+    onPlay: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable { onPlay() }
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val url = zone.iconUrl
+        if (url.isNotBlank()) {
+            val painter = rememberAsyncImagePainter(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(url)
+                    .memoryCacheKey(url)
+                    .crossfade(150)
+                    .size(160)
+                    .build()
+            )
+            Image(
+                painter = painter,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(10.dp)),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.MusicNote,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = zone.name,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = if (zone.ipId == null) "详情页开发中" else "随机50首 · 编辑精选",
+                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        if (loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(24.dp),
+                strokeWidth = 3.dp
+            )
+        } else if (zone.ipId != null) {
             IconButton(
-                onClick = { if (songs.isNotEmpty()) onPlaySong?.invoke(songs, 0) },
-                modifier = Modifier.size(40.dp)
+                onClick = onPlay,
+                modifier = Modifier.size(36.dp)
             ) {
                 Icon(
                     Icons.Default.PlayArrow,
-                    contentDescription = "播放全部",
+                    contentDescription = "播放",
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }
+    }
+}
 
-        // ip 切换：预设 chips
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            items(JINGXUAN_PRESETS) { preset ->
-                val name = preset.first
-                val id = preset.second
-                val isSelected = currentIpId() == id
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer
-                    else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable {
-                            ipIdText = id.toString()
-                            songs = emptyList()
-                            total = 0
-                            page = 1
-                            loadPage(1, false)
-                        }
-                ) {
-                    Text(
-                        text = name,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 13.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                        ),
-                        color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+// ==================== 频道子页面（zone/home 系专区完整页） ====================
+// 参数化 zoneId + 名字：青春(269)/音乐人(33)/热门自制(329)后续加进来就是调一次函数。
+// 内容 = 模块里所有可播歌曲（歌单样式） + 相关歌单（横滑卡片，gid 直开详情）。
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun PindaoTabContent(
+    zoneId: Long,
+    channelName: String,
+    channelDesc: String,
+    onPlaySong: ((List<SongInfo>, Int) -> Unit)?,
+    onPlaylistClick: ((SearchPlaylistItem) -> Unit)?,
+    currentPlayingPath: String?,
+    onAddToQueueNext: ((SongInfo) -> Unit)?
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val gson = remember { Gson() }
+    val prefs = remember { context.getSharedPreferences("channel_cache", Context.MODE_PRIVATE) }
+
+    var songs by remember(zoneId) { mutableStateOf<List<SongInfo>>(emptyList()) }
+    var playlists by remember(zoneId) { mutableStateOf<List<SearchPlaylistItem>>(emptyList()) }
+    var isLoading by remember(zoneId) { mutableStateOf(true) }
+    var loadError by remember(zoneId) { mutableStateOf<String?>(null) }
+
+    fun loadData() {
+        isLoading = true
+        loadError = null
+        scope.launch(Dispatchers.IO) {
+            try {
+                val ts = System.currentTimeMillis()
+                val resp = KuGouApi.service.getIpZoneHome(zoneId, ts)
+                val modules = resp.data?.module.orEmpty()
+                modules.forEachIndexed { i, m ->
+                    val items = m.items.orEmpty()
+                    android.util.Log.d(
+                        "LxMusic_Channel",
+                        "[频道] id=$zoneId 模块$i module_id=${m.moduleId} 条目=${items.size} " +
+                            "有hash=${items.count { !it.extend?.hash.isNullOrBlank() }} " +
+                            "有gid=${items.count { !it.extend?.globalSpecialId.isNullOrBlank() }}"
                     )
                 }
+                val items = modules.flatMap { it.items.orEmpty() }
+                var fetchedSongs = items.mapNotNull { it.toSongInfo() }
+                val fetchedPlaylists = items.mapNotNull { it.toSearchPlaylistItem() }.distinctBy { it.gid }
+                // 兜底：模块里没有直给的歌，就从头几个歌单里顺序各拿第一页凑 50 首（够即停）
+                if (fetchedSongs.isEmpty() && fetchedPlaylists.isNotEmpty()) {
+                    val gids = fetchedPlaylists.take(4).mapNotNull { it.gid?.takeIf { g -> g.isNotBlank() } }
+                    val pooled = mutableListOf<SongInfo>()
+                    for (gid in gids) {
+                        if (pooled.size >= 50) break
+                        val part = runCatching { KuGouApi.fetchSpecialPlaylistSongs(0, gid, 1, 30) }.getOrNull()?.first.orEmpty()
+                        part.filter { s -> pooled.none { it.filePath == s.filePath } }.forEach { pooled.add(it) }
+                    }
+                    android.util.Log.d("LxMusic_Channel", "[频道] id=$zoneId 歌单凑歌: ${gids.size}个歌单 → ${pooled.size}首")
+                    fetchedSongs = pooled.shuffled().take(50)
+                }
+                android.util.Log.d(
+                    "LxMusic_Channel",
+                    "=== [频道] id=$zoneId 模块=${resp.data?.module?.size ?: 0} 歌曲=${fetchedSongs.size} 歌单=${fetchedPlaylists.size} ==="
+                )
+                withContext(Dispatchers.Main) {
+                    if (fetchedSongs.isNotEmpty() || fetchedPlaylists.isNotEmpty()) {
+                        songs = fetchedSongs
+                        playlists = fetchedPlaylists
+                        prefs.edit()
+                            .putString("songs_$zoneId", gson.toJson(songs))
+                            .putString("playlists_$zoneId", gson.toJson(playlists))
+                            .apply()
+                    } else if (songs.isEmpty() && playlists.isEmpty()) {
+                        loadError = "这个专区暂无可播内容"
+                    }
+                    isLoading = false
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("LxMusic_Channel", "[频道] id=$zoneId 失败: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    if (songs.isEmpty() && playlists.isEmpty()) loadError = e.message ?: "未知错误"
+                    isLoading = false
+                }
             }
         }
+    }
 
-        // 手填任意 ip_id（banner 或歌曲 ips 里找）
-        OutlinedTextField(
-            value = ipIdText,
-            onValueChange = { ipIdText = it.filter { c -> c.isDigit() } },
-            label = { Text("ip_id（banner 或歌曲 ips 里找）") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Number,
-                imeAction = ImeAction.Done
-            ),
-            keyboardActions = KeyboardActions(onDone = { reload() }),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp)
-        )
+    LaunchedEffect(zoneId) {
+        // 缓存秒开
+        try {
+            prefs.getString("songs_$zoneId", null)?.let { json ->
+                gson.fromJson<List<SongInfo>>(json, object : TypeToken<List<SongInfo>>() {}.type)?.let { l ->
+                    if (l.isNotEmpty()) songs = l
+                }
+            }
+            prefs.getString("playlists_$zoneId", null)?.let { json ->
+                gson.fromJson<List<SearchPlaylistItem>>(json, object : TypeToken<List<SearchPlaylistItem>>() {}.type)?.let { l ->
+                    if (l.isNotEmpty()) playlists = l
+                }
+            }
+        } catch (_: Exception) {}
+        // 缓存命中也刷新一次，保证内容新鲜
+        loadData()
+    }
 
-        Box(modifier = Modifier.weight(1f)) {
-            if (isLoading && songs.isEmpty()) {
-                CircularWavyProgressIndicator(
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.align(Alignment.Center)
-                )
-            } else if (loadError != null && songs.isEmpty()) {
-                Column(
-                    modifier = Modifier.align(Alignment.Center),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text("精选加载失败：$loadError", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(onClick = { reload() }) {
-                        Text("重试")
+    fun hasData() = songs.isNotEmpty() || playlists.isNotEmpty()
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (isLoading && !hasData()) {
+            CircularWavyProgressIndicator(
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.align(Alignment.Center)
+            )
+        } else if (loadError != null && !hasData()) {
+            Column(
+                modifier = Modifier.align(Alignment.Center),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("频道加载失败：$loadError", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Button(onClick = { loadData() }) {
+                    Text("重试")
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = 8.dp, bottom = 180.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // 头部：频道名 + 播放全部
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = channelName,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = when {
+                                    songs.isNotEmpty() -> "$channelDesc · 共 ${songs.size} 首"
+                                    playlists.isNotEmpty() -> "$channelDesc · ${playlists.size}个歌单"
+                                    else -> channelDesc
+                                },
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        // 有可播歌曲才显示播放全部（纯歌单型专区不显示）
+                        if (songs.isNotEmpty()) {
+                            IconButton(
+                                onClick = { onPlaySong?.invoke(songs, 0) },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    contentDescription = "播放全部",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
                     }
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(top = 4.dp, bottom = 180.dp)
-                ) {
-                    itemsIndexed(songs, key = { index, s -> s.filePath.ifEmpty { "jx_$index" } }) { index, song ->
+
+                // 相关歌单（横滑卡片，gid 直开详情页）
+                if (playlists.isNotEmpty()) {
+                    item {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = "相关歌单",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                itemsIndexed(playlists, key = { i, p -> "ch_${p.gid}_$i" }) { _, item ->
+                                    RecommendPlaylistCard(
+                                        playlist = item,
+                                        onClick = { onPlaylistClick?.invoke(item) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 歌曲列表
+                if (songs.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "歌曲",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        )
+                    }
+                    itemsIndexed(songs, key = { index, s -> s.filePath.ifEmpty { "ch_s_$index" } }) { index, song ->
                         YuekuSongRow(
                             song = song,
                             isCurrent = song.filePath == currentPlayingPath,
                             onClick = { onPlaySong?.invoke(songs, index) },
                             onAddToQueueNext = onAddToQueueNext
                         )
-                    }
-                    if (isLoadingMore) {
-                        item(key = "loading") {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(28.dp),
-                                    strokeWidth = 3.dp
-                                )
-                            }
-                        }
-                    } else if (!noMore() && songs.isNotEmpty()) {
-                        // 滑到底自动拉下一页（key 带 page，翻页后重新触发）
-                        item(key = "more_$page") {
-                            LaunchedEffect(Unit) { loadPage(page + 1, true) }
-                        }
-                    } else if (noMore() && songs.isNotEmpty()) {
-                        item(key = "end") {
-                            Text(
-                                text = "— 到底了，共 $total 首 —",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp),
-                                textAlign = TextAlign.Center
-                            )
-                        }
                     }
                 }
             }

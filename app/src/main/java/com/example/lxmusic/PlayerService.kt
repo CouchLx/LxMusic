@@ -19,6 +19,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.Player
@@ -54,6 +56,15 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+
+/** 睡眠定时状态：UI 直接 collect（companion 静态流，不随页面关闭/ViewModel 销毁丢失） */
+data class SleepTimerUiState(
+    val active: Boolean = false,     // 有定时任务（倒计时中或延长中）
+    val extending: Boolean = false,  // 已到点、等待当前歌播完
+    val remainingMs: Long = 0L,      // 倒计时剩余
+    val totalMs: Long = 0L           // 本次定时总时长
+)
 
 class PlayerService : MediaSessionService() {
 
@@ -83,9 +94,28 @@ class PlayerService : MediaSessionService() {
         const val CHANNEL_DESCRIPTION = "音乐播放控制通知"
         const val NOTIFICATION_ID = 1001
 
+        /**
+         * 睡眠定时静态入口：UI 经 ViewModel 调用，直取存活的 PlayerService 实例。
+         * 播放器页面/菜单打开时 ViewModel 的 MediaController 必然绑定着服务，实例一定存在；
+         * 播放中场景下服务是前台 started 状态，退出 App 后定时照常生效。
+         */
+        fun startSleepTimerStatic(minutes: Int, extend: Boolean): Boolean {
+            val service = anchorServiceInstance ?: return false
+            service.armSleepTimer(minutes, extend)
+            return true
+        }
+
+        /** 手动取消入口：服务不存活时本地也没有定时任务可清，静默即可 */
+        fun cancelSleepTimerStatic() {
+            anchorServiceInstance?.cancelSleepTimer()
+        }
+
         /** 当前解码音频格式（采样率/位深/编码），UI 经 ViewModel 轮询读取 */
         @Volatile
         var lastAudioFormat: androidx.media3.common.Format? = null
+
+        /** 睡眠定时状态：UI 直接 collect（静态流不随页面关闭/ViewModel 销毁丢失） */
+        val sleepTimerFlow = MutableStateFlow(SleepTimerUiState())
 
         @Volatile
         private var appInForeground = true
@@ -421,6 +451,16 @@ class PlayerService : MediaSessionService() {
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
                 lastAudioFormat = null
+                // 睡眠定时延长态：自然播完（含单曲循环点）→ 暂停兑现；
+                // 手动切歌/跨歌 seek → 取消定时并告知
+                if (sleepTimerFlow.value.extending) {
+                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                        fulfillSleepTimer()
+                    } else {
+                        cancelSleepTimer()
+                        Toast.makeText(applicationContext, "睡眠定时已取消", Toast.LENGTH_LONG).show()
+                    }
+                }
             }
 
             override fun onEvents(p: Player, events: Player.Events) {
@@ -489,6 +529,12 @@ class PlayerService : MediaSessionService() {
                         startVolumeFade(player, fadeInMs)
                     }
                 } else {
+                    // 睡眠定时延长态下的手动暂停（含耳机拔出暂停）→ 取消定时并告知。
+                    // 定时器自身触发的暂停在 fulfillSleepTimer 里先清状态，不会走到这里。
+                    if (sleepTimerFlow.value.extending) {
+                        cancelSleepTimer()
+                        Toast.makeText(applicationContext, "睡眠定时已取消", Toast.LENGTH_LONG).show()
+                    }
                     routingRefreshJob?.cancel()
                     routingRefreshJob = null
                     abandonAudioFocus()
@@ -500,6 +546,10 @@ class PlayerService : MediaSessionService() {
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 updateUsbExclusiveVolumeRouting()
+                // 睡眠定时延长态：队列末尾播完不再产生 transition，用 ENDED 兑现
+                if (playbackState == Player.STATE_ENDED && sleepTimerFlow.value.extending) {
+                    fulfillSleepTimer()
+                }
             }
         })
     }
@@ -714,6 +764,8 @@ class PlayerService : MediaSessionService() {
     // ==================== 暂停后退出播放服务 ====================
 
     private fun scheduleIdleShutdownIfNeeded() {
+        // 睡眠定时进行中：保持服务存活，避免空闲退出把挂起的定时一起带走
+        if (sleepTimerFlow.value.active) return
         val player = mediaSession?.player ?: return
         if (player.playWhenReady) return // 仍在播放/缓冲中
         if (player.mediaItemCount == 0) return
@@ -722,6 +774,8 @@ class PlayerService : MediaSessionService() {
         if (minutes <= 0) return
         idleShutdownRunnable?.let { idleHandler?.removeCallbacks(it) }
         val runnable = Runnable {
+            // 兜底：调度后用户才挂上睡眠定时的场景，到点也不退出
+            if (sleepTimerFlow.value.active) return@Runnable
             val p = mediaSession?.player
             if (p != null && !p.isPlaying && !p.playWhenReady) {
                 stopSelf()
@@ -734,6 +788,72 @@ class PlayerService : MediaSessionService() {
     private fun cancelIdleShutdown() {
         idleShutdownRunnable?.let { idleHandler?.removeCallbacks(it) }
         idleShutdownRunnable = null
+    }
+
+    // ==================== 睡眠定时 ====================
+
+    private var sleepTimerJob: Job? = null
+    private var sleepTimerExtend = false
+    private var sleepTimerEndAtElapsedMs = 0L
+
+    /** 启动睡眠定时：协程 500ms 轮询刷新剩余时间，到点按延长开关决定直接暂停或等当前歌播完 */
+    private fun armSleepTimer(minutes: Int, extendOnSongEnd: Boolean) {
+        cancelSleepTimer()
+        sleepTimerExtend = extendOnSongEnd
+        val totalMs = minutes * 60_000L
+        sleepTimerEndAtElapsedMs = SystemClock.elapsedRealtime() + totalMs
+        sleepTimerFlow.value = SleepTimerUiState(
+            active = true,
+            remainingMs = totalMs,
+            totalMs = totalMs
+        )
+        sleepTimerJob = serviceScope.launch {
+            while (true) {
+                val remain = sleepTimerEndAtElapsedMs - SystemClock.elapsedRealtime()
+                if (remain <= 0) {
+                    onSleepTimerFired()
+                    return@launch
+                }
+                sleepTimerFlow.value = sleepTimerFlow.value.copy(remainingMs = remain)
+                delay(500)
+            }
+        }
+    }
+
+    /** 手动停止：只清定时，不动播放状态 */
+    private fun cancelSleepTimer() {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        sleepTimerExtend = false
+        sleepTimerFlow.value = SleepTimerUiState()
+    }
+
+    /** 到点：延长开且正在播 → 进入延长态等当前歌播完；否则静默结束并告知 */
+    private fun onSleepTimerFired() {
+        val player = mediaSession?.player
+        if (player != null && player.isPlaying && sleepTimerExtend) {
+            sleepTimerFlow.value = sleepTimerFlow.value.copy(extending = true)
+            return
+        }
+        sleepTimerFlow.value = SleepTimerUiState()
+        Toast.makeText(applicationContext, "睡眠定时已结束", Toast.LENGTH_LONG).show()
+        scheduleIdleShutdownIfNeeded()
+    }
+
+    /**
+     * 兑现暂停：先清状态再 pause——否则自己触发的暂停会被 onIsPlayingChanged(false)
+     * 误判成"延长期间手动暂停"，造成二次取消重复弹提示。
+     */
+    private fun fulfillSleepTimer() {
+        sleepTimerFlow.value = SleepTimerUiState()
+        val player = mediaSession?.player
+        val wasPlaying = player?.isPlaying == true
+        player?.pause()
+        Toast.makeText(
+            applicationContext,
+            if (wasPlaying) "睡眠定时已暂停播放" else "睡眠定时已结束",
+            Toast.LENGTH_LONG
+        ).show()
     }
 
     private fun createNotificationChannel() {
@@ -786,6 +906,7 @@ class PlayerService : MediaSessionService() {
     override fun onDestroy() {
         anchorServiceInstance = null
         UsbExclusiveBackgroundAudioAnchor.stop("service_destroy")
+        cancelSleepTimer()
         cancelIdleShutdown()
         idleHandler?.removeCallbacksAndMessages(null)
         idleHandler = null

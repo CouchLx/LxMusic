@@ -786,6 +786,86 @@ data class IpCover(
     val unionCover: String? = null
 )
 
+// ==================== 专区详情（/ip/zone/home） ====================
+// 模块混合：歌曲（resource_type=2，extend 里 hash，可播）、歌单（type=3，gid 可开）、
+// MV（type=8，无播放器）、歌手（type=5）。解析宽容：只认能播的歌，其它忽略。
+
+data class IpZoneHomeResponse(
+    val status: Int = 0,
+    val data: IpZoneHomeData? = null
+)
+
+data class IpZoneHomeData(
+    val module: List<IpZoneModule>? = null
+)
+
+data class IpZoneModule(
+    @com.google.gson.annotations.SerializedName("module_id")
+    val moduleId: Long = 0,
+    val items: List<IpZoneItem>? = null
+)
+
+data class IpZoneItem(
+    @com.google.gson.annotations.SerializedName("resource_type")
+    val resourceType: Int = 0,
+    @com.google.gson.annotations.SerializedName("resource_name")
+    val resourceName: String? = null,
+    @com.google.gson.annotations.SerializedName("resource_icon")
+    val resourceIcon: String? = null,
+    val extend: IpZoneItemExtend? = null
+) {
+    fun toSongInfo(): SongInfo? {
+        val h = extend?.hash
+        if (h.isNullOrBlank()) return null
+        val coverRaw = resourceIcon ?: extend?.album?.sizableCover ?: ""
+        return SongInfo(
+            title = resourceName?.takeIf { it.isNotBlank() } ?: "未知歌曲",
+            artist = extend?.singername?.takeIf { it.isNotBlank() } ?: "未知艺术家",
+            filePath = "$h|${extend?.albumAudioId ?: 0}",
+            albumArtUri = coverRaw.replace("{size}", "240").replace("http://", "https://"),
+            duration = (extend?.duration ?: 0).toLong()
+        )
+    }
+
+    /** 歌单模块条目 → 歌单（gid 直开详情页；specialid 恒为 0，走 gid 链路） */
+    fun toSearchPlaylistItem(): SearchPlaylistItem? {
+        val gid = extend?.globalSpecialId
+        if (gid.isNullOrBlank()) return null
+        return SearchPlaylistItem(
+            specialid = 0,
+            specialname = resourceName,
+            img = resourceIcon,
+            nickname = extend?.singerName,
+            play_count = extend?.playCountFriendly,
+            gid = gid
+        )
+    }
+}
+
+data class IpZoneItemExtend(
+    val hash: String? = null,
+    @com.google.gson.annotations.SerializedName("album_audio_id")
+    val albumAudioId: Long = 0,
+    val singername: String? = null,
+    // 毫秒
+    val duration: Int = 0,
+    val album: IpZoneItemAlbum? = null,
+    // 歌单模块条目用：gid 直开详情页
+    @com.google.gson.annotations.SerializedName("global_specialid")
+    val globalSpecialId: String? = null,
+    @com.google.gson.annotations.SerializedName("singer_name")
+    val singerName: String? = null,
+    @com.google.gson.annotations.SerializedName("play_count_friendly")
+    val playCountFriendly: String? = null
+)
+
+data class IpZoneItemAlbum(
+    @com.google.gson.annotations.SerializedName("album_name")
+    val albumName: String? = null,
+    @com.google.gson.annotations.SerializedName("sizable_cover")
+    val sizableCover: String? = null
+)
+
 /** 编辑精选专区批量备货（乐库卡片/详情/首页卡片三处共用）：
  * 按游标顺序拿 pageCount 页（空页回绕到开头），汇总打散取 targetCount 首。
  * 游标读写由调用方提供——都读写同一份 prefs 的 zone_page_<id> 即可全局轮转不重复。
@@ -1347,6 +1427,13 @@ interface KuGouService {
         @Query("id") id: Long,
         @Query("timestamp") timestamp: Long = 0
     ): okhttp3.ResponseBody
+
+    // 专区详情正式接口（混合模块，只取能播的歌）
+    @GET("ip/zone/home")
+    suspend fun getIpZoneHome(
+        @Query("id") id: Long,
+        @Query("timestamp") timestamp: Long = 0
+    ): IpZoneHomeResponse
 
     // 编辑精选歌曲正式接口（type=audios，分页：total 可达 9000+，务必分页拉）
     @GET("ip")

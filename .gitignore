@@ -18,6 +18,7 @@ local.properties
 *.bak
 *.bak_split
 *.orig
+*.summary.txt
 
 # 本地工具配置
 /.claude/
