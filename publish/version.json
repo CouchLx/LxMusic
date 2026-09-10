@@ -1,12 +1,12 @@
 {
-  "versionCode": 6,
-  "versionName": "3.7.59",
-  "desc": "3.7.59 更新内容：\n- 新增首页模块排序页(HomeOrderSortPage)\n- 播放器/发现页/设置页多项优化\n- 构建切换到阿里云镜像、Gradle 9.5.1\n- 更新下载优化：多镜像切换 + 断点续传 + 保存到 Download",
-  "apkUrl": "https://github.com/CouchLx/LxMusic/releases/download/v3.7.59/app-release.apk",
+  "versionCode": 7,
+  "versionName": "3.7.60",
+  "desc": "新增睡眠定时器等新功能",
+  "apkUrl": "https://github.com/CouchLx/LxMusic/releases/download/v3.7.60/app-release.apk",
   "apkMirrors": [
-    "https://gh-proxy.com/https://github.com/CouchLx/LxMusic/releases/download/v3.7.59/app-release.apk",
-    "https://ghproxy.net/https://github.com/CouchLx/LxMusic/releases/download/v3.7.59/app-release.apk",
-    "https://ghfast.top/https://github.com/CouchLx/LxMusic/releases/download/v3.7.59/app-release.apk",
-    "https://gh.llkk.cc/https://github.com/CouchLx/LxMusic/releases/download/v3.7.59/app-release.apk"
+    "https://gh-proxy.com/https://github.com/CouchLx/LxMusic/releases/download/v3.7.60/app-release.apk",
+    "https://ghproxy.net/https://github.com/CouchLx/LxMusic/releases/download/v3.7.60/app-release.apk",
+    "https://ghfast.top/https://github.com/CouchLx/LxMusic/releases/download/v3.7.60/app-release.apk",
+    "https://gh.llkk.cc/https://github.com/CouchLx/LxMusic/releases/download/v3.7.60/app-release.apk"
   ]
 }
