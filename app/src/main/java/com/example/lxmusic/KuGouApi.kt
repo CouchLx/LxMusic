@@ -4,6 +4,9 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.*
 import com.example.lxmusic.model.SongInfo
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 // ==================== 排行榜列表 ====================
 
@@ -869,7 +872,7 @@ data class IpZoneItemAlbum(
 /** 编辑精选专区批量备货（乐库卡片/详情/首页卡片三处共用）：
  * 按游标顺序拿 pageCount 页（空页回绕到开头），汇总打散取 targetCount 首。
  * 游标读写由调用方提供——都读写同一份 prefs 的 zone_page_<id> 即可全局轮转不重复。
- * 返回 Pair(歌曲, 专区总数)。单页请求最稳，extra 并行由调用方组织。 */
+ * 返回 Pair(歌曲, 专区总数)。**页与页之间并行请求**（原先是串行逐页，两页就是两次等待）。 */
 suspend fun fetchIpZoneBatch(
     ipId: Long,
     pageCount: Int = 2,
@@ -878,29 +881,39 @@ suspend fun fetchIpZoneBatch(
     getCursor: () -> Int,
     setCursor: (Int) -> Unit
 ): Pair<List<SongInfo>, Int> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-    var next = getCursor().coerceAtLeast(1)
-    val pool = mutableListOf<SongInfo>()
-    var fetched = 0
-    var guard = 0
-    var total = 0
-    while (pool.size < targetCount && fetched < pageCount && guard < pageCount + 2) {
-        guard++
+    val start = getCursor().coerceAtLeast(1)
+
+    // 单页请求：失败返回空列表，不抛异常（返回 页码/专区总数/歌曲）
+    suspend fun fetchPage(page: Int): Triple<Int, Int, List<SongInfo>> {
         val resp = runCatching {
-            KuGouApi.service.getIpSongs(ipId, "audios", next, pageSize, System.currentTimeMillis())
-        }.getOrNull()
-        val list = resp?.data.orEmpty().mapNotNull { it.toSongInfo() }
-        if (resp != null && resp.total > 0) total = resp.total
-        if (list.isEmpty()) {
-            if (next == 1) break // 连第一页都空，真没网
-            next = 1 // 疑似到头，回绕
-            continue
-        }
-        fetched++
-        list.filter { s -> pool.none { it.filePath == s.filePath } }.forEach { pool.add(it) }
-        next++
+            KuGouApi.service.getIpSongs(ipId, "audios", page, pageSize, System.currentTimeMillis())
+        }.getOrNull() ?: return Triple(page, 0, emptyList())
+        return Triple(page, resp.total, resp.data.orEmpty().mapNotNull { it.toSongInfo() })
+    }
+
+    // 这几页并行拉，总耗时 = 最慢一页
+    val results = coroutineScope {
+        (start until start + pageCount).map { p -> async { fetchPage(p) } }.awaitAll()
+    }
+
+    val pool = mutableListOf<SongInfo>()
+    var total = 0
+    var next = start
+    results.sortedBy { it.first }.forEach { (page, pageTotal, songs) ->
+        if (pageTotal > 0) total = pageTotal
+        if (songs.isEmpty()) return@forEach
+        songs.filter { s -> pool.none { it.filePath == s.filePath } }.forEach { pool.add(it) }
+        if (page >= next) next = page + 1
+    }
+    // 全空且不在开头：疑似到头，回绕第 1 页再试一次
+    if (pool.isEmpty() && start > 1) {
+        val (_, pageTotal, songs) = fetchPage(1)
+        if (pageTotal > 0) total = pageTotal
+        songs.filter { s -> pool.none { it.filePath == s.filePath } }.forEach { pool.add(it) }
+        if (songs.isNotEmpty()) next = 2
     }
     setCursor(next)
-    android.util.Log.d("LxMusic_IpZone", "[备货] ip=$ipId 拉${fetched}页 → ${pool.size}首（游标→$next，总数$total）")
+    android.util.Log.d("LxMusic_IpZone", "[备货] ip=$ipId 并行拉${results.count { it.third.isNotEmpty() }}页 → ${pool.size}首（游标→$next，总数$total）")
     Pair(pool.shuffled().take(targetCount), total)
 }
 
@@ -2408,7 +2421,12 @@ object KuGouApi {
         val loggingInterceptor = okhttp3.logging.HttpLoggingInterceptor { message ->
             android.util.Log.d("LxMusic_HTTP", message)
         }.apply {
-            level = okhttp3.logging.HttpLoggingInterceptor.Level.BODY
+            // 正式包不打全量 BODY 日志：每次请求都要把整个响应体序列化进 logcat，纯开销
+            level = if (BuildConfig.DEBUG) {
+                okhttp3.logging.HttpLoggingInterceptor.Level.BODY
+            } else {
+                okhttp3.logging.HttpLoggingInterceptor.Level.NONE
+            }
         }
 
         // 自动保存和回传 Cookie
@@ -2481,6 +2499,9 @@ object KuGouApi {
             .cookieJar(cookieJar)
             .addInterceptor(bodyLogInterceptor)
             .addInterceptor(loggingInterceptor)
+            // OkHttp 默认 maxRequestsPerHost=5：首页 12 个并行请求会被挤成 3 波串行等待，
+            // 放开后真正全并行，整体耗时 = 最慢的单个请求
+            .dispatcher(okhttp3.Dispatcher().apply { maxRequestsPerHost = 16 })
             .build()
 
         return Retrofit.Builder()

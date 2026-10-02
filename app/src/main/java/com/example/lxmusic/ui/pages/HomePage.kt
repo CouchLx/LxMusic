@@ -895,6 +895,8 @@ fun HomePage(
 
         scope.launch(Dispatchers.IO) {
             val updates = java.util.concurrent.ConcurrentLinkedQueue<FeedUpdate>()
+            // 单个请求成功后只登记一个「局部替换函数」，全部收齐后一次性应用
+            fun submit(update: FeedUpdate) { updates.add(update) }
             supervisorScope {
                 // 12 个请求全部并行（原先是 7 个一批 + 5 个后台一批，分段出结果）；
                 // 转圈时长 = 最慢单个请求，而不是两批之和
@@ -903,7 +905,7 @@ fun HomePage(
                         val list = fetchWithinBudget {
                             KuGouApi.service.getDailyRecommend(token, userid, timestamp = ts).data?.list
                         }
-                        if (list != null) updates.add { s -> s.copy(dailySongs = list, historySongs = list) }
+                        if (list != null) submit { s -> s.copy(dailySongs = list, historySongs = list) }
                     },
                     async {
                         val list = fetchWithinBudget {
@@ -911,7 +913,7 @@ fun HomePage(
                         }
                         if (list != null) {
                             val mapped = list.map { song -> SongInfo(title = song.title, artist = song.artist, filePath = "${song.hash}|${song.album_audio_id}", albumArtUri = song.coverUrl, duration = song.durationMs) }
-                            updates.add { s -> s.copy(vipSongs = mapped) }
+                            submit { s -> s.copy(vipSongs = mapped) }
                         }
                     },
                     // 百万收藏：跟乐库同一套备货（游标共用），首页每次刷新 50 首新的
@@ -927,7 +929,7 @@ fun HomePage(
                         }.getOrNull()
                         if (result != null && result.first.isNotEmpty()) {
                             val mapped = result.first
-                            updates.add { s -> s.copy(millionSongs = mapped) }
+                            submit { s -> s.copy(millionSongs = mapped) }
                         }
                     },
                     // 热歌推荐（网络专区）：同上，首页每次刷新 50 首新的
@@ -943,14 +945,14 @@ fun HomePage(
                         }.getOrNull()
                         if (result != null && result.first.isNotEmpty()) {
                             val mapped = result.first
-                            updates.add { s -> s.copy(networkSongs = mapped) }
+                            submit { s -> s.copy(networkSongs = mapped) }
                         }
                     },
                     async {
                         val list = fetchWithinBudget {
                             KuGouApi.service.getStyleRecommend(token, userid, timestamp = ts).data?.list
                         }
-                        if (list != null) updates.add { s -> s.copy(styleSongs = list) }
+                        if (list != null) submit { s -> s.copy(styleSongs = list) }
                     },
                     async {
                         val list = fetchWithinBudget {
@@ -958,7 +960,7 @@ fun HomePage(
                         }
                         if (list != null) {
                             val mapped = mapTopCardSongs(list)
-                            updates.add { s -> s.copy(personalSongs = mapped) }
+                            submit { s -> s.copy(personalSongs = mapped) }
                         }
                     },
                     async {
@@ -967,7 +969,7 @@ fun HomePage(
                         }
                         if (list != null) {
                             val mapped = list.take(28).map { song -> SongInfo(title = song.title, artist = song.artist, filePath = "${song.hash}|${song.album_audio_id}", albumArtUri = song.coverUrl, duration = song.durationMs) }
-                            updates.add { s -> s.copy(collectSongs = mapped) }
+                            submit { s -> s.copy(collectSongs = mapped) }
                         }
                     },
                     async {
@@ -976,7 +978,7 @@ fun HomePage(
                         }
                         if (list != null) {
                             val mapped = list.take(28).map { song -> SongInfo(title = song.title, artist = song.artist, filePath = "${song.hash}|${song.album_audio_id}", albumArtUri = song.coverUrl, duration = song.durationMs) }
-                            updates.add { s -> s.copy(surgeSongs = mapped) }
+                            submit { s -> s.copy(surgeSongs = mapped) }
                         }
                     },
                     async {
@@ -985,7 +987,7 @@ fun HomePage(
                         }
                         if (list != null) {
                             val mapped = list.take(28).map { song -> SongInfo(title = song.title, artist = song.artist, filePath = "${song.hash}|${song.album_audio_id}", albumArtUri = song.coverUrl, duration = song.durationMs) }
-                            updates.add { s -> s.copy(newSongs = mapped) }
+                            submit { s -> s.copy(newSongs = mapped) }
                         }
                     },
                     async {
@@ -994,7 +996,7 @@ fun HomePage(
                         }
                         if (list != null) {
                             val mapped = list.take(28).map { song -> SongInfo(title = song.title, artist = song.artist, filePath = "${song.hash}|${song.album_audio_id}", albumArtUri = song.coverUrl, duration = song.durationMs) }
-                            updates.add { s -> s.copy(nicheSongs = mapped) }
+                            submit { s -> s.copy(nicheSongs = mapped) }
                         }
                     },
                     async {
@@ -1003,7 +1005,7 @@ fun HomePage(
                         }
                         if (list != null) {
                             val mapped = mapTopCardSongs(list)
-                            updates.add { s -> s.copy(hotPickSongs = mapped, trendSongs = mapped) }
+                            submit { s -> s.copy(hotPickSongs = mapped, trendSongs = mapped) }
                         }
                     },
                     async {
@@ -1012,7 +1014,7 @@ fun HomePage(
                         }
                         if (list != null) {
                             val mapped = mapTopCardSongs(list)
-                            updates.add { s -> s.copy(conceptSongs = mapped) }
+                            submit { s -> s.copy(conceptSongs = mapped) }
                         }
                     }
                 )
