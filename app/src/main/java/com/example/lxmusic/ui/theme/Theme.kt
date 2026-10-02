@@ -130,8 +130,8 @@ fun LxMusicTheme(
     val colorScheme = if (colorAnimation) animateColorScheme(finalScheme) else finalScheme
 
     // ===== 统一缩放体系：屏幕宽度自适应 + 用户 UI 缩放 + 系统字体阻尼 =====
-    // 自适应（宽度比例适配）：以 393dp（小米14）为基准，开方阻尼双向缩放，
-    // 基准机系数严格 = 1.0（视觉零变化）；窄屏收缩、宽屏微放大（封顶 1.06）。
+    // 自适应（宽度比例适配）：以 400dp（小米14 实测 1200px/480dpi）为基准，
+    // 开方阻尼双向缩放，基准机系数严格 = 1.0（视觉零变化）；窄屏收缩、宽屏微放大（封顶 1.06）。
     // 统一收进 LocalDensity：全局所有 dp 自动等比缩放，页面/组件代码不再手动乘系数。
     val baseDensity = LocalDensity.current
     val autoScale = ScreenAdapter.getAutoScale()
