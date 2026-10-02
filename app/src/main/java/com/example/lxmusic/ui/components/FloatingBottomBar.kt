@@ -1,6 +1,7 @@
 package com.example.lxmusic.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -9,7 +10,11 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,6 +33,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -42,6 +48,7 @@ import com.example.lxmusic.ui.components.bottombar.FloatingGlassBottomBarIcon
 import com.example.lxmusic.ui.components.bottombar.FloatingGlassBottomBarItem
 import com.example.lxmusic.ui.components.bottombar.FloatingGlassBottomBarLabel
 import com.example.lxmusic.ui.components.bottombar.FloatingGlassPlayerCapsule
+import com.example.lxmusic.ui.theme.ScreenAdapter
 import com.kyant.backdrop.Backdrop
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -64,6 +71,8 @@ fun FloatingBottomBar(
     navBarOpacity: Float = 1f,
     followThemeColor: Boolean = false,
     playerBarWhiteBlend: Float = 0.8f,
+    // 原生底栏高度缩放（0.8~1.2，默认 1.0 = Material3 原生高度；悬浮底栏不受影响）
+    bottomBarHeightScale: Float = 1f,
     currentSong: SongInfo? = null,
     isPlaying: Boolean = false,
     progress: StateFlow<PlayerProgress> = MutableStateFlow(PlayerProgress()),
@@ -154,7 +163,8 @@ fun FloatingBottomBar(
             selectedTabIndex = selectedTabIndex,
             onTabSelected = onTabSelected,
             blurEnabled = blurEnabled,
-            navBarOpacity = navBarOpacity
+            navBarOpacity = navBarOpacity,
+            bottomBarHeightScale = bottomBarHeightScale
         )
     }
 }
@@ -166,7 +176,8 @@ private fun DefaultBottomBar(
     selectedTabIndex: Int,
     onTabSelected: (Int) -> Unit,
     blurEnabled: Boolean,
-    navBarOpacity: Float = 1f
+    navBarOpacity: Float = 1f,
+    bottomBarHeightScale: Float = 1f
 ) {
     val barColor = MaterialTheme.colorScheme.background.copy(alpha = navBarOpacity.coerceIn(0f, 1f))
     val barShape = RoundedCornerShape(0.dp)
@@ -176,6 +187,21 @@ private fun DefaultBottomBar(
         indicatorColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
         unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
         unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    // 高度调节：Material3 NavigationBar 内部为 defaultMinSize(80dp)（非硬编码高度），
+    // 外层固定高度 = 80dp × 系数 + 系统导航条 inset，100% 时与原生行为逐像素一致。
+    // 缩放只作用于底栏内容区，系统导航条安全区不变；icon/文字由 M3 自身在约束内居中，不会裁切。
+    val navBarInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val heightScale = bottomBarHeightScale.coerceIn(
+        ScreenAdapter.MIN_BOTTOM_BAR_HEIGHT_SCALE,
+        ScreenAdapter.MAX_BOTTOM_BAR_HEIGHT_SCALE
+    )
+    // 与迷你播放条跟随动画同时长（300ms），保证调节过程中播放条始终与底栏贴紧
+    val animatedBarHeight by animateDpAsState(
+        targetValue = 80.dp * heightScale + navBarInset,
+        animationSpec = tween(durationMillis = 300),
+        label = "nativeBottomBarHeight"
     )
 
     Box(
@@ -191,7 +217,8 @@ private fun DefaultBottomBar(
             val context = LocalContext.current
             NavigationBar(
                 containerColor = Color.Transparent,
-                tonalElevation = 0.dp
+                tonalElevation = 0.dp,
+                modifier = Modifier.height(animatedBarHeight)
             ) {
                 NavigationBarItem(
                     selected = selectedTabIndex == 0,

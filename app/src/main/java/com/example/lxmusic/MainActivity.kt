@@ -351,6 +351,8 @@ class MainActivity : ComponentActivity() {
                 var themeColorAnimation by remember { mutableStateOf(settingsRepository.themeColorAnimation) }
                 // 通用设置
                 var uiDensityScale by remember { mutableFloatStateOf(settingsRepository.uiDensityScale) }
+                // 原生底栏高度缩放（通用设置里可调，0.8~1.2）
+                var bottomBarHeightScale by remember { mutableFloatStateOf(settingsRepository.bottomBarHeightScale) }
                 var hapticEnabled by remember { mutableStateOf(settingsRepository.hapticFeedback) }
                 var preferHighRefreshRate by remember { mutableStateOf(settingsRepository.preferHighRefreshRate) }
                 var favoriteToKugou by remember { mutableStateOf(settingsRepository.favoriteToKugou) }
@@ -442,6 +444,11 @@ class MainActivity : ComponentActivity() {
                                 onUiDensityScaleChange = { value ->
                                     uiDensityScale = value
                                     settingsRepository.uiDensityScale = value
+                                },
+                                bottomBarHeightScale = bottomBarHeightScale,
+                                onBottomBarHeightScaleChange = { value ->
+                                    bottomBarHeightScale = value
+                                    settingsRepository.bottomBarHeightScale = value
                                 },
                                 hapticEnabled = hapticEnabled,
                                 onHapticEnabledChange = { enabled ->
@@ -604,6 +611,8 @@ fun AppScaffold(
     onThemeColorAnimationChange: (Boolean) -> Unit = {},
     uiDensityScale: Float = 1f,
     onUiDensityScaleChange: (Float) -> Unit = {},
+    bottomBarHeightScale: Float = 1f,
+    onBottomBarHeightScaleChange: (Float) -> Unit = {},
     hapticEnabled: Boolean = true,
     onHapticEnabledChange: (Boolean) -> Unit = {},
     preferHighRefreshRate: Boolean = false,
@@ -2290,6 +2299,8 @@ fun AppScaffold(
                             },
                             uiDensityScale = uiDensityScale,
                             onUiDensityScaleChange = onUiDensityScaleChange,
+                            bottomBarHeightScale = bottomBarHeightScale,
+                            onBottomBarHeightScaleChange = onBottomBarHeightScaleChange,
                             hapticEnabled = hapticEnabled,
                             onHapticEnabledChange = onHapticEnabledChange,
                             preferHighRefreshRate = preferHighRefreshRate,
@@ -2831,6 +2842,7 @@ fun AppScaffold(
                     navBarOpacity = if (floatingBottomBar) floatingBarOpacity else navBarOpacity,
                     followThemeColor = followThemeColor,
                     playerBarWhiteBlend = playerBarWhiteBlend,
+                    bottomBarHeightScale = bottomBarHeightScale,
                     currentSong = if (selectedTab !in listOf(12, 15, 17) && !isSelectionModeActive) currentSong else null,
                     isPlaying = isPlaying,
                     progress = playerViewModel.progress,

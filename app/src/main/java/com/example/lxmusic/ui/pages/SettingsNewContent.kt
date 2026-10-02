@@ -56,6 +56,7 @@ import com.example.lxmusic.data.formatFileSize
 import com.example.lxmusic.ui.theme.ScreenAdapter
 import kotlinx.coroutines.launch
 import java.io.File
+import kotlin.math.roundToInt
 
 // ==================== 通用设置项 ====================
 
@@ -232,6 +233,64 @@ internal fun UiScaleDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = "调节后点击「应用」生效",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onApply(sliderValue)
+                    onDismiss()
+                }
+            ) { Text("应用") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(
+                    onClick = { sliderValue = 1.0f }
+                ) { Text("重置") }
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+        }
+    )
+}
+
+// ==================== 底栏高度对话框（仅原生主题生效） ====================
+
+@Composable
+internal fun BottomBarHeightDialog(
+    currentScale: Float,
+    onDismiss: () -> Unit,
+    onApply: (Float) -> Unit
+) {
+    var sliderValue by remember(currentScale) { mutableFloatStateOf(currentScale) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        title = { Text("底栏高度") },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = String.format("%d%%", (sliderValue * 100).roundToInt()),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Slider(
+                    value = sliderValue,
+                    onValueChange = { sliderValue = it },
+                    // 与底栏组件的钳制范围保持一致（ScreenAdapter.MIN/MAX_BOTTOM_BAR_HEIGHT_SCALE），
+                    // 0.05 步进：7 个中间刻度；80% 为保证图标文字不挤压的下限
+                    valueRange = ScreenAdapter.MIN_BOTTOM_BAR_HEIGHT_SCALE..ScreenAdapter.MAX_BOTTOM_BAR_HEIGHT_SCALE,
+                    steps = 7,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "100% 为默认高度；仅原生主题底栏生效，播放条会自动贴紧",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

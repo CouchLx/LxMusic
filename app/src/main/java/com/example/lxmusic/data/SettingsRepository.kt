@@ -94,6 +94,8 @@ class SettingsRepository(context: Context) {
         // 收藏歌曲同步到本地：官方收藏开启后，喜欢/收藏的歌曲同时加入本地“我的收藏”
         const val FAVORITE_SYNC_LOCAL = "favorite_sync_local"
         const val UI_DENSITY_SCALE = "ui_density_scale"
+        // 原生底栏高度缩放（0.8~1.2，默认 1.0 即 Material3 原生 80dp 高度）
+        const val BOTTOM_BAR_HEIGHT_SCALE = "bottom_bar_height_scale"
         const val PLAYBACK_SERVICE_IDLE_SHUTDOWN_MINUTES = "playback_service_idle_shutdown_minutes"
         const val MAX_CACHE_SIZE_BYTES = "max_cache_size_bytes"
         // USB DAC
@@ -773,6 +775,16 @@ class SettingsRepository(context: Context) {
             prefs.edit().putFloat(Keys.UI_DENSITY_SCALE, value).apply()
         }
     private var _uiDensityScale: Float by mutableFloatStateOf(prefs.getFloat(Keys.UI_DENSITY_SCALE, 1.0f))
+
+    var bottomBarHeightScale: Float
+        get() = _bottomBarHeightScale
+        set(value) {
+            _bottomBarHeightScale = value
+            prefs.edit().putFloat(Keys.BOTTOM_BAR_HEIGHT_SCALE, value).apply()
+        }
+    private var _bottomBarHeightScale: Float by mutableFloatStateOf(
+        prefs.getFloat(Keys.BOTTOM_BAR_HEIGHT_SCALE, 1.0f)
+    )
 
     var playbackServiceIdleShutdownMinutes: Int
         get() = _playbackServiceIdleShutdownMinutes

@@ -380,6 +380,8 @@ fun SettingsPage(
     onThemeColorAnimationChange: (Boolean) -> Unit = {},
     uiDensityScale: Float = 1f,
     onUiDensityScaleChange: (Float) -> Unit = {},
+    bottomBarHeightScale: Float = 1f,
+    onBottomBarHeightScaleChange: (Float) -> Unit = {},
     hapticEnabled: Boolean = true,
     onHapticEnabledChange: (Boolean) -> Unit = {},
     preferHighRefreshRate: Boolean = false,
@@ -753,6 +755,8 @@ fun SettingsPage(
                         onClearBgImage = onReset,
                         uiDensityScale = uiDensityScale,
                         onUiDensityScaleChange = onUiDensityScaleChange,
+                        bottomBarHeightScale = bottomBarHeightScale,
+                        onBottomBarHeightScaleChange = onBottomBarHeightScaleChange,
                         hapticEnabled = hapticEnabled,
                         onHapticEnabledChange = onHapticEnabledChange,
                         preferHighRefreshRate = preferHighRefreshRate,
@@ -1555,6 +1559,8 @@ internal fun SettingsGeneralContent(
     onClearBgImage: () -> Unit = {},
     uiDensityScale: Float = 1f,
     onUiDensityScaleChange: (Float) -> Unit = {},
+    bottomBarHeightScale: Float = 1f,
+    onBottomBarHeightScaleChange: (Float) -> Unit = {},
     hapticEnabled: Boolean = true,
     onHapticEnabledChange: (Boolean) -> Unit = {},
     preferHighRefreshRate: Boolean = false,
@@ -2230,6 +2236,28 @@ internal fun SettingsGeneralContent(
                 showUiScaleDialog = false
                 settingsPrefs.edit().putFloat("ui_density_scale", newScale).apply()
                 onUiDensityScaleChange(newScale)
+            }
+        )
+    }
+
+    Spacer(modifier = Modifier.height(12.dp))
+
+    // 底栏高度（仅原生主题生效；点击打开对话框，应用后立即生效）
+    var showBottomBarHeightDialog by remember { mutableStateOf(false) }
+    SettingsChoiceItem(
+        title = "底栏高度",
+        subtitle = "调整底部导航栏高度（原生主题），播放条自动贴紧",
+        currentLabel = "${(bottomBarHeightScale * 100).toInt()}%",
+        onClick = { showBottomBarHeightDialog = true }
+    )
+    if (showBottomBarHeightDialog) {
+        BottomBarHeightDialog(
+            currentScale = bottomBarHeightScale,
+            onDismiss = { showBottomBarHeightDialog = false },
+            onApply = { newScale ->
+                showBottomBarHeightDialog = false
+                settingsPrefs.edit().putFloat("bottom_bar_height_scale", newScale).apply()
+                onBottomBarHeightScaleChange(newScale)
             }
         )
     }

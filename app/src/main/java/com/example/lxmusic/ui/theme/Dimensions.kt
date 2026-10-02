@@ -30,6 +30,12 @@ object ScreenAdapter {
     const val MIN_UI_SCALE = 0.75f
     const val MAX_UI_SCALE = 1.15f
 
+    // 原生底栏「高度调节」可调范围（设置对话框与底栏组件钳制共用，保持一致）
+    // 下限 0.8：再小图标+文字会挤压（已按系统最大字体验算）；
+    // 上限 1.2：避免底栏过高显得笨重
+    const val MIN_BOTTOM_BAR_HEIGHT_SCALE = 0.8f
+    const val MAX_BOTTOM_BAR_HEIGHT_SCALE = 1.2f
+
     /**
      * 宽度比例自适应系数（开方阻尼，双向生效）
      *
