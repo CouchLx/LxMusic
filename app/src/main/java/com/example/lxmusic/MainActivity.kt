@@ -230,8 +230,6 @@ import coil.compose.LocalImageLoader
 import coil.request.ImageRequest
 import com.example.lxmusic.coil.AudioArtFetcher
 import com.example.lxmusic.ui.theme.LxMusicTheme
-import com.example.lxmusic.ui.theme.LocalScaleFactor
-import com.example.lxmusic.ui.theme.ScreenAdapter
 import com.example.lxmusic.model.SongInfo
 import com.example.lxmusic.ui.components.FloatingBottomBar
 import com.example.lxmusic.data.LiquidGlassSettings
@@ -1050,10 +1048,6 @@ fun AppScaffold(
     // 上一首
     fun playPrevious() = playerViewModel.playPrevious()
 
-    // 获取屏幕缩放比例
-    val contentScaleFactor = LocalScaleFactor.current
-    val spacingScaleFactor = ScreenAdapter.getSpacingScaleFactor()
-
     // 实测底栏高度（px），用于迷你播放条贴住底栏（对齐 NeriPlayer 的 bottomBarLayoutInsets）
     var bottomBarHeightPx by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
@@ -1065,7 +1059,7 @@ fun AppScaffold(
     val miniPlayerBottomPadding by animateDpAsState(
         targetValue = when {
             !showNavBar -> 0.dp
-            floatingBottomBar -> 66.dp * spacingScaleFactor
+            floatingBottomBar -> 66.dp
             else -> with(density) {
                 // 底栏实测总高度减去底部系统导航条 inset，
                 // 得到与 MiniPlayerBar 内部 navigationBarsPadding 叠加后正好贴住底栏的偏移

@@ -81,8 +81,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import com.example.lxmusic.model.SongInfo
 import com.example.lxmusic.PlayerProgress
 import com.example.lxmusic.R
-import com.example.lxmusic.ui.theme.LocalScaleFactor
-import com.example.lxmusic.ui.theme.ScreenAdapter
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.drawBackdrop
 import com.kyant.backdrop.effects.blur
@@ -148,17 +146,12 @@ fun MiniPlayerBar(
         }
     }
 
-    // 获取屏幕缩放比例
-    val contentScaleFactor = LocalScaleFactor.current  // 用于图标、图片等内容
-    val spacingScaleFactor = ScreenAdapter.getSpacingScaleFactor()  // 用于间距、边距
-
-    // 尺寸配置 - 内容尺寸随屏幕放大，间距保持固定
+    // 尺寸配置（自适应缩放已统一由主题的 Density 承担，这里全部用固定 dp）
     // 原生主题（非悬浮）：对齐 Neri 风格（顶部圆角 20dp、封面 40dp、无阴影）
     // 现代化主题（悬浮）：保持原有胶囊样式
-    val cornerRadius = if (isFloatingBottomBar) 32.dp * contentScaleFactor else 20.dp * contentScaleFactor
+    val cornerRadius = if (isFloatingBottomBar) 32.dp else 20.dp
     // 悬浮模式阴影：减小高度 + 半透明柔和色，避免突兀的纯黑阴影
-    val shadowElevation = if (isFloatingBottomBar) 3.dp * contentScaleFactor else 0.dp
-    val albumSize = if (isFloatingBottomBar) 50.dp * contentScaleFactor else 40.dp * contentScaleFactor
+    val shadowElevation = if (isFloatingBottomBar) 3.dp else 0.dp
     val albumCornerRadius = if (isFloatingBottomBar) 10.dp else 8.dp
     // 形状：悬浮=全圆角胶囊；原生=仅顶部圆角（贴底卡片）
     val barShape = if (isFloatingBottomBar) {

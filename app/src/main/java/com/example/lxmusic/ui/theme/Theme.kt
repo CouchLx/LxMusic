@@ -129,22 +129,38 @@ fun LxMusicTheme(
     // 全色系颜色过渡动画（对齐 Neri 的 animateColorScheme，切换主题/种子色时平滑过渡）
     val colorScheme = if (colorAnimation) animateColorScheme(finalScheme) else finalScheme
 
-    // 计算屏幕缩放比例（自动适配）
-    val contentScaleFactor = ScreenAdapter.getContentScaleFactor()
-
-    // UI 缩放：整体缩放 density（对齐 NeriPlayer 的 AppUiDensityRoot），
-    // 作用于所有 dp，调节后立即全局生效
+    // ===== 统一缩放体系：屏幕宽度自适应 + 用户 UI 缩放 + 系统字体阻尼 =====
+    // 自适应（宽度比例适配）：以 393dp（小米14）为基准，开方阻尼双向缩放，
+    // 基准机系数严格 = 1.0（视觉零变化）；窄屏收缩、宽屏微放大（封顶 1.06）。
+    // 统一收进 LocalDensity：全局所有 dp 自动等比缩放，页面/组件代码不再手动乘系数。
     val baseDensity = LocalDensity.current
-    val scaledDensity = remember(baseDensity, uiDensityScale) {
+    val autoScale = ScreenAdapter.getAutoScale()
+    val scaledDensity = remember(baseDensity, uiDensityScale, autoScale) {
+        val userScale = uiDensityScale.coerceIn(
+            ScreenAdapter.MIN_UI_SCALE,
+            ScreenAdapter.MAX_UI_SCALE
+        )
+        // 布局：屏幕自适应 × 用户 UI 缩放
+        val layoutScale = autoScale * userScale
+        // 文字：
+        // - 系统 fontScale 阻尼 60%（系统大字体只吸收 60% 幅度，防止撑爆版式）
+        // - 自适应跟随 70% 阻尼（小屏文字相对略大一点，保持可读性）
+        // - 用户 UI 缩放 1:1 跟随（文字与布局同步，避免"容器缩了字没缩"）
+        val dampedSystemFontScale = (1f + (baseDensity.fontScale - 1f) * 0.6f)
+            .coerceIn(0.85f, 1.2f)
+        val textAutoScale = 1f + (autoScale - 1f) * 0.7f
+        val fontScale = (dampedSystemFontScale * textAutoScale * userScale)
+            .coerceIn(0.7f, 1.3f)
         Density(
-            density = baseDensity.density * uiDensityScale.coerceIn(0.85f, 1.2f),
-            fontScale = baseDensity.fontScale
+            density = baseDensity.density * layoutScale,
+            fontScale = fontScale
         )
     }
 
     CompositionLocalProvider(
         LocalDensity provides scaledDensity,
-        LocalScaleFactor provides contentScaleFactor
+        // 兼容保留：自适应已统一收进上面的 Density，调用点禁止再手动乘系数（双重缩放）
+        LocalScaleFactor provides 1f
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

@@ -53,6 +53,7 @@ import com.example.lxmusic.data.StorageUsageSummary
 import com.example.lxmusic.data.analyzeStorageUsage
 import com.example.lxmusic.data.clearStorageCaches
 import com.example.lxmusic.data.formatFileSize
+import com.example.lxmusic.ui.theme.ScreenAdapter
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -222,8 +223,10 @@ internal fun UiScaleDialog(
                 Slider(
                     value = sliderValue,
                     onValueChange = { sliderValue = it },
-                    valueRange = 0.6f..1.2f,
-                    steps = 11,
+                    // 与 Theme 的钳制范围保持一致（ScreenAdapter.MIN/MAX_UI_SCALE），
+                    // 0.05 步进：7 个中间刻度，拖动松手吸附到 5% 档位
+                    valueRange = ScreenAdapter.MIN_UI_SCALE..ScreenAdapter.MAX_UI_SCALE,
+                    steps = 7,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(modifier = Modifier.height(8.dp))

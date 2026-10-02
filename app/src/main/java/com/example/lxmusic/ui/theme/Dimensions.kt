@@ -5,59 +5,57 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import kotlin.math.min
+import kotlin.math.sqrt
 
 /**
- * 专业屏幕适配方案
- * 
+ * 专业屏幕适配方案（宽度比例自适应）
+ *
  * 核心思想：
- * 1. 以小米14（393dp宽）为基准设计
- * 2. 内容尺寸（图标、文字、图片）随屏幕放大
- * 3. 间距尺寸（边距、间距、高度）保持固定或轻微调整
- * 4. 所有适配逻辑集中在这里，其他地方只调用 scaleFactor
- * 
- * 使用方式：
- * - 内容尺寸：iconSize = 24.dp * scaleFactor
- * - 间距尺寸：padding = 16.dp（不加 scaleFactor）
- * - 混合尺寸：height = 56.dp + 4.dp * (scaleFactor - 1)  // 基础值 + 微调
+ * 1. 以小米14（393dp宽）为基准设计，基准宽度设备缩放系数严格 = 1.0（视觉零变化）
+ * 2. 自适应系数 = (屏宽 / 基准宽) 开方阻尼，双向生效：
+ *    窄屏收缩（治"整体偏大"）、宽屏微放大（封顶防平板"老人机"化）
+ * 3. 自适应统一收进 LxMusicTheme 的 Density 覆盖（见 Theme.kt），
+ *    全局所有 dp 自动等比缩放，页面/组件代码不要再手动乘系数（手动乘 = 双重缩放）
  */
 object ScreenAdapter {
     // 基准设计尺寸（小米14）
     const val BASE_SCREEN_WIDTH_DP = 393f
 
+    // 自适应系数下限：极窄屏（≈320dp）最多收缩到 85%
+    const val MIN_AUTO_SCALE = 0.85f
+    // 自适应系数上限：宽屏/折叠屏最多放大到 106%
+    const val MAX_AUTO_SCALE = 1.06f
+
+    // 用户「UI 缩放」可调范围（设置对话框与 Theme 钳制共用，保持一致）
+    const val MIN_UI_SCALE = 0.75f
+    const val MAX_UI_SCALE = 1.15f
+
     /**
-     * 获取内容缩放比例（用于图标、文字、图片等）
-     * 大屏手机内容适当放大，小屏保持原样
+     * 宽度比例自适应系数（开方阻尼，双向生效）
+     *
+     * 393dp → 1.000（基准机零变化）  360dp → 0.957  340dp → 0.930
+     * 411dp → 1.023  460dp 及以上 → 1.06（封顶）
      */
     @Composable
-    fun getContentScaleFactor(): Float {
+    fun getAutoScale(): Float {
         val screenWidthDp = LocalConfiguration.current.screenWidthDp.toFloat()
-        
-        return when {
-            // 小屏手机（<= 400dp）：不缩放
-            screenWidthDp <= 400f -> 1.0f
-            // 中屏手机（400-450dp）：内容放大到 1.0-1.08
-            screenWidthDp <= 450f -> 1.0f + (screenWidthDp - 400f) / 50f * 0.08f
-            // 大屏手机（> 450dp）：内容最大放大到 1.1
-            else -> 1.08f + min((screenWidthDp - 450f) / 150f, 0.02f)
-        }
+        if (screenWidthDp <= 0f) return 1f
+        return sqrt(screenWidthDp / BASE_SCREEN_WIDTH_DP)
+            .coerceIn(MIN_AUTO_SCALE, MAX_AUTO_SCALE)
     }
 
     /**
-     * 获取间距缩放比例（用于边距、间距等）
-     * 间距变化很小，保持视觉一致性
+     * 兼容旧调用点：自适应已收进 Theme 的 Density，这里恒返回 1.0，
+     * 旧代码里的手动乘系数会变成无害的 no-op（请逐步删除）。
      */
     @Composable
-    fun getSpacingScaleFactor(): Float {
-        val screenWidthDp = LocalConfiguration.current.screenWidthDp.toFloat()
-        
-        return when {
-            // 小屏：不缩放
-            screenWidthDp <= 400f -> 1.0f
-            // 中大屏：间距只微调 1.0-1.02（比之前更小）
-            else -> 1.0f + min((screenWidthDp - 400f) / 250f, 0.02f)
-        }
-    }
+    fun getContentScaleFactor(): Float = 1f
+
+    /**
+     * 兼容旧调用点：间距已随 density 全局缩放，这里恒返回 1.0。
+     */
+    @Composable
+    fun getSpacingScaleFactor(): Float = 1f
 }
 
 /**
