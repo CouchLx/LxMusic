@@ -101,6 +101,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
@@ -142,10 +143,16 @@ fun PlaylistDetailPage(
     val songs = remember { mutableStateListOf<SongInfo>() }
     var isLoading by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf(false) }
-    var currentPage by remember { mutableIntStateOf(1) }
     var totalSongs by remember { mutableIntStateOf(0) }
     var isLoadingMore by remember { mutableStateOf(false) }
     var noMoreData by remember { mutableStateOf(false) }
+    // 请求代次：切换歌单后自增，用于丢弃上一歌单的过期请求结果（防止串数据）
+    var requestSeq by remember { mutableIntStateOf(0) }
+    // 最近一次成功加载的页码：翻页永远从它 +1，失败不推进，避免跳页/重复
+    var loadedPage by remember { mutableIntStateOf(0) }
+    var loadMoreFailed by remember { mutableStateOf(false) }
+    // 镜像歌单（负 listid）必须有 gid 才能拉到歌曲，缺 gid 时给出明确提示而不是停在空列表
+    val missingPlaylistInfo = playlist.listid < 0 && playlist.global_collection_id.isNullOrBlank()
     val pageSize = 30
 
     // 选中模式状态
@@ -182,9 +189,15 @@ fun PlaylistDetailPage(
     }
 
     fun loadPage(page: Int, append: Boolean = false) {
-        if (append) isLoadingMore = true else isLoading = true
+        val seq = requestSeq
+        val targetListId = playlist.listid
+        if (append) {
+            isLoadingMore = true
+        } else {
+            isLoading = true
+        }
         scope.launch(Dispatchers.IO) {
-            try {
+            val result = runCatching {
                 var mapped: List<SongInfo>? = null
                 var total = 0
                 val gid = playlist.global_collection_id
@@ -196,29 +209,34 @@ fun PlaylistDetailPage(
                     }
                 }
                 if (mapped == null) {
-                    val respNew = KuGouApi.service.getPlaylistTracksNew(playlist.listid, page, pageSize)
+                    val respNew = KuGouApi.service.getPlaylistTracksNew(targetListId, page, pageSize)
                     val rawList = respNew.data?.info?.map { mapSong(it) }.orEmpty()
-                    mapped = KuGouApi.filterLocallyRemoved(playlist.listid, rawList)
+                    mapped = KuGouApi.filterLocallyRemoved(targetListId, rawList)
                     total = respNew.data?.count ?: 0
                 }
-                withContext(Dispatchers.Main) {
+                Pair(mapped ?: emptyList(), total)
+            }
+            withContext(Dispatchers.Main) {
+                // 已经切到别的歌单：丢弃过期结果，避免把上一歌单的数据写进来
+                if (seq != requestSeq) return@withContext
+                result.onSuccess { (mapped, total) ->
                     if (append) {
-                        songs.addAll(mapped ?: emptyList())
+                        songs.addAll(mapped)
                     } else {
                         songs.clear()
-                        songs.addAll(mapped ?: emptyList())
+                        songs.addAll(mapped)
                     }
                     totalSongs = total
-                    noMoreData = (mapped?.size ?: 0) < pageSize || songs.size >= total
+                    loadedPage = page
+                    loadMoreFailed = false
+                    noMoreData = mapped.size < pageSize || songs.size >= total
                     isLoading = false
                     isLoadingMore = false
                     loadError = false
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
+                }.onFailure {
                     isLoading = false
                     isLoadingMore = false
-                    if (!append) loadError = true
+                    if (append) loadMoreFailed = true else loadError = true
                 }
             }
         }
@@ -284,20 +302,30 @@ fun PlaylistDetailPage(
         onLocateReady { locateToCurrentSong() }
     }
 
-    LaunchedEffect(playlist.listid) {
-        loadPage(1)
+    // 切换歌单：完整复位分页/列表状态（否则会在上一歌单的数据与页码上继续 append，造成残留/跳页）
+    LaunchedEffect(playlist.listid, playlist.global_collection_id) {
+        requestSeq++
+        songs.clear()
+        loadedPage = 0
+        totalSongs = 0
+        noMoreData = false
+        loadMoreFailed = false
+        loadError = false
+        isLoading = !missingPlaylistInfo
+        isLoadingMore = false
+        if (!missingPlaylistInfo) loadPage(1)
     }
 
     val shouldLoadMore by remember {
         derivedStateOf {
             val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last >= listState.layoutInfo.totalItemsCount - 3 && !isLoadingMore && !noMoreData && songs.isNotEmpty()
+            last >= listState.layoutInfo.totalItemsCount - 3 &&
+                !isLoading && !isLoadingMore && !noMoreData && !loadMoreFailed && songs.isNotEmpty()
         }
     }
-    LaunchedEffect(shouldLoadMore) {
+    LaunchedEffect(shouldLoadMore, songs.size) {
         if (shouldLoadMore) {
-            currentPage++
-            loadPage(currentPage, append = true)
+            loadPage(loadedPage + 1, append = true)
         }
     }
 
@@ -526,6 +554,39 @@ fun PlaylistDetailPage(
                     item {
                         Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                             IOLoadingIndicator(Modifier.size(24.dp))
+                        }
+                    }
+                } else if (loadMoreFailed) {
+                    item {
+                        Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "加载更多失败，点击重试",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.clickable {
+                                    loadMoreFailed = false
+                                    loadPage(loadedPage + 1, append = true)
+                                }
+                            )
+                        }
+                    }
+                }
+                if (songs.isEmpty() && !isLoading && !loadError) {
+                    item {
+                        Box(
+                            Modifier.fillMaxWidth().padding(24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (missingPlaylistInfo) {
+                                    "该收藏歌单缺少必要信息（gid），无法加载歌曲。可在「我的-歌单管理」删除后重新收藏"
+                                } else {
+                                    "暂无歌曲"
+                                },
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyMedium,
+                                textAlign = TextAlign.Center
+                            )
                         }
                     }
                 }
@@ -766,10 +827,13 @@ fun SearchPlaylistDetailPage(
     val songs = remember { mutableStateListOf<SongInfo>() }
     var isLoading by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf(false) }
-    var currentPage by remember { mutableIntStateOf(1) }
     var totalSongs by remember { mutableIntStateOf(0) }
     var isLoadingMore by remember { mutableStateOf(false) }
     var noMoreData by remember { mutableStateOf(false) }
+    // 请求代次 / 已加载页码 / 加载更多失败标记：切换歌单时复位，避免串数据与跳页
+    var requestSeq by remember { mutableIntStateOf(0) }
+    var loadedPage by remember { mutableIntStateOf(0) }
+    var loadMoreFailed by remember { mutableStateOf(false) }
     val pageSize = 30
     val listState = rememberLazyListState()
 
@@ -812,27 +876,44 @@ fun SearchPlaylistDetailPage(
     }
 
     fun loadPage(page: Int, append: Boolean = false) {
-        if (append) isLoadingMore = true else if (songs.isEmpty()) isLoading = true
+        val seq = requestSeq
+        if (append) {
+            isLoadingMore = true
+        } else if (songs.isEmpty()) {
+            isLoading = true
+        }
         scope.launch(Dispatchers.IO) {
-            try {
-                val (list, count) = KuGouApi.fetchSpecialPlaylistSongs(playlistId, gid.ifBlank { null }, page, pageSize)
-                android.util.Log.d("LxMusic", "SearchPlaylistDetail: page=$page, got=${list.size}, total=$count, gid=$gid, specialId=$playlistId")
-                if (list.isNotEmpty()) {
-                    if (append) {
-                        songs.addAll(list)
+            val result = runCatching {
+                KuGouApi.fetchSpecialPlaylistSongs(playlistId, gid.ifBlank { null }, page, pageSize)
+            }
+            withContext(Dispatchers.Main) {
+                // 已切换到别的歌单：丢弃过期结果
+                if (seq != requestSeq) return@withContext
+                result.onSuccess { (list, count) ->
+                    android.util.Log.d("LxMusic", "SearchPlaylistDetail: page=$page, got=${list.size}, total=$count, gid=$gid, specialId=$playlistId")
+                    if (list.isNotEmpty()) {
+                        if (append) {
+                            songs.addAll(list)
+                        } else {
+                            songs.clear()
+                            songs.addAll(list)
+                        }
+                        totalSongs = count
+                        loadedPage = page
+                        loadMoreFailed = false
+                        if (list.size < pageSize || songs.size >= count) noMoreData = true
+                        loadError = false
                     } else {
-                        songs.clear()
-                        songs.addAll(list)
+                        if (!append) {
+                            songs.clear()
+                            // 接口声称歌单有歌却一条没返回：按加载失败处理，给重试入口而不是静默空列表
+                            loadError = count > 0
+                        }
+                        noMoreData = true
                     }
-                    totalSongs = count
-                    if (list.size < pageSize || songs.size >= count) noMoreData = true
-                    loadError = false
-                } else {
-                    noMoreData = true
+                }.onFailure {
+                    if (songs.isEmpty()) loadError = true else if (append) loadMoreFailed = true
                 }
-            } catch (e: Exception) {
-                if (songs.isEmpty()) loadError = true
-            } finally {
                 isLoading = false
                 isLoadingMore = false
             }
@@ -967,7 +1048,17 @@ fun SearchPlaylistDetailPage(
         }
     }
 
+    // 切换歌单：完整复位分页/列表状态，避免上一歌单的数据与页码残留
     LaunchedEffect(playlistId, gid) {
+        requestSeq++
+        songs.clear()
+        loadedPage = 0
+        totalSongs = 0
+        noMoreData = false
+        loadMoreFailed = false
+        loadError = false
+        isLoading = true
+        isLoadingMore = false
         loadPage(1)
     }
 
@@ -996,13 +1087,13 @@ fun SearchPlaylistDetailPage(
     val shouldLoadMore by remember {
         derivedStateOf {
             val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last >= listState.layoutInfo.totalItemsCount - 3 && !isLoadingMore && !noMoreData && songs.isNotEmpty()
+            last >= listState.layoutInfo.totalItemsCount - 3 &&
+                !isLoading && !isLoadingMore && !noMoreData && !loadMoreFailed && songs.isNotEmpty()
         }
     }
-    LaunchedEffect(shouldLoadMore) {
+    LaunchedEffect(shouldLoadMore, songs.size) {
         if (shouldLoadMore) {
-            currentPage++
-            loadPage(currentPage, true)
+            loadPage(loadedPage + 1, true)
         }
     }
 
@@ -1326,6 +1417,43 @@ fun SearchPlaylistDetailPage(
                             IOLoadingIndicator(Modifier.size(24.dp))
                         }
                     }
+                } else if (loadMoreFailed) {
+                    item {
+                        Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "加载更多失败，点击重试",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.clickable {
+                                    loadMoreFailed = false
+                                    loadPage(loadedPage + 1, true)
+                                }
+                            )
+                        }
+                    }
+                }
+                if (songs.isEmpty() && !isLoading && !loadError) {
+                    item {
+                        Box(
+                            Modifier.fillMaxWidth().padding(24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "没有获取到歌曲，点击重试",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyMedium,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.clickable {
+                                    if (!isLoading) {
+                                        isLoading = true
+                                        loadError = false
+                                        noMoreData = false
+                                        loadPage(1)
+                                    }
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1587,7 +1715,8 @@ fun CollectionDetailPage(
             val mapped = collected.map { entity ->
                 SongInfo(
                     title = entity.title, artist = entity.artist,
-                    filePath = "${entity.hash}|${entity.audioId}",
+                    // 网易云歌曲直接还原 netease:// 路径（酷狗歌曲为 hash|audioId）
+                    filePath = if (entity.filePath.startsWith("netease://")) entity.filePath else "${entity.hash}|${entity.audioId}",
                     albumArtUri = entity.albumArtUri, duration = entity.duration,
                     albumId = entity.albumId, mixsongid = entity.mixsongid
                 )
@@ -1603,7 +1732,8 @@ fun CollectionDetailPage(
             val localMapped = likedSongs.map { entity ->
                 SongInfo(
                     title = entity.title, artist = entity.artist,
-                    filePath = "${entity.hash}|${entity.audioId}",
+                    // 网易云歌曲直接还原 netease:// 路径（酷狗歌曲为 hash|audioId）
+                    filePath = if (entity.filePath.startsWith("netease://")) entity.filePath else "${entity.hash}|${entity.audioId}",
                     albumArtUri = entity.albumArtUri, duration = entity.duration,
                     albumId = entity.albumId, mixsongid = entity.mixsongid
                 )

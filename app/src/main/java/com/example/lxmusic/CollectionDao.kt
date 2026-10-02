@@ -127,7 +127,14 @@ interface CollectionDao {
     @Query("DELETE FROM liked_playlists")
     suspend fun clearAllLikedPlaylists()
 
-    // ========== 清除所有数据 ==========
+    // ========== 清除数据 ==========
+
+    /** 只清酷狗账号相关数据（喜欢镜像 + 收藏歌单镜像），退出登录用；本地收藏与自建歌单保留 */
+    @androidx.room.Transaction
+    suspend fun clearKugouAccountData() {
+        clearAllLikedSongs()
+        clearAllLikedPlaylists()
+    }
 
     @Query("DELETE FROM collected_songs")
     suspend fun clearAllCollectedSongs()

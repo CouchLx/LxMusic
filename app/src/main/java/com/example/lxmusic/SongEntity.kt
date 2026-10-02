@@ -65,8 +65,9 @@ data class PlaylistSongCrossRef(
     fun toSongInfo() = com.example.lxmusic.model.SongInfo(
         title = title,
         artist = artist,
-        // 本地歌曲存的是绝对路径（以 / 开头），原样返回；网络歌曲为 "hash|audioId"
-        filePath = if (songFilePath.startsWith("/")) songFilePath else "$hash|$audioId",
+        // 本地歌曲存的是绝对路径（以 / 开头），原样返回；网络歌曲为 "hash|audioId"；
+        // 网易云歌曲为 netease://<id>，同样原样返回
+        filePath = if (songFilePath.startsWith("/") || songFilePath.startsWith("netease://")) songFilePath else "$hash|$audioId",
         albumArtUri = albumArtUri,
         duration = duration,
         albumId = albumId,

@@ -47,6 +47,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Checkroom
@@ -95,6 +96,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -120,16 +122,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.graphics.toColorInt
 import coil.compose.rememberAsyncImagePainter
 import com.example.lxmusic.BuildConfig
 import com.example.lxmusic.KuGouApi
+import com.example.lxmusic.NeteaseApi
 import com.example.lxmusic.UpdateChecker
 import com.example.lxmusic.UpdateInfo
 import com.example.lxmusic.VipConfigManager
 import com.example.lxmusic.CollectionBackup
 import com.example.lxmusic.CollectionBackupIO
+import com.example.lxmusic.BackupStats
+import com.example.lxmusic.ImportMode
 import com.example.lxmusic.MusicDatabase
+import com.example.lxmusic.backup.AutoBackupRunner
+import com.example.lxmusic.backup.AutoBackupScheduler
+import com.example.lxmusic.backup.BackupOutcome
+import com.example.lxmusic.backup.BackupReason
+import com.example.lxmusic.backup.BackupStorage
 import com.example.lxmusic.ui.components.IOLoadingIndicator
 import com.example.lxmusic.ui.components.ThemeCustomizationSection
 import com.example.lxmusic.ui.components.ThemePreset
@@ -543,7 +554,7 @@ fun SettingsPage(
                                 AlertDialog(
                                     onDismissRequest = { showLogoutDialog = false },
                                     title = { Text("确认退出登录") },
-                                    text = { Text("退出登录后将清除本地缓存数据，确定要退出吗？") },
+                                    text = { Text("退出后将清除酷狗账号的收藏歌单与喜欢记录；本地「我的收藏」和自建歌单会保留。确定要退出吗？") },
                                     confirmButton = {
                                         TextButton(onClick = {
                                             showLogoutDialog = false
@@ -564,13 +575,15 @@ fun SettingsPage(
                                             minePrefs.edit()
                                                 .remove("playlists_json")
                                                 .remove("playlists_json_uid")
+                                                .remove("last_load_auth")
                                                 .apply()
                                             // 清掉酷狗「喜欢」歌单的缓存，避免串账号
                                             KuGouApi.clearKugouLikeCache()
                                             scope.launch(Dispatchers.IO) {
                                                 try {
                                                     val db = MusicDatabase.getDatabase(context)
-                                                    db.collectionDao().clearAllData()
+                                                    // 只清酷狗账号镜像（喜欢/收藏歌单）；本地「我的收藏」与自建歌单保留
+                                                    db.collectionDao().clearKugouAccountData()
                                                 } catch (_: Exception) {}
                                             }
                                             onLogout()
@@ -1809,72 +1822,396 @@ internal fun SettingsGeneralContent(
 
     // ===== 本地收藏数据导出 / 导入（防止卸载丢失本地收藏） =====
     val backupScope = rememberCoroutineScope()
+    val backupTimeFormat = remember { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()) }
+    val backupFileStampFormat = remember { java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US) }
+
+    var exportConfirmStats by remember { mutableStateOf<BackupStats?>(null) }
+    var exportBusy by remember { mutableStateOf(false) }
+    var importPreview by remember { mutableStateOf<CollectionBackup?>(null) }
+    var importParsing by remember { mutableStateOf(false) }
+    var importApplying by remember { mutableStateOf(false) }
+
+    fun backupToast(text: String) {
+        Toast.makeText(settingsContext, text, Toast.LENGTH_LONG).show()
+    }
+
+    // ---- 导出：先确认导出内容，再让用户选择保存位置 ----
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
-        if (uri != null) {
-            backupScope.launch(Dispatchers.IO) {
-                try {
-                    val dao = MusicDatabase.getDatabase(settingsContext).collectionDao()
+        if (uri == null) return@rememberLauncherForActivityResult
+        backupScope.launch {
+            exportBusy = true
+            val result = runCatching {
+                val dao = withContext(Dispatchers.IO) { MusicDatabase.getDatabase(settingsContext).collectionDao() }
+                withContext(Dispatchers.IO) {
                     settingsContext.contentResolver.openOutputStream(uri)?.use { out ->
                         CollectionBackupIO.export(dao, out)
-                    }
-                    withContext(Dispatchers.Main) {
-                        android.widget.Toast.makeText(settingsContext, "导出成功", android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                } catch (e: Exception) {
-                    withContext(Dispatchers.Main) {
-                        android.widget.Toast.makeText(settingsContext, "导出失败: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
-                    }
+                    } ?: throw IllegalStateException("无法写入所选文件")
                 }
             }
+            exportBusy = false
+            result
+                .onSuccess { stats -> backupToast("导出成功：${stats.summary}") }
+                .onFailure { e -> backupToast("导出失败：${e.message ?: "未知错误"}") }
         }
     }
+
+    // ---- 导入：先解析预览，再由用户选择「合并共存 / 清空替换」 ----
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) {
-            backupScope.launch(Dispatchers.IO) {
-                try {
-                    val db = MusicDatabase.getDatabase(settingsContext)
-                    val dao = db.collectionDao()
-                    var backup: com.example.lxmusic.CollectionBackup? = null
+        if (uri == null) return@rememberLauncherForActivityResult
+        backupScope.launch {
+            importParsing = true
+            val parsed = withContext(Dispatchers.IO) {
+                runCatching {
                     settingsContext.contentResolver.openInputStream(uri)?.use { input ->
-                        backup = CollectionBackupIO.import(db, dao, input)
+                        CollectionBackupIO.read(input)
                     }
-                    val b = backup
-                    withContext(Dispatchers.Main) {
-                        if (b != null) {
-                            android.widget.Toast.makeText(
-                                settingsContext,
-                                "导入成功（歌曲 ${b.collectedSongs.size + b.likedSongs.size}，歌单 ${b.playlists.size + b.likedPlaylists.size}）",
-                                android.widget.Toast.LENGTH_LONG
-                            ).show()
-                        } else {
-                            android.widget.Toast.makeText(settingsContext, "导入失败：文件格式不正确", android.widget.Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                } catch (e: Exception) {
-                    withContext(Dispatchers.Main) {
-                        android.widget.Toast.makeText(settingsContext, "导入失败: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                }
+                }.getOrNull()
+            }
+            importParsing = false
+            when {
+                parsed == null -> backupToast("导入失败：文件格式不正确")
+                parsed.isEmpty -> backupToast("导入失败：备份文件里没有任何数据")
+                else -> importPreview = parsed
             }
         }
     }
+
+    fun applyImport(mode: ImportMode) {
+        val backup = importPreview ?: return
+        importPreview = null
+        backupScope.launch {
+            importApplying = true
+            val result = runCatching {
+                val dao = withContext(Dispatchers.IO) { MusicDatabase.getDatabase(settingsContext).collectionDao() }
+                withContext(Dispatchers.IO) { CollectionBackupIO.apply(dao, backup, mode) }
+            }
+            importApplying = false
+            result
+                .onSuccess { report ->
+                    backupToast(if (mode == ImportMode.MERGE) "合并完成：${report.summary}" else "导入完成：${report.summary}")
+                }
+                .onFailure { e -> backupToast("导入失败：${e.message ?: "未知错误"}") }
+        }
+    }
+
     SettingsChoiceItem(
         title = "本地收藏数据导出",
-        subtitle = "把本地收藏的歌曲、歌单导出为一个备份文件，防止卸载丢失",
-        currentLabel = "",
-        onClick = { exportLauncher.launch("lxmusic_collection_backup.json") }
+        subtitle = "把本地收藏的歌曲、歌单导出为备份文件，防止卸载/更新丢失",
+        currentLabel = if (exportBusy) "准备中…" else "",
+        onClick = {
+            if (exportBusy) return@SettingsChoiceItem
+            backupScope.launch {
+                exportBusy = true
+                val stats = withContext(Dispatchers.IO) {
+                    runCatching {
+                        CollectionBackupIO.stats(MusicDatabase.getDatabase(settingsContext).collectionDao())
+                    }.getOrNull()
+                }
+                exportBusy = false
+                when {
+                    stats == null -> backupToast("读取本地收藏失败")
+                    stats.isEmpty -> backupToast("没有可导出的本地收藏数据")
+                    else -> exportConfirmStats = stats
+                }
+            }
+        }
     )
     Spacer(modifier = Modifier.height(8.dp))
     SettingsChoiceItem(
         title = "导入本地收藏数据",
-        subtitle = "选择之前导出的备份文件恢复（会覆盖现有本地收藏）",
-        currentLabel = "",
-        onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }
+        subtitle = "选择之前导出的备份文件，可选「合并共存」或「清空替换」",
+        currentLabel = if (importParsing) "读取中…" else "",
+        onClick = {
+            if (!importParsing && !importApplying) {
+                importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
+            }
+        }
     )
+
+    // 导出确认弹窗：先让用户看清导出内容，再走系统文件选择器
+    exportConfirmStats?.let { stats ->
+        AlertDialog(
+            onDismissRequest = { exportConfirmStats = null },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            title = { Text("导出本地收藏数据") },
+            text = {
+                Column {
+                    Text("将导出以下内容：", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        stats.summary,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "下一步选择保存位置，建议保存在「下载」目录，卸载重装后仍可导入恢复。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    exportConfirmStats = null
+                    val name = "lxmusic_collection_backup_${backupFileStampFormat.format(java.util.Date())}.json"
+                    exportLauncher.launch(name)
+                }) { Text("选择保存位置") }
+            },
+            dismissButton = {
+                TextButton(onClick = { exportConfirmStats = null }) { Text("取消") }
+            }
+        )
+    }
+
+    // 导入预览弹窗：二选一（合并共存 / 清空替换）
+    importPreview?.let { backup ->
+        AlertDialog(
+            onDismissRequest = { importPreview = null },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            title = { Text("导入本地收藏数据") },
+            text = {
+                Column {
+                    Text(
+                        "备份内容：收藏歌曲 ${backup.collectedSongs.size} 首 · 喜欢 ${backup.likedSongs.size} 首 · " +
+                                "自建歌单 ${backup.playlists.size} 个（${backup.playlistSongs.size} 首） · " +
+                                "收藏歌单 ${backup.likedPlaylists.size} 个",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    if (backup.exportedAt > 0) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "备份时间：${backupTimeFormat.format(java.util.Date(backup.exportedAt))}" +
+                                    if (backup.appVersion.isNotBlank()) "（版本 ${backup.appVersion}）" else "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text("选择导入方式", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        onClick = { applyImport(ImportMode.MERGE) },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                            Text(
+                                "合并共存（推荐）",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                            Text(
+                                "保留现有数据，只补齐缺失的歌曲和歌单，不会删除任何东西",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        onClick = { applyImport(ImportMode.REPLACE) },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+                            Text(
+                                "清空替换",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Text(
+                                "先清空现有本地收藏和自建歌单，再完整还原为备份数据",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { importPreview = null }) { Text("取消") }
+            }
+        )
+    }
+
+    if (importApplying) {
+        AlertDialog(
+            onDismissRequest = {},
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            title = { Text("正在导入") },
+            text = { Text("正在写入本地收藏数据，请稍候…") },
+            confirmButton = {}
+        )
+    }
+
+    Spacer(modifier = Modifier.height(24.dp))
+
+    // ===== 定时自动备份（防丢）=====
+    Text(
+        text = "自动备份",
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    var autoBackupEnabled by remember { mutableStateOf(AutoBackupScheduler.isEnabled(settingsContext)) }
+    var autoBackupDays by remember { mutableIntStateOf(AutoBackupScheduler.intervalDays(settingsContext)) }
+    var lastBackupTime by remember { mutableLongStateOf(AutoBackupScheduler.lastRunTime(settingsContext)) }
+    var lastBackupOk by remember { mutableStateOf(AutoBackupScheduler.lastRunSuccess(settingsContext)) }
+    var lastBackupMsg by remember { mutableStateOf(AutoBackupScheduler.lastRunMessage(settingsContext)) }
+    var showBackupIntervalDialog by remember { mutableStateOf(false) }
+    var manualBackupRunning by remember { mutableStateOf(false) }
+
+    // 按需申请权限：通知权限只影响是否弹提示；存储权限仅 Android 9- 写公共下载目录需要
+    var pendingBackupPermissionAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val backupPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        val action = pendingBackupPermissionAction
+        pendingBackupPermissionAction = null
+        action?.invoke()
+    }
+    fun runWithBackupPermissions(block: () -> Unit) {
+        fun withStorage() {
+            if (BackupStorage.hasWriteAccess(settingsContext)) {
+                block()
+            } else {
+                pendingBackupPermissionAction = block
+                backupPermissionLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }
+        val needNotification = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    settingsContext, android.Manifest.permission.POST_NOTIFICATIONS
+                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (needNotification) {
+            pendingBackupPermissionAction = { withStorage() }
+            backupPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            withStorage()
+        }
+    }
+
+    SettingsSwitchItem(
+        icon = Icons.Default.Backup,
+        title = "定时自动备份",
+        description = "按设定周期自动把本地收藏导出到 下载/LxMusic 文件夹，防止数据丢失",
+        checked = autoBackupEnabled,
+        onCheckedChange = { enabled ->
+            if (enabled) {
+                runWithBackupPermissions {
+                    AutoBackupScheduler.schedule(settingsContext, autoBackupDays)
+                    autoBackupEnabled = true
+                    Toast.makeText(
+                        settingsContext,
+                        "已开启：${AutoBackupScheduler.intervalLabel(autoBackupDays)}自动备份一次",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            } else {
+                AutoBackupScheduler.cancel(settingsContext)
+                autoBackupEnabled = false
+            }
+        }
+    )
+
+    if (autoBackupEnabled) {
+        Spacer(modifier = Modifier.height(12.dp))
+        SettingsChoiceItem(
+            title = "备份周期",
+            subtitle = "自动导出本地收藏的时间间隔",
+            currentLabel = AutoBackupScheduler.intervalLabel(autoBackupDays),
+            onClick = { showBackupIntervalDialog = true }
+        )
+    }
+
+    Spacer(modifier = Modifier.height(12.dp))
+    SettingsChoiceItem(
+        title = "立即备份一次",
+        subtitle = if (lastBackupTime > 0) {
+            "上次备份：${backupTimeFormat.format(java.util.Date(lastBackupTime))}" +
+                    if (lastBackupOk) "" else "（失败：$lastBackupMsg）"
+        } else {
+            "还没有备份记录，建议先手动备份一次"
+        },
+        currentLabel = if (manualBackupRunning) "备份中…" else "",
+        onClick = {
+            if (manualBackupRunning) return@SettingsChoiceItem
+            runWithBackupPermissions {
+                backupScope.launch {
+                    manualBackupRunning = true
+                    val outcome = AutoBackupRunner.run(settingsContext, BackupReason.MANUAL, notify = false)
+                    manualBackupRunning = false
+                    lastBackupTime = AutoBackupScheduler.lastRunTime(settingsContext)
+                    lastBackupOk = AutoBackupScheduler.lastRunSuccess(settingsContext)
+                    lastBackupMsg = AutoBackupScheduler.lastRunMessage(settingsContext)
+                    backupToast(
+                        when (outcome) {
+                            is BackupOutcome.Success -> "备份成功：${outcome.location}"
+                            is BackupOutcome.Failure -> "备份失败：${outcome.reason}"
+                        }
+                    )
+                }
+            }
+        }
+    )
+
+    if (showBackupIntervalDialog) {
+        AlertDialog(
+            onDismissRequest = { showBackupIntervalDialog = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            title = { Text("自动备份周期") },
+            text = {
+                Column {
+                    AutoBackupScheduler.INTERVAL_OPTIONS.forEach { (days, label) ->
+                        Surface(
+                            onClick = {
+                                autoBackupDays = days
+                                AutoBackupScheduler.schedule(settingsContext, days)
+                                showBackupIntervalDialog = false
+                                Toast.makeText(
+                                    settingsContext,
+                                    "已设置为${label}自动备份一次",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (autoBackupDays == days) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                Color.Transparent
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(selected = autoBackupDays == days, onClick = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(label, style = MaterialTheme.typography.bodyLarge)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showBackupIntervalDialog = false }) { Text("取消") }
+            }
+        )
+    }
+
     Spacer(modifier = Modifier.height(12.dp))
 
     // UI 缩放（点击打开对话框，应用后立即生效）
@@ -2004,6 +2341,11 @@ internal fun SettingsProxyContent() {
                         settingsPrefs.edit().remove("server_url").apply()
                         KuGouApi.baseUrl = KuGouApi.DEFAULT_BASE_URL
                         KuGouApi.rebuildService()
+                        // 酷狗地址变化后，网易云若为自动跟随状态则同步重建
+                        if (settingsPrefs.getString("netease_server_url", null).isNullOrBlank()) {
+                            NeteaseApi.baseUrl = NeteaseApi.effectiveBaseUrl()
+                            NeteaseApi.rebuildService()
+                        }
                         Toast.makeText(context, "已恢复默认服务器", Toast.LENGTH_SHORT).show()
                     },
                     shape = RoundedCornerShape(10.dp),
@@ -2032,6 +2374,108 @@ internal fun SettingsProxyContent() {
                 )
             }
         }
+    }
+
+    Spacer(modifier = Modifier.height(16.dp))
+
+    // --- 网易云服务器地址设置 ---
+    var neteaseUrl by remember { mutableStateOf(NeteaseApi.baseUrl) }
+    var showNeteaseDialog by remember { mutableStateOf(false) }
+    var newNeteaseInput by remember { mutableStateOf("") }
+
+    Text(
+        text = "网易云服务器地址",
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "当前服务器",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = if (settingsPrefs.getString("netease_server_url", null).isNullOrBlank())
+                    "自动跟随酷狗服务器（${NeteaseApi.deriveDefaultBaseUrl()}）"
+                else neteaseUrl,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { newNeteaseInput = ""; showNeteaseDialog = true },
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f)
+                ) { Text("修改服务器", fontSize = 13.sp) }
+                OutlinedButton(
+                    onClick = {
+                        settingsPrefs.edit().remove("netease_server_url").apply()
+                        NeteaseApi.setCustomServerUrl(null)
+                        NeteaseApi.baseUrl = NeteaseApi.effectiveBaseUrl()
+                        NeteaseApi.rebuildService()
+                        neteaseUrl = NeteaseApi.baseUrl
+                        Toast.makeText(context, "已恢复自动跟随酷狗服务器", Toast.LENGTH_SHORT).show()
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.weight(1f)
+                ) { Text("恢复默认", fontSize = 13.sp) }
+            }
+        }
+    }
+
+    if (showNeteaseDialog) {
+        AlertDialog(
+            onDismissRequest = { showNeteaseDialog = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            title = { Text("修改网易云服务器地址") },
+            text = {
+                Column {
+                    Text("输入新的网易云 API 地址（包含 http:// 和端口号）", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("留空则恢复自动跟随酷狗服务器", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = newNeteaseInput,
+                        onValueChange = { newNeteaseInput = it },
+                        label = { Text("网易云服务器地址") },
+                        singleLine = true,
+                        placeholder = { Text("http://example.com:3001/") }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val url = newNeteaseInput.trim()
+                    if (url.isBlank()) {
+                        settingsPrefs.edit().remove("netease_server_url").apply()
+                        NeteaseApi.setCustomServerUrl(null)
+                    } else if (url.startsWith("http://") || url.startsWith("https://")) {
+                        val finalUrl = if (url.endsWith("/")) url else "$url/"
+                        settingsPrefs.edit().putString("netease_server_url", finalUrl).apply()
+                        NeteaseApi.setCustomServerUrl(finalUrl)
+                    } else {
+                        Toast.makeText(context, "请输入有效的 http/https 地址", Toast.LENGTH_SHORT).show()
+                        return@TextButton
+                    }
+                    NeteaseApi.baseUrl = NeteaseApi.effectiveBaseUrl()
+                    NeteaseApi.rebuildService()
+                    neteaseUrl = NeteaseApi.baseUrl
+                    showNeteaseDialog = false
+                    Toast.makeText(context, "网易云服务器已更新", Toast.LENGTH_SHORT).show()
+                }) { Text("确认") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNeteaseDialog = false }) { Text("取消") }
+            }
+        )
     }
 
     if (showServerDialog) {
@@ -2063,6 +2507,11 @@ internal fun SettingsProxyContent() {
                         settingsPrefs.edit().remove("server_url").apply()
                         KuGouApi.baseUrl = KuGouApi.DEFAULT_BASE_URL
                         KuGouApi.rebuildService()
+                        // 酷狗地址变化后，网易云若为自动跟随状态则同步重建
+                        if (settingsPrefs.getString("netease_server_url", null).isNullOrBlank()) {
+                            NeteaseApi.baseUrl = NeteaseApi.effectiveBaseUrl()
+                            NeteaseApi.rebuildService()
+                        }
                         showServerDialog = false
                         Toast.makeText(context, "已恢复默认服务器", Toast.LENGTH_SHORT).show()
                     } else if (url.startsWith("http://") || url.startsWith("https://")) {
@@ -2071,6 +2520,11 @@ internal fun SettingsProxyContent() {
                         settingsPrefs.edit().putString("server_url", finalUrl).apply()
                         KuGouApi.baseUrl = finalUrl
                         KuGouApi.rebuildService()
+                        // 酷狗地址变化后，网易云若为自动跟随状态则同步重建
+                        if (settingsPrefs.getString("netease_server_url", null).isNullOrBlank()) {
+                            NeteaseApi.baseUrl = NeteaseApi.effectiveBaseUrl()
+                            NeteaseApi.rebuildService()
+                        }
                         showServerDialog = false
                         Toast.makeText(context, "服务器已切换", Toast.LENGTH_SHORT).show()
                     } else {

@@ -62,7 +62,12 @@ abstract class MusicDatabase : RoomDatabase() {
                     "lx_music_database"
                 )
                     .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
-                    .fallbackToDestructiveMigration().build()
+                    // 公开版本（v3.7.56 起）数据库版本始终 >= 5，这里只对从未公开发布的 v1~v4
+                    // 允许重建；5→N 的正常升级必须走显式 Migration，缺失时直接报错暴露问题，
+                    // 绝不再静默清空用户收藏。降级安装旧版本时允许重建（无法避免）。
+                    .fallbackToDestructiveMigrationFrom(false, 1, 2, 3, 4)
+                    .fallbackToDestructiveMigrationOnDowngrade(false)
+                    .build()
                 INSTANCE = instance
                 instance
             }

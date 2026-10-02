@@ -156,6 +156,9 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
+    // WorkManager（定时自动备份本地收藏数据到 下载/LxMusic）
+    implementation(libs.androidx.work.runtime.ktx)
+
     // Retrofit + OkHttp + Gson（网络请求）
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")

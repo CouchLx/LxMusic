@@ -12,6 +12,8 @@ class LxMusicApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         applyUsbAttachHandlingComponentState()
+        // 定时自动备份自愈：开关开着但周期任务被系统清理/重装丢失时补建（KEEP 策略不会重置计时）
+        runCatching { com.example.lxmusic.backup.AutoBackupScheduler.ensureScheduled(this) }
     }
 
     /**

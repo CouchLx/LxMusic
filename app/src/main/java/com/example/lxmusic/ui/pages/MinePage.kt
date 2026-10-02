@@ -696,13 +696,21 @@ fun MinePage(
                             IOLoadingIndicator(modifier = Modifier.size(24.dp))
                         }
                     }
-                    playlistError != null -> {
-                        Text(
-                            text = playlistError!!,
-                            modifier = Modifier.padding(16.dp),
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                    playlists.isEmpty() && playlistError != null -> {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = playlistError!!,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "点击重试",
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.clickable(enabled = !playlistLoading) { loadPlaylists() }
+                            )
+                        }
                     }
                     playlists.isEmpty() -> {
                         Text(
@@ -716,6 +724,25 @@ fun MinePage(
                         Column(
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
+                            // 有缓存数据时后台刷新失败不再隐藏列表，只在顶部提醒并可点击重试
+                            if (playlistLoading) {
+                                Text(
+                                    text = "刷新中…",
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            } else if (playlistError != null) {
+                                Text(
+                                    text = "刷新失败，点击重试",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { loadPlaylists() }
+                                        .padding(horizontal = 4.dp, vertical = 6.dp),
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
                             playlists.forEach { playlist ->
                                 PlaylistCard(
                                     playlist = playlist,

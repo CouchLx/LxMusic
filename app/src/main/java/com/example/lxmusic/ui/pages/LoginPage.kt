@@ -215,6 +215,13 @@ fun LoginPage(onBack: () -> Unit, onLoginSuccess: (String) -> Unit) {
                                 .remove("history_songs_json")
                                 .remove("style_songs_json")
                                 .apply()
+                            // 清除「我的」页歌单缓存（带账号标识），保证按当前登录账号重新拉取歌单
+                            val minePrefs = context.getSharedPreferences("mine_state", Context.MODE_PRIVATE)
+                            minePrefs.edit()
+                                .remove("playlists_json")
+                                .remove("playlists_json_uid")
+                                .remove("last_load_auth")
+                                .apply()
                             // 获取用户详情（头像等）
                             try {
                                 val detailResp = KuGouApi.service.getUserDetail(token ?: "", userid)

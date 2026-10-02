@@ -675,19 +675,31 @@ fun AppScaffold(
         onlineLyrics = null
         val song = currentSong ?: return@LaunchedEffect
         if (!song.lyrics.isNullOrBlank()) return@LaunchedEffect
-        val hash = song.filePath.split("|").firstOrNull()?.takeIf { it.isNotBlank() }
-            ?: return@LaunchedEffect
         try {
-            val searchResp = KuGouApi.service.searchLyric(hash)
-            val candidate = searchResp.candidates?.firstOrNull()
-            if (candidate?.id != null && candidate.accesskey != null) {
-                val lyricResp = KuGouApi.service.getLyric(candidate.id, candidate.accesskey)
-                val content = lyricResp.content
-                if (!content.isNullOrBlank()) {
-                    val decoded = try {
-                        String(android.util.Base64.decode(content, android.util.Base64.DEFAULT))
-                    } catch (_: Exception) { content }
-                    onlineLyrics = decoded
+            if (NeteaseApi.isNeteasePath(song.filePath)) {
+                // 网易云歌曲：/lyric 获取歌词，优先逐字 yrc，空则标准 lrc
+                val id = NeteaseApi.neteaseSongIdOf(song.filePath) ?: return@LaunchedEffect
+                val lyricResp = NeteaseApi.service.getLyric(id)
+                val content = if (!lyricResp.yrc?.lyric.isNullOrBlank()) {
+                    lyricResp.yrc!!.lyric
+                } else {
+                    lyricResp.lrc?.lyric
+                }
+                if (!content.isNullOrBlank()) onlineLyrics = content
+            } else {
+                val hash = song.filePath.split("|").firstOrNull()?.takeIf { it.isNotBlank() }
+                    ?: return@LaunchedEffect
+                val searchResp = KuGouApi.service.searchLyric(hash)
+                val candidate = searchResp.candidates?.firstOrNull()
+                if (candidate?.id != null && candidate.accesskey != null) {
+                    val lyricResp = KuGouApi.service.getLyric(candidate.id, candidate.accesskey)
+                    val content = lyricResp.content
+                    if (!content.isNullOrBlank()) {
+                        val decoded = try {
+                            String(android.util.Base64.decode(content, android.util.Base64.DEFAULT))
+                        } catch (_: Exception) { content }
+                        onlineLyrics = decoded
+                    }
                 }
             }
         } catch (_: Exception) {}
@@ -698,6 +710,8 @@ fun AppScaffold(
     var loginVersion by rememberSaveable { mutableIntStateOf(0) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var searchSelectedType by rememberSaveable { mutableStateOf("song") }
+    // 搜索音源：kugou / netease（持久化 prefs "music_source"，启动时通过 settingsPrefs 恢复）
+    var searchSource by rememberSaveable { mutableStateOf("kugou") }
     var searchPlaylistId by rememberSaveable { mutableLongStateOf(0L) }
     var searchPlaylistName by rememberSaveable { mutableStateOf("") }
     var searchPlaylistCover by rememberSaveable { mutableStateOf("") }
@@ -864,15 +878,16 @@ fun AppScaffold(
     var kugouLikeTick by remember { mutableStateOf(0) }
     LaunchedEffect(currentSong?.filePath, favoriteToKugou, kugouLikeTick) {
         val fp = currentSong?.filePath ?: return@LaunchedEffect
+        val isNeteaseSong = NeteaseApi.isNeteasePath(fp)
         val parts = fp.split("|")
         val hash = parts.getOrElse(0) { "" }
         val audioId = parts.getOrElse(1) { "0" }.toLongOrNull() ?: 0L
-        if (hash.isBlank()) {
+        if (!isNeteaseSong && hash.isBlank()) {
             isCurrentSongFavorite = false
             return@LaunchedEffect
         }
-        val key = "${hash}|${audioId}"
-        if (favoriteToKugou) {
+        val key = if (isNeteaseSong) fp else "${hash}|${audioId}"
+        if (favoriteToKugou && !isNeteaseSong) {
             // 官方模式：本地「喜欢镜像」先写即亮；酷狗官方喜欢的也亮；本地“我的收藏”忽略
             if (KuGouApi.token.isNotBlank() && KuGouApi.userid.isNotBlank()) {
                 val liked = withContext(Dispatchers.IO) { KuGouApi.isSongLikedKugou(key) }
@@ -906,6 +921,13 @@ fun AppScaffold(
         if (!savedServerUrl.isNullOrBlank()) {
             KuGouApi.baseUrl = savedServerUrl
         }
+        // 网易云 API：自定义地址优先，否则自动跟随酷狗（同一主机 + 3001 端口）
+        val savedNeteaseUrl = settingsPrefs.getString("netease_server_url", null) ?: ""
+        NeteaseApi.setCustomServerUrl(savedNeteaseUrl.ifBlank { null })
+        NeteaseApi.baseUrl = NeteaseApi.effectiveBaseUrl()
+        android.util.Log.d("LxMusic", "网易云 API 地址: ${NeteaseApi.baseUrl}")
+        // 恢复搜索音源（酷狗 / 网易云）
+        searchSource = settingsPrefs.getString("music_source", null) ?: "kugou"
         // VIP userid 由 ownerToken/ownerUserid 统一处理，不再单独加载
         KuGouApi.vipUserid = ""
 
@@ -1275,7 +1297,12 @@ fun AppScaffold(
                                 searchSelectedType = "song"
                             },
                             onSearch = { query -> searchQuery = query },
-                            externalQuery = searchQuery
+                            externalQuery = searchQuery,
+                            searchSource = searchSource,
+                            onSourceChange = { source ->
+                                searchSource = source
+                                settingsPrefs.edit().putString("music_source", source).apply()
+                            }
                         )
                     } else if (currentTab == 12) {
                         TopAppBar(
@@ -1948,7 +1975,12 @@ fun AppScaffold(
                             onSelectedTypeChange = { type -> searchSelectedType = type },
                             currentPlayingPath = currentSong?.filePath,
                             isPlaying = isPlaying,
-                            onAddToQueueNext = { song -> addToQueueNext(song) }
+                            onAddToQueueNext = { song -> addToQueueNext(song) },
+                            initialSource = searchSource,
+                            onSourceChange = { source ->
+                                searchSource = source
+                                settingsPrefs.edit().putString("music_source", source).apply()
+                            }
                         )
                         16 -> SearchPlaylistDetailPage(
                             playlistId = searchPlaylistId,
@@ -2610,14 +2642,16 @@ fun AppScaffold(
                         onFavoriteClick = {
                             val song = currentSong ?: return@PlayerStage
                             scope.launch(Dispatchers.IO) {
+                                val isNeteaseSong = NeteaseApi.isNeteasePath(song.filePath)
                                 val parts = song.filePath.split("|")
-                                val hash = parts.getOrElse(0) { "" }
-                                val audioId = parts.getOrElse(1) { "0" }.toLongOrNull() ?: 0L
-                                if (hash.isBlank()) return@launch
-                                val key = "${hash}|${audioId}"
+                                val hash = if (isNeteaseSong) "" else parts.getOrElse(0) { "" }
+                                val audioId = if (isNeteaseSong) 0L else parts.getOrElse(1) { "0" }.toLongOrNull() ?: 0L
+                                if (!isNeteaseSong && hash.isBlank()) return@launch
+                                val key = if (isNeteaseSong) song.filePath else "${hash}|${audioId}"
                                 // 开启「收藏到酷狗」：本地先写「喜欢镜像」（立即可见、不消失），酷狗后台慢慢同步；
                                 // “同步到本地收藏”开启时再额外复制一份到本地“我的收藏”
-                                if (favoriteToKugou) {
+                                // 网易云歌曲暂无官方同步，一律走本地收藏
+                                if (favoriteToKugou && !isNeteaseSong) {
                                     val target = !isCurrentSongFavorite
                                     isCurrentSongFavorite = target
                                     if (target) {

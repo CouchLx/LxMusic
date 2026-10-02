@@ -507,6 +507,19 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     // ==================== 工具 ====================
 
     private fun SongInfo.toMediaItem(): MediaItem {
+        // 网易云歌曲：netease://<songId> 直接作为播放 URI（SongDataSource 识别）
+        if (NeteaseApi.isNeteasePath(filePath)) {
+            return MediaItem.Builder()
+                .setUri(Uri.parse(filePath))
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(title)
+                        .setArtist(artist)
+                        .setArtworkUri(albumArtUri?.let { Uri.parse(it) })
+                        .build()
+                )
+                .build()
+        }
         val parts = filePath.split("|")
         val hash = parts.getOrElse(0) { "" }
         val albumAudioId = parts.getOrElse(1) { "0" }

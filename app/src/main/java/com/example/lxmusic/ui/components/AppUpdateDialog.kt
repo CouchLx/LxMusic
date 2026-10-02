@@ -319,9 +319,23 @@ fun AppUpdateDialog(
                                         )
                                         isDownloading = false
                                         if (apkUri != null) {
+                                            // 安装前先把本地收藏静默备份到 下载/LxMusic，避免升级/重装丢数据
+                                            val backupOutcome = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                com.example.lxmusic.backup.AutoBackupRunner.run(
+                                                    context,
+                                                    com.example.lxmusic.backup.BackupReason.BEFORE_UPDATE,
+                                                    notify = false
+                                                )
+                                            }
+                                            val backupTip =
+                                                if (backupOutcome is com.example.lxmusic.backup.BackupOutcome.Success) {
+                                                    "，本地收藏已备份到 下载/LxMusic"
+                                                } else {
+                                                    ""
+                                                }
                                             Toast.makeText(
                                                 context,
-                                                "下载完成，安装包已保存到手机 Download 文件夹",
+                                                "下载完成，安装包已保存到手机 Download 文件夹$backupTip",
                                                 Toast.LENGTH_LONG
                                             ).show()
                                             onDismiss()

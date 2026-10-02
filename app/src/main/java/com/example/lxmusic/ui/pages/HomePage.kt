@@ -201,16 +201,25 @@ data class HomeFeedState(
     val trendSongs: List<SongInfo> = emptyList(),
 )
 
+/** 首页区块的局部更新函数：每个请求成功产出一个，刷新收齐后统一应用（一次性替换 feed） */
+private typealias FeedUpdate = (HomeFeedState) -> HomeFeedState
+
+// 一键全量刷新的总预算：转圈最长显示这么久；到点未完成的区块保留旧内容
+private const val REFRESH_BUDGET_MS = 6_000L
+// 单次请求超时，预算内自动重试
+private const val REFRESH_ATTEMPT_MS = 3_000L
+
 /**
  * 预算时间内持续重试的接口请求：网络抖动/超时自动重试直到成功或预算耗尽。
  * 正常网络下一次成功（刷新很快）；抖动时在 [budgetMs] 内反复尝试（每次
  * [attemptTimeoutMs] 超时），大幅降低"某区块加载失败"概率；预算耗尽仍失败
  * 返回 null（调用方保留旧数据，保证区块不空白）。
- * 预算/超时给足：单次超时 5s（服务器慢也能等到），预算 12s（约 2-3 次机会）。
+ * 预算按"一键刷新整体转圈"给：单次超时 3s，预算 6s（约 2 次机会），
+ * 到点必须放行，不能把转圈拖长。
  */
 private suspend fun <T> fetchWithinBudget(
-    budgetMs: Long = 12_000,
-    attemptTimeoutMs: Long = 5_000,
+    budgetMs: Long = REFRESH_BUDGET_MS,
+    attemptTimeoutMs: Long = REFRESH_ATTEMPT_MS,
     request: suspend () -> T?
 ): T? {
     val deadline = System.currentTimeMillis() + budgetMs
@@ -218,6 +227,9 @@ private suspend fun <T> fetchWithinBudget(
         try {
             val result = withTimeoutOrNull(attemptTimeoutMs) { request() }
             if (result != null) return result
+        } catch (e: java.util.concurrent.CancellationException) {
+            // 整体刷新到点收工取消协程时必须继续向上抛，不能吞掉继续重试
+            throw e
         } catch (_: Exception) {
             // 网络异常：继续重试
         }
@@ -292,7 +304,6 @@ fun HomePage(
     // ===== UI 状态 =====
     var isRefreshing by remember { mutableStateOf(false) }
     var isRefreshEnabled by remember { mutableStateOf(true) }
-    var isLoading by remember { mutableStateOf(false) }
     val isLoggedIn = authPrefs.getString("token", null) != null
 
     // 刷新世代号：刷新时 +1，作为歌曲区块分页器的 key —— 强制 Pager 重建，
@@ -852,13 +863,16 @@ fun HomePage(
     }
 
     // 统一的刷新逻辑
+    // ===== 一键全量刷新 =====
+    // 所有区块请求一次性并行发出；每个请求成功后只产出「局部更新函数」，
+    // 全部收齐（或到总预算）后一次性替换 feed 并结束转圈：
+    // 加载动画覆盖整个过程，结束后内容即最终态，不会再有区块陆续冒出来。
     fun performRefresh(isAuto: Boolean = false, isClick: Boolean = false) {
         if (!isLoggedIn) {
             if (!isAuto) {
                 Toast.makeText(context, "请先登录后刷新", Toast.LENGTH_SHORT).show()
             }
             isRefreshing = false
-            isLoading = false
             return
         }
 
@@ -867,153 +881,180 @@ fun HomePage(
         isRefreshEnabled = false
 
         // 刷新不清空数据：全屏转圈期间内容被隐藏（contentAlpha=0），
-        // 各请求成功才替换为新数据；失败区块保留刷新前的旧内容，
-        // 保证"不丢失内容、不空白"且成功的区块都是全新的。
+        // 失败/超时区块保留刷新前的旧内容，保证"不丢失内容、不空白"。
         // 翻页进度：清空全局 map + 世代号 +1（强制 Pager 重建）→ 全部回到第 1 页
         clearHomePagerStates()
         refreshGeneration++
+        val myGeneration = refreshGeneration
 
         isRefreshing = true
-        isLoading = true
 
         val ts = System.currentTimeMillis()
         val token = authPrefs.getString("token", "") ?: ""
         val userid = authPrefs.getLong("userid", 0)
 
         scope.launch(Dispatchers.IO) {
+            val updates = java.util.concurrent.ConcurrentLinkedQueue<FeedUpdate>()
             supervisorScope {
-                // ===== 首批：顶部推荐栏 + 前两个内容区块（5 个请求全并行，预算内持续重试）=====
-                // 旧实现分两批串行 awaitAll（最多 6s 转圈）；合并并行后
-                // 转圈时长 = 最慢单个请求（正常时 ~1-2s），更快显示新内容。
-                val firstJobs = listOf(
+                // 12 个请求全部并行（原先是 7 个一批 + 5 个后台一批，分段出结果）；
+                // 转圈时长 = 最慢单个请求，而不是两批之和
+                val jobs = listOf(
                     async {
                         val list = fetchWithinBudget {
                             KuGouApi.service.getDailyRecommend(token, userid, timestamp = ts).data?.list
                         }
-                        if (list != null) {
-                            feed = feed.copy(
-                                dailySongs = list,
-                                historySongs = list
-                            )
-                        }
+                        if (list != null) updates.add { s -> s.copy(dailySongs = list, historySongs = list) }
                     },
                     async {
                         val list = fetchWithinBudget {
                             KuGouApi.service.getTopCardYouth(3006, timestamp = ts).data?.list
                         }
                         if (list != null) {
-                            feed = feed.copy(
-                                vipSongs = list.map { song -> SongInfo(title = song.title, artist = song.artist, filePath = "${song.hash}|${song.album_audio_id}", albumArtUri = song.coverUrl, duration = song.durationMs) }
-                            )
+                            val mapped = list.map { song -> SongInfo(title = song.title, artist = song.artist, filePath = "${song.hash}|${song.album_audio_id}", albumArtUri = song.coverUrl, duration = song.durationMs) }
+                            updates.add { s -> s.copy(vipSongs = mapped) }
                         }
                     },
                     // 百万收藏：跟乐库同一套备货（游标共用），首页每次刷新 50 首新的
                     async {
-                        val (list, _) = fetchIpZoneBatch(
-                            99070L, 2, 30, 50,
-                            getCursor = { yuekuPrefs.getInt("zone_page_99070", 1) },
-                            setCursor = { yuekuPrefs.edit().putInt("zone_page_99070", it).apply() }
-                        )
-                        if (list.isNotEmpty()) {
-                            feed = feed.copy(millionSongs = list)
+                        val result = runCatching {
+                            withTimeoutOrNull(REFRESH_BUDGET_MS) {
+                                fetchIpZoneBatch(
+                                    99070L, 2, 30, 50,
+                                    getCursor = { yuekuPrefs.getInt("zone_page_99070", 1) },
+                                    setCursor = { yuekuPrefs.edit().putInt("zone_page_99070", it).apply() }
+                                )
+                            }
+                        }.getOrNull()
+                        if (result != null && result.first.isNotEmpty()) {
+                            val mapped = result.first
+                            updates.add { s -> s.copy(millionSongs = mapped) }
                         }
                     },
                     // 热歌推荐（网络专区）：同上，首页每次刷新 50 首新的
                     async {
-                        val (list, _) = fetchIpZoneBatch(
-                            87634L, 2, 30, 50,
-                            getCursor = { yuekuPrefs.getInt("zone_page_87634", 1) },
-                            setCursor = { yuekuPrefs.edit().putInt("zone_page_87634", it).apply() }
-                        )
-                        if (list.isNotEmpty()) {
-                            feed = feed.copy(networkSongs = list)
+                        val result = runCatching {
+                            withTimeoutOrNull(REFRESH_BUDGET_MS) {
+                                fetchIpZoneBatch(
+                                    87634L, 2, 30, 50,
+                                    getCursor = { yuekuPrefs.getInt("zone_page_87634", 1) },
+                                    setCursor = { yuekuPrefs.edit().putInt("zone_page_87634", it).apply() }
+                                )
+                            }
+                        }.getOrNull()
+                        if (result != null && result.first.isNotEmpty()) {
+                            val mapped = result.first
+                            updates.add { s -> s.copy(networkSongs = mapped) }
                         }
                     },
                     async {
                         val list = fetchWithinBudget {
                             KuGouApi.service.getStyleRecommend(token, userid, timestamp = ts).data?.list
                         }
-                        if (list != null) feed = feed.copy(styleSongs = list)
+                        if (list != null) updates.add { s -> s.copy(styleSongs = list) }
                     },
                     async {
                         val list = fetchWithinBudget {
                             KuGouApi.service.getTopCardYouth(3001, timestamp = ts).data?.list
                         }
-                        if (list != null) feed = feed.copy(personalSongs = mapTopCardSongs(list))
+                        if (list != null) {
+                            val mapped = mapTopCardSongs(list)
+                            updates.add { s -> s.copy(personalSongs = mapped) }
+                        }
                     },
                     async {
                         val list = fetchWithinBudget {
                             KuGouApi.service.getTopCard(3, timestamp = ts).data?.list
                         }
-                        if (list != null) feed = feed.copy(collectSongs = list.take(28).map { song -> SongInfo(title = song.title, artist = song.artist, filePath = "${song.hash}|${song.album_audio_id}", albumArtUri = song.coverUrl, duration = song.durationMs) })
+                        if (list != null) {
+                            val mapped = list.take(28).map { song -> SongInfo(title = song.title, artist = song.artist, filePath = "${song.hash}|${song.album_audio_id}", albumArtUri = song.coverUrl, duration = song.durationMs) }
+                            updates.add { s -> s.copy(collectSongs = mapped) }
+                        }
+                    },
+                    async {
+                        val list = fetchWithinBudget {
+                            KuGouApi.service.getTopCard(1, timestamp = ts).data?.list
+                        }
+                        if (list != null) {
+                            val mapped = list.take(28).map { song -> SongInfo(title = song.title, artist = song.artist, filePath = "${song.hash}|${song.album_audio_id}", albumArtUri = song.coverUrl, duration = song.durationMs) }
+                            updates.add { s -> s.copy(surgeSongs = mapped) }
+                        }
+                    },
+                    async {
+                        val list = fetchWithinBudget {
+                            KuGouApi.service.getTopCard(2, timestamp = ts).data?.list
+                        }
+                        if (list != null) {
+                            val mapped = list.take(28).map { song -> SongInfo(title = song.title, artist = song.artist, filePath = "${song.hash}|${song.album_audio_id}", albumArtUri = song.coverUrl, duration = song.durationMs) }
+                            updates.add { s -> s.copy(newSongs = mapped) }
+                        }
+                    },
+                    async {
+                        val list = fetchWithinBudget {
+                            KuGouApi.service.getTopCard(4, timestamp = ts).data?.list
+                        }
+                        if (list != null) {
+                            val mapped = list.take(28).map { song -> SongInfo(title = song.title, artist = song.artist, filePath = "${song.hash}|${song.album_audio_id}", albumArtUri = song.coverUrl, duration = song.durationMs) }
+                            updates.add { s -> s.copy(nicheSongs = mapped) }
+                        }
+                    },
+                    async {
+                        val list = fetchWithinBudget {
+                            KuGouApi.service.getTopCardYouth(3005, timestamp = ts).data?.list
+                        }
+                        if (list != null) {
+                            val mapped = mapTopCardSongs(list)
+                            updates.add { s -> s.copy(hotPickSongs = mapped, trendSongs = mapped) }
+                        }
+                    },
+                    async {
+                        val list = fetchWithinBudget {
+                            KuGouApi.service.getTopCardYouth(3101, timestamp = ts).data?.list
+                        }
+                        if (list != null) {
+                            val mapped = mapTopCardSongs(list)
+                            updates.add { s -> s.copy(conceptSongs = mapped) }
+                        }
                     }
                 )
-                firstJobs.awaitAll()
+                // 总预算兜底：到点收工，慢/失败区块保留旧内容，不让转圈无限等；
+                // 单个请求异常不影响其它（逐个 await + 兜底）
+                withTimeoutOrNull(REFRESH_BUDGET_MS + 1_500) {
+                    jobs.forEach { runCatching { it.await() } }
+                }
+                jobs.forEach { if (!it.isCompleted) it.cancel() }
+            }
 
-                // 首批完成后，结束刷新状态，让用户看到内容
+            // ===== 一次性替换：所有区块同帧变新，随后结束转圈 =====
+            val finalFeed = withContext(Dispatchers.Main) {
+                val next = if (updates.isEmpty()) feed else updates.fold(feed) { acc, t -> t(acc) }
+                feed = next
                 isRefreshing = false
-                isLoading = false
                 isRefreshEnabled = true
+                next
+            }
 
-                // ===== 第二批：剩余区块（后台静默加载，成功后合并进 feed）=====
-                launch {
-                    supervisorScope {
-                        val remainingJobs = listOf(
-                            async {
-                                val list = fetchWithinBudget {
-                                    KuGouApi.service.getTopCard(1, timestamp = ts).data?.list
-                                }
-                                if (list != null) feed = feed.copy(surgeSongs = list.take(28).map { song -> SongInfo(title = song.title, artist = song.artist, filePath = "${song.hash}|${song.album_audio_id}", albumArtUri = song.coverUrl, duration = song.durationMs) })
-                            },
-                            async {
-                                val list = fetchWithinBudget {
-                                    KuGouApi.service.getTopCard(2, timestamp = ts).data?.list
-                                }
-                                if (list != null) feed = feed.copy(newSongs = list.take(28).map { song -> SongInfo(title = song.title, artist = song.artist, filePath = "${song.hash}|${song.album_audio_id}", albumArtUri = song.coverUrl, duration = song.durationMs) })
-                            },
-                            async {
-                                val list = fetchWithinBudget {
-                                    KuGouApi.service.getTopCard(4, timestamp = ts).data?.list
-                                }
-                                if (list != null) feed = feed.copy(nicheSongs = list.take(28).map { song -> SongInfo(title = song.title, artist = song.artist, filePath = "${song.hash}|${song.album_audio_id}", albumArtUri = song.coverUrl, duration = song.durationMs) })
-                            },
-                            async {
-                                val list = fetchWithinBudget {
-                                    KuGouApi.service.getTopCardYouth(3005, timestamp = ts).data?.list
-                                }
-                                if (list != null) {
-                                    val mapped = mapTopCardSongs(list)
-                                    feed = feed.copy(
-                                        hotPickSongs = mapped,
-                                        trendSongs = mapped
-                                    )
-                                }
-                            },
-                            async {
-                                val list = fetchWithinBudget {
-                                    KuGouApi.service.getTopCardYouth(3101, timestamp = ts).data?.list
-                                }
-                                if (list != null) feed = feed.copy(conceptSongs = mapTopCardSongs(list))
-                            }
-                        )
-                        remainingJobs.awaitAll()
-
-                        // 批量写入缓存（一次性提交）
+            // 批量写入缓存（一次性提交）；期间若已开始更新一代的刷新则跳过，避免旧快照覆盖新数据
+            if (refreshGeneration == myGeneration) {
+                runCatching {
+                    val payload = buildMap<String, String> {
+                        put("daily_songs_json", gson.toJson(finalFeed.dailySongs))
+                        put("history_songs_json", gson.toJson(finalFeed.historySongs))
+                        put("vip_songs_json", gson.toJson(finalFeed.vipSongs))
+                        put("million_songs_json", gson.toJson(finalFeed.millionSongs))
+                        put("network_songs_json", gson.toJson(finalFeed.networkSongs))
+                        put("style_songs_json", gson.toJson(finalFeed.styleSongs))
+                        put("home_surge", gson.toJson(finalFeed.surgeSongs))
+                        put("home_hot", gson.toJson(finalFeed.hotPickSongs))
+                        put("home_new", gson.toJson(finalFeed.newSongs))
+                        put("home_collect", gson.toJson(finalFeed.collectSongs))
+                        put("home_niche", gson.toJson(finalFeed.nicheSongs))
+                        put("home_personal", gson.toJson(finalFeed.personalSongs))
+                        put("home_concept", gson.toJson(finalFeed.conceptSongs))
+                        put("home_trend", gson.toJson(finalFeed.trendSongs))
+                    }
+                    if (refreshGeneration == myGeneration) {
                         homePrefs.edit().apply {
-                            putString("daily_songs_json", gson.toJson(feed.dailySongs))
-                            putString("history_songs_json", gson.toJson(feed.historySongs))
-                            putString("vip_songs_json", gson.toJson(feed.vipSongs))
-                            putString("million_songs_json", gson.toJson(feed.millionSongs))
-                            putString("network_songs_json", gson.toJson(feed.networkSongs))
-                            putString("style_songs_json", gson.toJson(feed.styleSongs))
-                            putString("home_surge", gson.toJson(feed.surgeSongs))
-                            putString("home_hot", gson.toJson(feed.hotPickSongs))
-                            putString("home_new", gson.toJson(feed.newSongs))
-                            putString("home_collect", gson.toJson(feed.collectSongs))
-                            putString("home_niche", gson.toJson(feed.nicheSongs))
-                            putString("home_personal", gson.toJson(feed.personalSongs))
-                            putString("home_concept", gson.toJson(feed.conceptSongs))
-                            putString("home_trend", gson.toJson(feed.trendSongs))
+                            payload.forEach { (key, value) -> putString(key, value) }
                             putLong("last_refresh_time", System.currentTimeMillis())
                             apply()
                         }

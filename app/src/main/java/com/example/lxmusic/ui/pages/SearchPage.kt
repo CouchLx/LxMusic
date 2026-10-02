@@ -45,6 +45,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
@@ -53,6 +55,8 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularWavyProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
@@ -96,6 +100,7 @@ import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.example.lxmusic.HotSearchItem
 import com.example.lxmusic.KuGouApi
+import com.example.lxmusic.NeteaseApi
 import com.example.lxmusic.SearchAlbumItem
 import com.example.lxmusic.SearchAuthorItem
 import com.example.lxmusic.SearchMvItem
@@ -103,17 +108,84 @@ import com.example.lxmusic.SearchPlaylistItem
 import com.example.lxmusic.SearchSuggestItem
 import com.example.lxmusic.ui.components.SongContextMenuActions
 import com.example.lxmusic.model.SongInfo
+import com.example.lxmusic.toSongInfo
 import com.example.lxmusic.ui.components.IOLoadingIndicator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * 音源切换按钮（酷狗 / 网易云）：pill 样式，点击弹出选择菜单
+ * 搜索栏旁与搜索结果 Tab 行共用
+ */
+@Composable
+fun MusicSourceSwitcher(
+    searchSource: String,
+    onSourceChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isNetease = searchSource == "netease"
+    var showMenu by remember { mutableStateOf(false) }
+    Box(modifier) {
+        Surface(
+            onClick = { showMenu = true },
+            shape = RoundedCornerShape(14.dp),
+            color = if (isNetease) MaterialTheme.colorScheme.secondaryContainer
+            else MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (isNetease) "网易云" else "酷狗",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (isNetease) MaterialTheme.colorScheme.onSecondaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.width(2.dp))
+                Icon(
+                    Icons.Default.ArrowDropDown,
+                    contentDescription = "切换音源",
+                    modifier = Modifier.size(16.dp),
+                    tint = if (isNetease) MaterialTheme.colorScheme.onSecondaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        DropdownMenu(
+            expanded = showMenu,
+            onDismissRequest = { showMenu = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            DropdownMenuItem(
+                text = { Text("酷狗", fontSize = 13.sp) },
+                trailingIcon = {
+                    if (!isNetease) Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                },
+                onClick = { showMenu = false; onSourceChange("kugou") }
+            )
+            DropdownMenuItem(
+                text = { Text("网易云", fontSize = 13.sp) },
+                trailingIcon = {
+                    if (isNetease) Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                },
+                onClick = { showMenu = false; onSourceChange("netease") }
+            )
+        }
+    }
+}
+
 @Composable
 fun SearchTopBar(
     onBack: () -> Unit,
     onSearch: (String) -> Unit,
-    externalQuery: String = ""
+    externalQuery: String = "",
+    searchSource: String = "kugou",
+    onSourceChange: (String) -> Unit = {}
 ) {
     var textFieldValue by remember { mutableStateOf(TextFieldValue(externalQuery, selection = TextRange(externalQuery.length))) }
     var isFocused by remember { mutableStateOf(false) }
@@ -280,10 +352,16 @@ fun SearchTopBar(
                 }
             },
             actions = {
-                TextButton(onClick = {
-                    submitSearch(textFieldValue.text)
-                }) {
-                    Text("搜索", fontSize = 14.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    MusicSourceSwitcher(
+                        searchSource = searchSource,
+                        onSourceChange = onSourceChange
+                    )
+                    TextButton(onClick = {
+                        submitSearch(textFieldValue.text)
+                    }) {
+                        Text("搜索", fontSize = 14.sp)
+                    }
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
@@ -359,6 +437,8 @@ fun SearchPage(
     currentPlayingPath: String? = null,
     isPlaying: Boolean = false,
     onAddToQueueNext: (SongInfo) -> Unit = {},
+    initialSource: String = "kugou",
+    onSourceChange: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -374,6 +454,12 @@ fun SearchPage(
     var currentQuery by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(initialSelectedType) }
     var inputText by remember { mutableStateOf(initialQuery) }
+
+    // 音源：kugou / netease（持久化到 settings 的 music_source，启动时由 MainActivity 传入）
+    var searchSource by remember { mutableStateOf(initialSource) }
+    LaunchedEffect(initialSource) {
+        searchSource = initialSource
+    }
 
     // 热搜
     var hotSearchList by remember { mutableStateOf<List<HotSearchItem>>(emptyList()) }
@@ -491,23 +577,34 @@ fun SearchPage(
                         if (mvResults.isNotEmpty()) saveHistory(keywords)
                     }
                     else -> {
-                        // 单曲搜索 (song, author, album, mv 等通用 fallback)
-                        val resp = KuGouApi.service.search(keywords, page = 1, pageSize = 30, type = type)
-                        android.util.Log.d("LxMusic", "搜索: type=$type, status=${resp.status}, total=${resp.data?.total}, listSize=${resp.data?.lists?.size}")
-                        val songs = resp.data?.lists?.map { song ->
-                            SongInfo(
-                                title = song.title,
-                                artist = song.artist,
-                                filePath = "${song.hash}|${song.album_audio_id}",
-                                albumArtUri = song.coverUrl,
-                                duration = song.Duration.toLong() * 1000,
-                                albumId = song.AlbumID?.toLongOrNull() ?: 0
-                            )
-                        } ?: emptyList()
-                        searchResults = songs
-                        totalResults = resp.data?.total ?: 0
-                        if (songs.size < 30) noMoreData = true
-                        if (songs.isNotEmpty()) saveHistory(keywords)
+                        if (searchSource == "netease") {
+                            // 网易云单曲搜索（type=1）
+                            val resp = NeteaseApi.service.search(keywords, limit = 30, offset = 0, type = 1)
+                            val songs = resp.result?.songs?.map { it.toSongInfo() } ?: emptyList()
+                            android.util.Log.d("LxMusic", "网易云搜索: keywords=$keywords, size=${songs.size}, total=${resp.result?.songCount}")
+                            searchResults = songs
+                            totalResults = resp.result?.songCount ?: 0
+                            if (songs.size < 30) noMoreData = true
+                            if (songs.isNotEmpty()) saveHistory(keywords)
+                        } else {
+                            // 单曲搜索 (song, author, album, mv 等通用 fallback)
+                            val resp = KuGouApi.service.search(keywords, page = 1, pageSize = 30, type = type)
+                            android.util.Log.d("LxMusic", "搜索: type=$type, status=${resp.status}, total=${resp.data?.total}, listSize=${resp.data?.lists?.size}")
+                            val songs = resp.data?.lists?.map { song ->
+                                SongInfo(
+                                    title = song.title,
+                                    artist = song.artist,
+                                    filePath = "${song.hash}|${song.album_audio_id}",
+                                    albumArtUri = song.coverUrl,
+                                    duration = song.Duration.toLong() * 1000,
+                                    albumId = song.AlbumID?.toLongOrNull() ?: 0
+                                )
+                            } ?: emptyList()
+                            searchResults = songs
+                            totalResults = resp.data?.total ?: 0
+                            if (songs.size < 30) noMoreData = true
+                            if (songs.isNotEmpty()) saveHistory(keywords)
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -560,17 +657,25 @@ fun SearchPage(
                         if (more.size < 30) noMoreData = true
                     }
                     else -> {
-                        val resp = KuGouApi.service.search(currentQuery, page = nextPage, pageSize = 30, type = selectedType)
-                        val songs = resp.data?.lists?.map { song ->
-                            SongInfo(
-                                title = song.title, artist = song.artist,
-                                filePath = "${song.hash}|${song.album_audio_id}",
-                                albumArtUri = song.coverUrl, duration = song.Duration.toLong(),
-                                albumId = song.AlbumID?.toLongOrNull() ?: 0
-                            )
-                        } ?: emptyList()
-                        if (songs.isNotEmpty()) { searchResults = searchResults + songs; currentPage = nextPage }
-                        if (songs.size < 30) noMoreData = true
+                        if (searchSource == "netease") {
+                            // 网易云分页：offset = (页数-1) * limit
+                            val resp = NeteaseApi.service.search(currentQuery, limit = 30, offset = (nextPage - 1) * 30, type = 1)
+                            val songs = resp.result?.songs?.map { it.toSongInfo() } ?: emptyList()
+                            if (songs.isNotEmpty()) { searchResults = searchResults + songs; currentPage = nextPage }
+                            if (songs.size < 30) noMoreData = true
+                        } else {
+                            val resp = KuGouApi.service.search(currentQuery, page = nextPage, pageSize = 30, type = selectedType)
+                            val songs = resp.data?.lists?.map { song ->
+                                SongInfo(
+                                    title = song.title, artist = song.artist,
+                                    filePath = "${song.hash}|${song.album_audio_id}",
+                                    albumArtUri = song.coverUrl, duration = song.Duration.toLong(),
+                                    albumId = song.AlbumID?.toLongOrNull() ?: 0
+                                )
+                            } ?: emptyList()
+                            if (songs.isNotEmpty()) { searchResults = searchResults + songs; currentPage = nextPage }
+                            if (songs.size < 30) noMoreData = true
+                        }
                     }
                 }
             } catch (_: Exception) {}
@@ -625,6 +730,28 @@ fun SearchPage(
         }
     }
 
+    // 切换音源：保存状态，网易云模式只支持单曲，已有搜索词则立即用新音源重搜
+    fun switchSource(source: String) {
+        if (source == searchSource) return
+        searchSource = source
+        onSourceChange(source)
+        if (source == "netease" && selectedType != "song") {
+            selectedType = "song"
+            onSelectedTypeChange("song")
+        }
+        if (currentQuery.isNotBlank()) {
+            doSearch(currentQuery, "song")
+        } else {
+            searchResults = emptyList()
+            playlistResults = emptyList()
+            authorResults = emptyList()
+            albumResults = emptyList()
+            mvResults = emptyList()
+            noMoreData = false
+            hasSearched = false
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         // 搜索类型 Tab（搜索后显示，平滑展开/收起）
         AnimatedVisibility(
@@ -632,24 +759,37 @@ fun SearchPage(
             enter = expandVertically(tween(250, easing = FastOutSlowInEasing)) + fadeIn(tween(250)),
             exit = shrinkVertically(tween(200, easing = FastOutSlowInEasing)) + fadeOut(tween(180))
         ) {
-            val types = listOf("song" to "单曲", "special" to "歌单", "author" to "歌手", "album" to "专辑", "mv" to "MV")
-            ScrollableTabRow(
-                selectedTabIndex = types.indexOfFirst { it.first == selectedType }.coerceAtLeast(0),
+            // 网易云模式本轮仅支持单曲搜索
+            val types = if (searchSource == "netease") listOf("song" to "单曲")
+            else listOf("song" to "单曲", "special" to "歌单", "author" to "歌手", "album" to "专辑", "mv" to "MV")
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                containerColor = Color.Transparent,
-                edgePadding = 8.dp
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                types.forEach { (type, label) ->
-                    Tab(
-                        selected = selectedType == type,
-                        onClick = {
-                            focusManager.clearFocus(force = true)
-                            keyboardController?.hide()
-                            selectedType = type
-                            onSelectedTypeChange(type)
-                            if (currentQuery.isNotBlank()) doSearch(currentQuery, type)
-                        },
-                        text = { Text(label, fontSize = 13.sp) }
+                ScrollableTabRow(
+                    selectedTabIndex = types.indexOfFirst { it.first == selectedType }.coerceAtLeast(0),
+                    modifier = Modifier.weight(1f),
+                    containerColor = Color.Transparent,
+                    edgePadding = 8.dp
+                ) {
+                    types.forEach { (type, label) ->
+                        Tab(
+                            selected = selectedType == type,
+                            onClick = {
+                                focusManager.clearFocus(force = true)
+                                keyboardController?.hide()
+                                selectedType = type
+                                onSelectedTypeChange(type)
+                                if (currentQuery.isNotBlank()) doSearch(currentQuery, type)
+                            },
+                            text = { Text(label, fontSize = 13.sp) }
+                        )
+                    }
+                }
+                Box(modifier = Modifier.padding(end = 12.dp)) {
+                    MusicSourceSwitcher(
+                        searchSource = searchSource,
+                        onSourceChange = { switchSource(it) }
                     )
                 }
             }

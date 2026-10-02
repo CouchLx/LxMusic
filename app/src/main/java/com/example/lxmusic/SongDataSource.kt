@@ -27,6 +27,56 @@ class SongDataSource : DataSource {
 
     override fun open(dataSpec: DataSpec): Long {
         val uri = dataSpec.uri
+        if (uri.scheme == "netease") {
+            // netease://<songId> -> 网易云歌曲：调网易云 API 获取真实播放 URL
+            val songId = (uri.schemeSpecificPart ?: "").removePrefix("//").toLongOrNull() ?: 0L
+            if (songId <= 0) {
+                throw java.io.IOException("无效的网易云歌曲地址: $uri")
+            }
+            val playUrl = runBlocking {
+                var resultUrl: String? = null
+                try {
+                    for ((idx, level) in NeteaseApi.qualityLevels().withIndex()) {
+                        val resp = NeteaseApi.service.getSongUrl(songId, level)
+                        val data = resp.data?.firstOrNull()
+                        val url = data?.url
+                        if (!url.isNullOrBlank()) {
+                            if (data.isTrial) {
+                                android.util.Log.w("LxMusic", "SongDataSource: 网易云歌曲为试听片段 id=$songId level=$level")
+                            }
+                            // 复用酷狗音质徽章字段（PlayerStage 读取），按 level 估算码率
+                            KuGouApi.lastBitRate = NeteaseApi.bitrateOf(level)
+                            KuGouApi.lastExtName = data.type
+                            lastTimeLength = 0
+                            android.util.Log.d("LxMusic", "SongDataSource: 网易云 id=$songId, level=$level, type=${data.type}")
+                            resultUrl = url
+                            break
+                        }
+                        android.util.Log.d("LxMusic", "SongDataSource: 网易云 id=$songId level=$level 不可用, 尝试下一档")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("LxMusic", "SongDataSource: 网易云获取URL失败", e)
+                }
+                resultUrl
+            }
+            if (playUrl.isNullOrBlank()) {
+                android.util.Log.e("LxMusic", "SongDataSource: 无法获取网易云播放地址 id=$songId")
+                throw java.io.IOException("无法获取网易云歌曲播放地址: $songId")
+            }
+            val innerSource = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                .setConnectTimeoutMs(15000)
+                .setReadTimeoutMs(15000)
+                .setAllowCrossProtocolRedirects(true)
+                .createDataSource()
+            val innerSpec = DataSpec.Builder()
+                .setUri(playUrl)
+                .setPosition(dataSpec.position)
+                .setLength(dataSpec.length)
+                .setKey(dataSpec.key)
+                .build()
+            inner = innerSource
+            return innerSource.open(innerSpec)
+        }
         if (uri.scheme == "song") {
             // song://hash|album_audio_id -> 去掉可能的 "//" 前缀
             val path = (uri.schemeSpecificPart ?: "").removePrefix("//")

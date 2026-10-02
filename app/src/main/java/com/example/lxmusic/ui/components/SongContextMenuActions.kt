@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import com.example.lxmusic.CollectedSongEntity
 import com.example.lxmusic.KuGouApi
 import com.example.lxmusic.MusicDatabase
+import com.example.lxmusic.NeteaseApi
 import com.example.lxmusic.PlaylistSongCrossRef
 import com.example.lxmusic.UserPlaylistEntity
 import com.example.lxmusic.UserPlaylistItem
@@ -90,6 +91,8 @@ fun SongContextMenuActions(
     var kugouLikeTick by remember { mutableStateOf(0) }
 
     fun getFilePath(): String? {
+        // 网易云歌曲：netease://<id> 直接作为本地收藏/喜欢键
+        if (NeteaseApi.isNeteasePath(song.filePath)) return song.filePath
         val parts = song.filePath.split("|")
         val hash = parts.getOrElse(0) { "" }
         val audioId = parts.getOrElse(1) { "0" }.toLongOrNull() ?: 0L
@@ -98,6 +101,20 @@ fun SongContextMenuActions(
     }
 
     fun saveSongEntity(): CollectedSongEntity? {
+        // 网易云歌曲：filePath 直通，hash 为空（播放走 netease:// URI，不依赖酷狗 hash）
+        if (NeteaseApi.isNeteasePath(song.filePath)) {
+            return CollectedSongEntity(
+                filePath = song.filePath,
+                title = song.title,
+                artist = song.artist,
+                albumArtUri = song.albumArtUri,
+                duration = song.duration,
+                hash = "",
+                audioId = 0,
+                albumId = song.albumId,
+                mixsongid = song.mixsongid
+            )
+        }
         val parts = song.filePath.split("|")
         val hash = parts.getOrElse(0) { "" }
         val audioId = parts.getOrElse(1) { "0" }.toLongOrNull() ?: 0L
@@ -115,7 +132,8 @@ fun SongContextMenuActions(
         )
     }
 
-    // 生成歌单-歌曲关联数据：本地歌曲存绝对路径（离线可播+歌词），网络歌曲存 hash|audioId
+    // 生成歌单-歌曲关联数据：本地歌曲存绝对路径（离线可播+歌词），网络歌曲存 hash|audioId，
+    // 网易云歌曲存 netease://<id>（播放走 netease:// URI）
     fun buildPlaylistCrossRef(playlistId: Long): PlaylistSongCrossRef? {
         if (song.filePath.startsWith("/")) {
             return PlaylistSongCrossRef(
@@ -125,6 +143,21 @@ fun SongContextMenuActions(
                 artist = song.artist,
                 albumArtUri = song.albumArtUri,
                 duration = song.duration,
+                lyrics = song.lyrics
+            )
+        }
+        if (NeteaseApi.isNeteasePath(song.filePath)) {
+            return PlaylistSongCrossRef(
+                playlistId = playlistId,
+                songFilePath = song.filePath,
+                title = song.title,
+                artist = song.artist,
+                albumArtUri = song.albumArtUri,
+                duration = song.duration,
+                hash = "",
+                audioId = 0,
+                albumId = song.albumId,
+                mixsongid = song.mixsongid,
                 lyrics = song.lyrics
             )
         }
@@ -150,7 +183,8 @@ fun SongContextMenuActions(
     var isCollected by remember { mutableStateOf(false) }
     LaunchedEffect(song.filePath, favoriteToKugou, syncLocalFavorite, kugouLikeTick) {
         val fp = getFilePath() ?: return@LaunchedEffect
-        if (favoriteToKugou) {
+        // 网易云歌曲无官方同步，跳过酷狗「喜欢」查询，只查本地
+        if (favoriteToKugou && !NeteaseApi.isNeteasePath(song.filePath)) {
             // 官方模式：本地「喜欢镜像」先写即亮；酷狗官方喜欢的也亮；本地“我的收藏”忽略
             isCollected = if (KuGouApi.token.isNotBlank() && KuGouApi.userid.isNotBlank()) {
                 val liked = withContext(Dispatchers.IO) { KuGouApi.isSongLikedKugou(fp) }
@@ -245,7 +279,9 @@ fun SongContextMenuActions(
         onClick = {
             scope.launch(Dispatchers.IO) {
                 val fp = getFilePath() ?: return@launch
-                if (favoriteToKugou) {
+                // 网易云歌曲无官方同步，一律走本地收藏
+                val isNeteaseSong = NeteaseApi.isNeteasePath(song.filePath)
+                if (favoriteToKugou && !isNeteaseSong) {
                     // 本地先写「喜欢镜像」（立即可见、不消失），酷狗后台慢慢同步；
                     // “同步到本地收藏”开启时再额外复制一份到本地“我的收藏”
                     val target = !isCollected
@@ -326,8 +362,8 @@ fun SongContextMenuActions(
     }
     }
 
-    // 添加到歌单（酷狗模式时走酷狗歌单多选+新建；showOnlyPlaylistAdd 时固定显示收藏页面的本地歌单）
-    val useKugouPlaylist = favoriteToKugou && !showOnlyPlaylistAdd
+    // 添加到歌单（酷狗模式时走酷狗歌单多选+新建；showOnlyPlaylistAdd 时固定显示收藏页面的本地歌单；网易云歌曲走本地歌单）
+    val useKugouPlaylist = favoriteToKugou && !showOnlyPlaylistAdd && !NeteaseApi.isNeteasePath(song.filePath)
     Surface(
         onClick = {
             if (useKugouPlaylist) {
