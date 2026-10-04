@@ -16,8 +16,10 @@ class AutoParser(
     private val fallbackPhoneticProvider: PhoneticProvider? = null,
     private val parsers: List<ILyricsParser> = listOf(
         TTMLParser(fallbackPhoneticProvider = fallbackPhoneticProvider),
-        NeteaseYrcParser,
+        // QRC 必须排在 YRC 之前：YRC 的 canParse 只查行头 [num,num] + '('，
+        // 二元组 QRC 行同样命中，放后面会导致 QRCParser 永远轮不到
         com.example.lxmusic.ui.lyrics.QRCParser,
+        NeteaseYrcParser,
         LyricifySyllableParser,
         EnhancedLrcParser,
         KugouKrcParser,

@@ -23,6 +23,9 @@ object LyricRepository {
     // 内存 LruCache（保留最近 200 首歌的歌词，0ms 响应）
     private val memoryCache = LruCache<String, String>(200)
 
+    // 翻译内存缓存（进程内；主歌词已持久化，翻译体积小走内存即可）
+    private val translationMemory = LruCache<String, String>(200)
+
     fun getCacheKey(song: SongInfo): String {
         val isNetease = NeteaseApi.isNeteasePath(song.filePath)
         if (isNetease) {
@@ -45,6 +48,19 @@ object LyricRepository {
     fun getMemoryCachedLyric(song: SongInfo): String? {
         val key = getCacheKey(song)
         return memoryCache.get(key)
+    }
+
+    /**
+     * 读取翻译内存缓存（LRC 文本，供逐字歌词视图的 translatedLyrics 管线）
+     */
+    fun getTranslationMemory(song: SongInfo): String? {
+        return translationMemory.get(getCacheKey(song))
+    }
+
+    private fun putTranslationMemory(song: SongInfo, text: String) {
+        if (text.isNotBlank()) {
+            translationMemory.put(getCacheKey(song), text)
+        }
     }
 
     private fun getDiskFile(context: Context, key: String): File {
@@ -102,6 +118,8 @@ object LyricRepository {
             if (NeteaseApi.isNeteasePath(song.filePath)) {
                 val id = NeteaseApi.neteaseSongIdOf(song.filePath) ?: return@withContext null
                 val lyricResp = NeteaseApi.service.getLyric(id)
+                // 顺带缓存网易云翻译（tlyric），翻译通路 0 额外请求
+                lyricResp.tlyric?.lyric?.takeIf { it.isNotBlank() }?.let { putTranslationMemory(song, it) }
                 val yrc = lyricResp.yrc?.lyric
                 if (!yrc.isNullOrBlank()) return@withContext yrc
                 val lrc = lyricResp.lrc?.lyric
@@ -143,11 +161,12 @@ object LyricRepository {
                 val lyricResp = NeteaseApi.service.getLyric(id)
                 val yrc = lyricResp.yrc?.lyric
                 if (!yrc.isNullOrBlank()) return@withContext yrc
-                // 3. QQ 音乐 QRC 逐字库（全网最全逐字）
+                // 3. QQ 音乐 QRC 逐字库（全网最全逐字），顺带回填 QQ trans 翻译
                 val qqQrc = com.example.lxmusic.data.qq.QQMusicApi.searchAndFetchBestQrc(
                     title = song.title,
                     artist = song.artist,
-                    durationMs = song.duration
+                    durationMs = song.duration,
+                    onTranslation = { putTranslationMemory(song, it) }
                 )
                 if (!qqQrc.isNullOrBlank()) return@withContext qqQrc
                 // 4. 网易云普通 LRC 兜底
@@ -163,17 +182,51 @@ object LyricRepository {
                 if (!result.isNullOrBlank() && (isTtmlLyrics(result) || isNeteaseYrc(result))) {
                     return@withContext result
                 }
-                // 若网易云与 AMLL 均无逐字，由 QQ 音乐 QRC 兜底
+                // 若网易云与 AMLL 均无逐字，由 QQ 音乐 QRC 兜底（顺带回填翻译）
                 val qqQrc = com.example.lxmusic.data.qq.QQMusicApi.searchAndFetchBestQrc(
                     title = song.title,
                     artist = song.artist,
-                    durationMs = song.duration
+                    durationMs = song.duration,
+                    onTranslation = { putTranslationMemory(song, it) }
                 )
                 if (!qqQrc.isNullOrBlank()) return@withContext qqQrc
                 result
             }
         } catch (e: Exception) {
             Log.w(TAG, "fetchAmllLyric failed: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * 翻译兜底通路：主歌词已缓存（逐字命中、A/B 通路被跳过）时补拉翻译。
+     * 网易云走 tlyric；酷狗/本地走 QQ 搜索通路只取 trans。
+     */
+    suspend fun fetchTranslation(song: SongInfo): String? = withContext(Dispatchers.IO) {
+        getTranslationMemory(song)?.let { return@withContext it }
+        try {
+            if (NeteaseApi.isNeteasePath(song.filePath)) {
+                val id = NeteaseApi.neteaseSongIdOf(song.filePath) ?: return@withContext null
+                val lyricResp = NeteaseApi.service.getLyric(id)
+                val t = lyricResp.tlyric?.lyric
+                if (!t.isNullOrBlank()) {
+                    putTranslationMemory(song, t)
+                    return@withContext t
+                }
+                null
+            } else {
+                val (_, trans) = com.example.lxmusic.data.qq.QQMusicApi.searchAndFetchLyricWithTranslation(
+                    title = song.title,
+                    artist = song.artist,
+                    durationMs = song.duration
+                )
+                if (!trans.isNullOrBlank()) {
+                    putTranslationMemory(song, trans)
+                    trans
+                } else null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "fetchTranslation failed: ${e.message}")
             null
         }
     }

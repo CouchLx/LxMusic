@@ -35,7 +35,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import androidx.palette.graphics.Palette
-import coil.ImageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import kotlinx.coroutines.Dispatchers
@@ -54,7 +53,9 @@ import kotlinx.coroutines.withContext
 fun FluidAmbientBackground(
     coverModel: Any?,
     playing: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // 应用级 loader（带 AudioArtFetcher）：全局 Coil 默认 loader 解不了本地音频内嵌封面
+    imageLoader: coil.ImageLoader = coil.compose.LocalImageLoader.current
 ) {
     val context = LocalContext.current
     val isDark = isSystemInDarkTheme()
@@ -84,7 +85,8 @@ fun FluidAmbientBackground(
         if (coverModel == null) return@LaunchedEffect
         withContext(Dispatchers.IO) {
             try {
-                val loader = ImageLoader(context)
+                // 复用组合级单例：每封面 new ImageLoader 会泄漏独立线程池与内存缓存
+                val loader = imageLoader
                 val request = ImageRequest.Builder(context)
                     .data(coverModel)
                     .size(200)

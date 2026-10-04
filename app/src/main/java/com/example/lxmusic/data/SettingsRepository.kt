@@ -39,6 +39,7 @@ class SettingsRepository(context: Context) {
         const val PLAYER_BG_ENHANCE = "player_bg_enhance"
         const val PLAYER_HYPER_BG = "player_hyper_bg"
         const val PLAYER_FLUID_AMBIENT_BG = "player_fluid_ambient_bg"
+        const val PLAYER_MESH_BG = "player_mesh_bg"
         const val PLAYER_WAVEFORM_SLIDER = "player_waveform_slider"
         // 逐字歌词动效：当前行逐字点亮（关闭=整行高亮，其余样式不变）
         const val PLAYER_LYRICS_WORD_EFFECT = "player_lyrics_word_effect"
@@ -339,6 +340,16 @@ class SettingsRepository(context: Context) {
         }
     private var _playerFluidAmbientBg: Boolean by mutableStateOf(
         prefs.getBoolean(Keys.PLAYER_FLUID_AMBIENT_BG, false)
+    )
+
+    var playerMeshBg: Boolean
+        get() = _playerMeshBg
+        set(value) {
+            _playerMeshBg = value
+            prefs.edit().putBoolean(Keys.PLAYER_MESH_BG, value).apply()
+        }
+    private var _playerMeshBg: Boolean by mutableStateOf(
+        prefs.getBoolean(Keys.PLAYER_MESH_BG, false)
     )
 
     var playerWaveformSlider: Boolean

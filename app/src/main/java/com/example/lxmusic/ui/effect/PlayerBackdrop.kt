@@ -2,7 +2,7 @@ package com.example.lxmusic.ui.effect
 
 /*
  * 播放器共享背景层：播放页与全屏歌词页复用同一背景渲染，
- * 5 种互斥模式：封面模糊背景 / 流体动态背景(Hyper) / Mesh 渐变 / 动态渐变 / 应用背景图片
+ * 6 种互斥模式：MeiloX 网格渐变 / 封面模糊背景 / 流体动态背景(Hyper) / 灵动流体光场 / 动态渐变 / 应用背景图片
  */
 
 import androidx.compose.foundation.Image
@@ -38,6 +38,7 @@ fun PlayerBackdrop(
     backgroundEnhance: Boolean,
     playerHyperBg: Boolean,
     playerFluidAmbientBg: Boolean = false,
+    playerMeshBg: Boolean = false,
     playerAudioReactive: Boolean,
     // 页面顶偏移提供器（px）：流体 View 绘制裁剪到页面覆盖范围（防松手瞬间占满）
     hyperClipTopProvider: (() -> Float)? = null,
@@ -79,8 +80,18 @@ fun PlayerBackdrop(
                 .fillMaxSize()
                 .background(backgroundColor)
         )
+        // MeiloX 网格渐变背景（GL 网格 + 封面取色 + 频谱律动，最高优先级）
+        if (playerMeshBg) {
+            FluidMeshBackground(
+                coverModel = coverModel,
+                playing = playing,
+                imageLoader = imageLoader,
+                fallbackColors = dynamicBgColors,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
         // 封面模糊背景（与流体/动态渐变/图片互斥）
-        if (playerCoverBlurBg) {
+        else if (playerCoverBlurBg) {
             Image(
                 painter = albumPainter,
                 contentDescription = null,
@@ -111,11 +122,12 @@ fun PlayerBackdrop(
             FluidAmbientBackground(
                 coverModel = coverModel,
                 playing = playing,
+                imageLoader = imageLoader,
                 modifier = Modifier.fillMaxSize()
             )
         }
         // 动态渐变背景（与背景图片互斥，随专辑旋转流动）
-        if (!playerHyperBg && !playerCoverBlurBg && !playerFluidAmbientBg && dynamicBackground) {
+        if (!playerMeshBg && !playerHyperBg && !playerCoverBlurBg && !playerFluidAmbientBg && dynamicBackground) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -125,7 +137,7 @@ fun PlayerBackdrop(
                     )
             )
         }
-        if (!playerHyperBg && !playerCoverBlurBg && !playerFluidAmbientBg && !dynamicBackground &&
+        if (!playerMeshBg && !playerHyperBg && !playerCoverBlurBg && !playerFluidAmbientBg && !dynamicBackground &&
             backgroundEnhance
         ) {
             // 使用应用设置中的背景图片

@@ -22,12 +22,31 @@ package com.example.lxmusic.ui.lyrics
  * File: moe.ouom.neriplayer.ui.component.lyrics/SyncedLyricsView (parsers)
  */
 
-private val NeteaseYrcLineRegex = Regex("""\[\d{1,19},\s*\d{1,19}]\(\d{1,19},""")
+// YRC 音节固定为三元组 (start,dur,0)；二元组 (start,dur) 是 QQ QRC 格式，
+// 收紧到此可避免原始 QRC 文本被误判成 YRC 而解析出带时间戳的乱码
+private val NeteaseYrcLineRegex = Regex("""\[\d{1,19},\s*\d{1,19}]\(\d{1,19},\s*\d{1,19},\s*-?\d+""")
 private val LrcCreditLineRegex = Regex(
     """^(?:作词|作曲|编曲|填词|演唱|歌手|混音|母带|制作|监制|录音|和声|配唱|吉他(?:solo)?|贝斯|鼓|键盘|弦乐|vo(?:/mix)?|mix|tune|inst|guitar|bass|drums?|vocal|lyrics|music|arrangement|produced)\s*[:：]""",
     RegexOption.IGNORE_CASE
 )
 private val LegacyLrcTimestampRegex = Regex("""\[(\d{1,2}):(\d{2}):(\d{2,3})]""")
+
+// 音源在无歌词歌曲的歌词内容里自带的占位行（如网易云 lrc 的
+// "此歌曲为没有填词的纯音乐，请您欣赏"），不是真实歌词：解析时剔除，
+// 否则会先当歌词显示、等 AMLL/QQ 通道找到真歌词后又被顶掉（先显示后变歌词）
+private val InstrumentalPlaceholderRegex = Regex("""^(纯音乐|此歌曲为[^。]*纯音乐)\s*[,，]?\s*请?欣赏?[。.]?$""")
+
+fun isInstrumentalPlaceholderLine(text: String): Boolean {
+    val trimmed = text.trim()
+    if (trimmed.isEmpty()) return false
+    return trimmed.contains("没有填词的纯音乐") || InstrumentalPlaceholderRegex.matches(trimmed)
+}
+
+fun hasInstrumentalPlaceholder(content: String): Boolean {
+    if (content.isBlank()) return false
+    if (content.contains("没有填词的纯音乐")) return true
+    return content.lineSequence().any { isInstrumentalPlaceholderLine(it) }
+}
 
 private data class LrcTimelineEntry(
     val startTimeMs: Long,
@@ -79,13 +98,14 @@ fun parseTtmlToLyricEntries(ttml: String): List<LyricEntry> {
 }
 
 fun parseNeteaseLyricsAuto(content: String): List<LyricEntry> {
-    return when {
+    val entries = when {
         isTtmlLyrics(content) -> parseTtmlToLyricEntries(content).takeIf { it.isNotEmpty() }
             ?: runCatching { parseNeteaseYrc(content) }.getOrDefault(emptyList())
         isNeteaseYrc(content) -> runCatching { parseNeteaseYrc(content) }.getOrDefault(emptyList())
         isQrcLyrics(content) -> runCatching { QRCParser.parseToLyricEntries(content) }.getOrDefault(emptyList())
         else -> parseNeteaseLrc(content)
     }
+    return entries.filterNot { isInstrumentalPlaceholderLine(it.text) }
 }
 
 /**
@@ -111,6 +131,7 @@ fun parseNeteaseYrc(yrc: String): List<LyricEntry> {
         val segs = segRegex.findAll(line).toList()
         if (segs.isEmpty()) {
             val text = line.substringAfter("]").trim()
+            if (isInstrumentalPlaceholderLine(text)) return@forEach
             out.add(LyricEntry(text = text, startTimeMs = start, endTimeMs = end, words = null))
         } else {
             val words = mutableListOf<WordTiming>()
@@ -123,9 +144,11 @@ fun parseNeteaseYrc(yrc: String): List<LyricEntry> {
                 sb.append(t)
                 words.add(WordTiming(ws, we, charCount = t.length))
             }
+            val text = sb.toString()
+            if (isInstrumentalPlaceholderLine(text)) return@forEach
             out.add(
                 LyricEntry(
-                    text = sb.toString(),
+                    text = text,
                     startTimeMs = start,
                     endTimeMs = end,
                     words = words
@@ -162,6 +185,7 @@ fun parseNeteaseLrc(lrc: String): List<LyricEntry> {
         }
         val time = mm * 60_000L + ss * 1_000L + ms
         val text = line.substring(m.range.last + 1).trim()
+        if (isInstrumentalPlaceholderLine(text)) return@forEach // 音源占位行不是歌词
         timeline.add(LrcTimelineEntry(startTimeMs = time, text = text))
     }
 

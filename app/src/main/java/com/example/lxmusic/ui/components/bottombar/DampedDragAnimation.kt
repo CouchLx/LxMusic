@@ -108,11 +108,13 @@ class DampedDragAnimation(
             mutatorMutex.mutate {
                 press()
                 val targetVal = value.coerceIn(valueRange)
-                val job = launch { valueAnimation.animateTo(targetVal, valueAnimationSpec) }
+                launch { valueAnimation.animateTo(targetVal, valueAnimationSpec) }
                 if (velocity != 0f) {
                     launch { velocityAnimation.animateTo(0f, velocityAnimationSpec) }
                 }
-                job.join()
+                // release 必须与滑动动画重叠发起：其内部等指示器进入行程末段(2.5%)才开始
+                // 回弹水滴形变，形成“落定”的连贯感。若等弹簧完全收敛(join)再 release，
+                // 水滴会在整个滑动过程中保持按压状态，体感时长约翻倍（对齐 MeiloX）。
                 release()
             }
         }

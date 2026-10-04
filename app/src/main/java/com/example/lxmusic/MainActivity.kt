@@ -686,6 +686,11 @@ fun AppScaffold(
     }
     var onlineLyrics by remember(currentSong?.filePath) { mutableStateOf(initialCachedLyric) }
 
+    // 翻译（LRC 文本，来自网易云 tlyric / QQ trans）：独立于主歌词的内存通路
+    var onlineTranslationText by remember(currentSong?.filePath) {
+        mutableStateOf(currentSong?.let { com.example.lxmusic.data.LyricRepository.getTranslationMemory(it) })
+    }
+
     LaunchedEffect(currentSong?.filePath) {
         val song = currentSong ?: return@LaunchedEffect
 
@@ -699,13 +704,28 @@ fun AppScaffold(
             com.example.lxmusic.data.LyricRepository.preload(context, prev1)
         }
 
-        // 2. 若已有最高精度逐字歌词（TTML、YRC 或 QRC），无需重复发起网络拉取
+        // 2. 若已有最高精度逐字歌词（TTML、YRC 或 QRC），无需重复发起网络拉取；
+        //    但翻译仍要补拉（翻译不落盘，重启后内存为空）
         val currentHasVerbatim = !onlineLyrics.isNullOrBlank() && (
             com.example.lxmusic.ui.lyrics.isTtmlLyrics(onlineLyrics!!) ||
             com.example.lxmusic.ui.lyrics.isNeteaseYrc(onlineLyrics!!) ||
             com.example.lxmusic.ui.lyrics.isQrcLyrics(onlineLyrics!!)
         )
-        if (currentHasVerbatim) return@LaunchedEffect
+        if (currentHasVerbatim) {
+            if (onlineTranslationText == null) {
+                launch(Dispatchers.IO) {
+                    val t = runCatching {
+                        com.example.lxmusic.data.LyricRepository.fetchTranslation(song)
+                    }.getOrNull()
+                    if (!t.isNullOrBlank()) {
+                        withContext(Dispatchers.Main) {
+                            if (onlineTranslationText == null) onlineTranslationText = t
+                        }
+                    }
+                }
+            }
+            return@LaunchedEffect
+        }
 
         // 3. 双通路并发拉取（Native 极速通道 ~150ms 先顶上 + 高画质逐字通道平滑升级）
         kotlinx.coroutines.coroutineScope {
@@ -718,6 +738,11 @@ fun AppScaffold(
                             // 仅当当前还没有获取到更高规格的逐字时先展示原生歌词
                             if (onlineLyrics == null || (!com.example.lxmusic.ui.lyrics.isTtmlLyrics(onlineLyrics!!) && !com.example.lxmusic.ui.lyrics.isNeteaseYrc(onlineLyrics!!) && !com.example.lxmusic.ui.lyrics.isQrcLyrics(onlineLyrics!!))) {
                                 onlineLyrics = nativeContent
+                            }
+                            // fetchNativeLyric 顺带缓存了 tlyric，回填翻译
+                            if (onlineTranslationText == null) {
+                                onlineTranslationText =
+                                    com.example.lxmusic.data.LyricRepository.getTranslationMemory(song)
                             }
                         }
                         com.example.lxmusic.data.LyricRepository.putCachedLyric(context, song, nativeContent)
@@ -732,6 +757,11 @@ fun AppScaffold(
                     if (!bestVerbatim.isNullOrBlank()) {
                         withContext(Dispatchers.Main) {
                             onlineLyrics = bestVerbatim
+                            // QQ 通路在 fetchAmllLyric 内经 onTranslation 回填了翻译
+                            if (onlineTranslationText == null) {
+                                onlineTranslationText =
+                                    com.example.lxmusic.data.LyricRepository.getTranslationMemory(song)
+                            }
                         }
                         com.example.lxmusic.data.LyricRepository.putCachedLyric(context, song, bestVerbatim)
                     }
@@ -745,6 +775,12 @@ fun AppScaffold(
         !currentSongLyrics.isNullOrBlank() && (com.example.lxmusic.ui.lyrics.isTtmlLyrics(currentSongLyrics) || com.example.lxmusic.ui.lyrics.isNeteaseYrc(currentSongLyrics) || com.example.lxmusic.ui.lyrics.isQrcLyrics(currentSongLyrics)) -> currentSongLyrics
         !onlineLyrics.isNullOrBlank() -> onlineLyrics
         else -> currentSongLyrics
+    }
+    // 翻译条目（±450ms 容差与主歌词行对齐，attachTranslations 消费）
+    val currentTranslationEntries = remember(onlineTranslationText) {
+        onlineTranslationText?.let { text ->
+            com.example.lxmusic.ui.lyrics.parseNeteaseLrc(text).takeIf { it.isNotEmpty() }
+        }
     }
     var showRankDetail by remember { mutableStateOf<RankItem?>(null) }
     var showLoginPage by rememberSaveable { mutableStateOf(false) }
@@ -859,6 +895,7 @@ fun AppScaffold(
     var playerBgEnhance by remember { mutableStateOf(settingsRepository.playerBgEnhance) }
     var playerHyperBg by remember { mutableStateOf(settingsRepository.playerHyperBg) }
     var playerFluidAmbientBg by remember { mutableStateOf(settingsRepository.playerFluidAmbientBg) }
+    var playerMeshBg by remember { mutableStateOf(settingsRepository.playerMeshBg) }
     var playerWaveformSlider by remember { mutableStateOf(settingsRepository.playerWaveformSlider) }
     var playerLyricsWordEffect by remember { mutableStateOf(settingsRepository.playerLyricsWordEffect) }
     var playerMeiloxLyrics by remember { mutableStateOf(settingsRepository.playerMeiloxLyrics) }
@@ -2189,6 +2226,11 @@ fun AppScaffold(
                                 playerFluidAmbientBg = enabled
                                 settingsRepository.playerFluidAmbientBg = enabled
                             },
+                            playerMeshBg = playerMeshBg,
+                            onPlayerMeshBgChange = { enabled ->
+                                playerMeshBg = enabled
+                                settingsRepository.playerMeshBg = enabled
+                            },
                             playerWaveformSlider = playerWaveformSlider,
                             onPlayerWaveformSliderChange = { enabled ->
                                 playerWaveformSlider = enabled
@@ -2658,6 +2700,7 @@ fun AppScaffold(
                         backgroundEnhance = playerBgEnhance,
                         playerHyperBg = playerHyperBg,
                         playerFluidAmbientBg = playerFluidAmbientBg,
+                        playerMeshBg = playerMeshBg,
                         playerAudioReactive = playerAudioReactive,
                         hyperClipTopProvider = { hyperClipTopPx.floatValue },
                         playerCoverBlurBg = playerCoverBlurBg,
@@ -2790,9 +2833,11 @@ fun AppScaffold(
                         playerBgEnhance = playerBgEnhance,
                         playerHyperBg = playerHyperBg,
                         playerFluidAmbientBg = playerFluidAmbientBg,
+                        playerMeshBg = playerMeshBg,
                         playerCoverBlurBg = playerCoverBlurBg,
                         playerLyricsWordEffect = playerLyricsWordEffect,
                         playerMeiloxLyrics = playerMeiloxLyrics,
+                        translatedLyrics = currentTranslationEntries,
                         playerWaveformSlider = playerWaveformSlider,
                         playerLyricsSeekPreview = playerLyricsSeekPreview,
                         playerLyricBlur = playerLyricBlur,

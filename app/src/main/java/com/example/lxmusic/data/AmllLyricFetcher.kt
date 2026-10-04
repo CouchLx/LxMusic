@@ -42,7 +42,7 @@ object AmllLyricFetcher {
         if (id <= 0) return@withContext null
         val mirrors = listOf(
             "https://amlldb.bikonoo.com/ncm-lyrics/$id.ttml",
-            "https://cdn.jsdelivr.net/gh/amll-dev/amll-ttml-db@main/ncm-lyrics/$id.ttml"
+            "https://cdn.jsdelivr.net/gh/Steve-xmh/amll-ttml-db@main/ncm-lyrics/$id.ttml"
         )
         for (url in mirrors) {
             try {

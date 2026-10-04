@@ -23,6 +23,7 @@ import android.os.SystemClock
 import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.core.app.NotificationCompat
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.Player
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
@@ -35,6 +36,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.DefaultMediaNotificationProvider
 import com.example.lxmusic.util.AudioReactive
+import com.example.lxmusic.util.MeshSpectrumProvider
 import com.example.lxmusic.util.PlaybackVolumeBalanceState
 import com.example.lxmusic.util.PlaybackVolumeNormalizationState
 import com.example.lxmusic.util.StereoBalanceAudioProcessor
@@ -396,10 +398,11 @@ class PlayerService : MediaSessionService() {
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParams: Boolean
             ): androidx.media3.exoplayer.audio.AudioSink {
-                // 处理链：响度均衡 → 声道平衡 → 可视化 Tee（分流 PCM 到 AudioReactive 驱动背景律动）
+                // 处理链：响度均衡 → 声道平衡 → 可视化 Tee
+                // （分流 PCM 到 AudioReactive 音量/鼓点 + MeshSpectrumProvider 三频段频谱）
                 val volumeNormalization = VolumeNormalizationAudioProcessor()
                 val balance = StereoBalanceAudioProcessor()
-                val tee = TeeAudioProcessor(AudioReactive.teeSink)
+                val tee = TeeAudioProcessor(MeshSpectrumProvider.pcmSink)
                 val delegate = DefaultAudioSink.Builder(context)
                     .setAudioProcessors(
                         arrayOf<AudioProcessor>(volumeNormalization, balance, tee)
@@ -443,7 +446,14 @@ class PlayerService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        mediaSession = MediaSession.Builder(this, player)
+        // 会话侧播放器：改写 seekToPrevious 的 Media3 默认语义（3 秒后重播当前曲），
+        // 使通知栏/蓝牙耳机按键的"上一首"始终切上一曲，与 UI 端 playPrevious 一致
+        val sessionPlayer = object : ForwardingPlayer(player) {
+            override fun seekToPrevious() {
+                if (hasPreviousMediaItem()) seekToPreviousMediaItem() else seekTo(0, 0)
+            }
+        }
+        mediaSession = MediaSession.Builder(this, sessionPlayer)
             .setSessionActivity(pendingIntent)
             .build()
 

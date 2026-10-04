@@ -320,6 +320,8 @@ fun SettingsPage(
     onPlayerHyperBgChange: (Boolean) -> Unit = {},
     playerFluidAmbientBg: Boolean = false,
     onPlayerFluidAmbientBgChange: (Boolean) -> Unit = {},
+    playerMeshBg: Boolean = false,
+    onPlayerMeshBgChange: (Boolean) -> Unit = {},
     playerWaveformSlider: Boolean = false,
     onPlayerWaveformSliderChange: (Boolean) -> Unit = {},
     playerLyricsWordEffect: Boolean = true,
@@ -700,6 +702,8 @@ fun SettingsPage(
                         onPlayerHyperBgChange = onPlayerHyperBgChange,
                         playerFluidAmbientBg = playerFluidAmbientBg,
                         onPlayerFluidAmbientBgChange = onPlayerFluidAmbientBgChange,
+                        playerMeshBg = playerMeshBg,
+                        onPlayerMeshBgChange = onPlayerMeshBgChange,
                         playerCoverBlurBg = playerCoverBlurBg,
                         onPlayerCoverBlurBgChange = onPlayerCoverBlurBgChange,
                         playerCoverBlurAmount = playerCoverBlurAmount,
@@ -3680,6 +3684,8 @@ fun SettingsMotionContent(
     onPlayerHyperBgChange: (Boolean) -> Unit,
     playerFluidAmbientBg: Boolean,
     onPlayerFluidAmbientBgChange: (Boolean) -> Unit,
+    playerMeshBg: Boolean,
+    onPlayerMeshBgChange: (Boolean) -> Unit,
     playerCoverBlurBg: Boolean,
     onPlayerCoverBlurBgChange: (Boolean) -> Unit,
     playerCoverBlurAmount: Float,
@@ -3706,6 +3712,32 @@ fun SettingsMotionContent(
         )
         Spacer(modifier = Modifier.height(8.dp))
 
+        // MeiloX 网格渐变背景（移植自 MeiloX 旗舰动态背景：GL 网格 + 封面取色 + 频谱律动）
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            PlayerSettingSwitchRow(
+                title = "MeiloX 网格渐变",
+                subtitle = "封面取色驱动 GL 网格流体形变，随音乐鼓点律动（与其它背景互斥）",
+                checked = playerMeshBg,
+                onCheckedChange = { enabled ->
+                    onPlayerMeshBgChange(enabled)
+                    // 与「灵动流体背景」「流体动态背景」「封面模糊背景」「动态渐变背景」「应用背景图片」互斥
+                    if (enabled) {
+                        if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
+                        if (playerHyperBg) onPlayerHyperBgChange(false)
+                        if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
+                        if (playerDynamicBg) onPlayerDynamicBgChange(false)
+                        if (playerBgEnhance) onPlayerBgEnhanceChange(false)
+                    }
+                }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         // 灵动流体背景（仿 Apple Music 风格流体光场，多频有机流动与智能高饱和取色）
         Surface(
             shape = RoundedCornerShape(12.dp),
@@ -3718,8 +3750,9 @@ fun SettingsMotionContent(
                 checked = playerFluidAmbientBg,
                 onCheckedChange = { enabled ->
                     onPlayerFluidAmbientBgChange(enabled)
-                    // 与「流体动态背景」「封面模糊背景」「动态渐变背景」「应用背景图片」互斥
+                    // 与「MeiloX 网格渐变」「流体动态背景」「封面模糊背景」「动态渐变背景」「应用背景图片」互斥
                     if (enabled) {
+                        if (playerMeshBg) onPlayerMeshBgChange(false)
                         if (playerHyperBg) onPlayerHyperBgChange(false)
                         if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
                         if (playerDynamicBg) onPlayerDynamicBgChange(false)
@@ -3748,8 +3781,9 @@ fun SettingsMotionContent(
                 enabled = Build.VERSION.SDK_INT >= 33,
                 onCheckedChange = { enabled ->
                     onPlayerHyperBgChange(enabled)
-                    // 与「灵动流体背景」「动态渐变背景」「应用背景图片」「封面模糊背景」互斥
+                    // 与「MeiloX 网格渐变」「灵动流体背景」「动态渐变背景」「应用背景图片」「封面模糊背景」互斥
                     if (enabled) {
+                        if (playerMeshBg) onPlayerMeshBgChange(false)
                         if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
                         if (playerDynamicBg) onPlayerDynamicBgChange(false)
                         if (playerBgEnhance) onPlayerBgEnhanceChange(false)
@@ -3778,8 +3812,9 @@ fun SettingsMotionContent(
                 enabled = Build.VERSION.SDK_INT >= 31,
                 onCheckedChange = { enabled ->
                     onPlayerCoverBlurBgChange(enabled)
-                    // 与「灵动流体背景」「动态渐变背景」「应用背景图片」「流体动态背景」互斥
+                    // 与「MeiloX 网格渐变」「灵动流体背景」「动态渐变背景」「应用背景图片」「流体动态背景」互斥
                     if (enabled) {
+                        if (playerMeshBg) onPlayerMeshBgChange(false)
                         if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
                         if (playerDynamicBg) onPlayerDynamicBgChange(false)
                         if (playerBgEnhance) onPlayerBgEnhanceChange(false)

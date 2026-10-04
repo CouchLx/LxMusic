@@ -105,7 +105,7 @@ fun NeriAdvancedLyricsView(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "纯音乐，请欣赏",
+                text = "纯音乐",
                 style = TextStyle(
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Medium,

@@ -138,9 +138,9 @@ object QQMusicApi {
 
     /**
      * 拉取并解密指定 QQ 歌曲的 QRC / LRC 歌词
-     * @return 解密并转换为通用 YRC/逐字格式的歌词，如无逐字则回退解密后的普通 LRC
+     * @return (解密后的主歌词[已转通用 YRC 或 LRC], 解密后的 LRC 翻译)；无可用歌词时为 null
      */
-    suspend fun fetchLyric(candidate: QQCandidate): String? = withContext(Dispatchers.IO) {
+    suspend fun fetchLyric(candidate: QQCandidate): Pair<String, String?>? = withContext(Dispatchers.IO) {
         try {
             val payload = JsonObject().apply {
                 val comm = JsonObject().apply {
@@ -209,12 +209,16 @@ object QQMusicApi {
                     val yrc = QRCParser.qrcToYrc(decodedLyric)
                     if (yrc.isNotBlank()) {
                         Log.d(TAG, "Successfully matched & decoded QQ Music QRC for ${candidate.title}")
-                        return@withContext yrc
+                        return@withContext Pair(yrc, decodedTrans)
                     }
+                    // QRC 转换失败时不能漏出原始 QRC 文本：它会被 YRC 解析器
+                    // 解析成带时间戳的乱码并被缓存固化，宁可返回 null 走下一候选
+                    Log.w(TAG, "QRC -> YRC conversion failed for ${candidate.title}, skip")
+                    return@withContext null
                 }
 
-                // 否则返回普通解密后的 LRC
-                decodedLyric
+                // 否则返回普通解密后的 LRC（附翻译）
+                Pair(decodedLyric, decodedTrans)
             }
         } catch (e: Exception) {
             Log.w(TAG, "fetchLyric failed for ${candidate.id}: ${e.message}")
@@ -225,12 +229,28 @@ object QQMusicApi {
     /**
      * 智能跨平台搜索并拉取最佳 QRC 逐字歌词
      * 支持歌名清洗与时长容差（±6秒）匹配
+     * @param onTranslation 命中候选自带 LRC 翻译时回调（QQ trans，供翻译链路缓存）
      */
     suspend fun searchAndFetchBestQrc(
         title: String,
         artist: String,
+        durationMs: Long,
+        onTranslation: ((String) -> Unit)? = null
+    ): String? {
+        val (lyric, trans) = searchAndFetchLyricWithTranslation(title, artist, durationMs)
+        if (!trans.isNullOrBlank()) onTranslation?.invoke(trans)
+        return lyric
+    }
+
+    /**
+     * 搜索 + 拉取最佳候选的 (主歌词, 翻译)；
+     * 单独暴露是为了翻译兜底通路能只取 trans 而不复用主歌词。
+     */
+    suspend fun searchAndFetchLyricWithTranslation(
+        title: String,
+        artist: String,
         durationMs: Long
-    ): String? = withContext(Dispatchers.IO) {
+    ): Pair<String, String?> = withContext(Dispatchers.IO) {
         val rawTitle = title.trim()
         val cleanedTitle = cleanTitle(rawTitle)
         val cleanArtist = artist.takeIf { it != "未知艺术家" }?.trim().orEmpty()
@@ -259,12 +279,13 @@ object QQMusicApi {
             }
 
             for (cand in matchedCandidates.take(3)) {
-                val lyric = fetchLyric(cand)
-                if (!lyric.isNullOrBlank()) {
-                    return@withContext lyric
+                val result = fetchLyric(cand) ?: continue
+                val (lyric, trans) = result
+                if (lyric.isNotBlank()) {
+                    return@withContext Pair(lyric, trans)
                 }
             }
         }
-        null
+        Pair("", null)
     }
 }

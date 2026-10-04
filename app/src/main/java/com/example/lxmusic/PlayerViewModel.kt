@@ -327,12 +327,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         if (c.mediaItemCount == 0) return
         viewModelScope.launch {
             crossfadeToNext {
-                // 同 playNext：单曲循环下 seekToPrevious 也会重播当前曲目，临时切换模式
+                // 单曲循环下临时切顺序模式再切歌，随后恢复（同 playNext）
                 val prevRepeat = c.repeatMode
                 if (prevRepeat == Player.REPEAT_MODE_ONE) {
                     c.repeatMode = Player.REPEAT_MODE_OFF
                 }
-                if (c.hasPreviousMediaItem()) c.seekToPrevious() else c.seekTo(0, 0)
+                // 必须用 seekToPreviousMediaItem：seekToPrevious 是 Media3 的"3 秒内才切上一首，
+                // 否则重播当前曲"语义，歌播到中段时点上一首会变成从头播放
+                if (c.hasPreviousMediaItem()) c.seekToPreviousMediaItem() else c.seekTo(0, 0)
                 if (prevRepeat == Player.REPEAT_MODE_ONE) {
                     c.repeatMode = Player.REPEAT_MODE_ONE
                 }

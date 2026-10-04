@@ -137,6 +137,7 @@ import com.example.lxmusic.ui.lyrics.LyricSeekHapticFeedback
 import com.example.lxmusic.ui.lyrics.NeriAdvancedLyricsView
 import com.example.lxmusic.ui.lyrics.MeiloxLiquidLyricsView
 import com.example.lxmusic.ui.lyrics.SyncedLyricsView
+import com.example.lxmusic.ui.lyrics.hasInstrumentalPlaceholder
 import com.example.lxmusic.ui.lyrics.parseNeteaseLyricsAuto
 import com.example.lxmusic.ui.lyrics.rememberLyricSeekHapticFeedback
 import com.example.lxmusic.ui.lyrics.resolveLyricPreviewTimeMs
@@ -197,12 +198,15 @@ fun PlayerStage(
     playerBgEnhance: Boolean = false,
     playerHyperBg: Boolean = false,
     playerFluidAmbientBg: Boolean = false,
+    playerMeshBg: Boolean = false,
     playerCoverBlurBg: Boolean = false,
     playerLyricBlur: Boolean = false,
     playerLyricBlurAmount: Float = 10f,
     // 逐字歌词动效（设置-播放器设置，默认开启；关闭=整行高亮）
     playerLyricsWordEffect: Boolean = true,
     playerMeiloxLyrics: Boolean = false,
+    // 翻译条目（网易云 tlyric / QQ trans 经 ±450ms 容差对齐，两个歌词视图共用）
+    translatedLyrics: List<LyricEntry>? = null,
     playerWaveformSlider: Boolean = false,
     playerLyricsSeekPreview: Boolean = true,
     // 播放器 UI 显示设置（设置-播放器设置，默认全开启）
@@ -309,6 +313,11 @@ fun PlayerStage(
     // 歌词解析（两卡共享；拖动进度条时跟随预览）
     val lyricText = lyricsText?.takeIf { it.isNotBlank() }
         ?: song.lyrics?.takeIf { it.isNotBlank() }
+    // 歌名带伴奏标记，或歌词内容是音源塞的"无歌词"占位行 → 按"纯音乐"展示
+    val isInstrumentalLyric = hasInstrumentalPlaceholder(lyricText.orEmpty()) ||
+        song.title.contains("伴奏") ||
+        song.title.contains("Instrumental") ||
+        song.title.contains("纯音乐")
     val lyricEntries = remember(lyricText) {
         lyricText?.let { parseNeteaseLyricsAuto(it) }?.takeIf { it.isNotEmpty() }
             ?: emptyList()
@@ -329,9 +338,9 @@ fun PlayerStage(
     val durationState = rememberUpdatedState(totalDuration)
     val lyricHaptic = rememberLyricSeekHapticFeedback(lyricEntries)
 
-    // 深色动态背景（流体/封面模糊/动态渐变/背景图片/灵动流体背景）开启时强制白色前景，保证文字与图标可读；
+    // 深色动态背景（流体/封面模糊/动态渐变/背景图片/灵动流体背景/MeiloX 网格渐变）开启时强制白色前景，保证文字与图标可读；
     // 默认关闭背景时跟随主题表面色（浅色主题下为深色/黑色），主页与歌词页保持一致
-    val deepBackdrop = playerHyperBg || playerCoverBlurBg || playerDynamicBg || playerBgEnhance || playerFluidAmbientBg
+    val deepBackdrop = playerHyperBg || playerCoverBlurBg || playerDynamicBg || playerBgEnhance || playerFluidAmbientBg || playerMeshBg
     val uiTint = if (deepBackdrop) Color.White else MaterialTheme.colorScheme.onSurface
     val uiTintVariant = if (deepBackdrop) {
         Color.White.copy(alpha = 0.75f)
@@ -557,6 +566,7 @@ fun PlayerStage(
                         uiTint = uiTint,
                         uiTintVariant = uiTintVariant,
                         lyricEntries = lyricEntries,
+                        isInstrumentalLyric = isInstrumentalLyric,
                         lyricPreviewTimeMs = lyricPreviewTimeMs,
                         lyricFontSize = coverLyricFontSize,
                         lyricFontWeight = coverLyricFontWeightValue,
@@ -613,6 +623,10 @@ fun PlayerStage(
                                 currentOrTargetLyricText?.let { parseNeteaseLyricsAuto(it) }?.takeIf { it.isNotEmpty() }
                                     ?: emptyList()
                             }
+                            // 翻译只对应当前已拉取的歌曲；过渡目标歌曲翻译未就绪时先不传
+                            val currentOrTargetTranslations = remember(targetSong.filePath, translatedLyrics) {
+                                if (targetSong.filePath == song.filePath) translatedLyrics else null
+                            }
 
                             if (playerMeiloxLyrics) {
                                 MeiloxLiquidLyricsView(
@@ -626,7 +640,7 @@ fun PlayerStage(
                                         onSeek(entry.startTimeMs)
                                     },
                                     rawLyrics = currentOrTargetLyricText,
-                                    translatedLyrics = null,
+                                    translatedLyrics = currentOrTargetTranslations,
                                     showLyricTranslation = true,
                                     textColor = uiTint,
                                     fontSize = lyricFontSize.sp,
@@ -651,6 +665,7 @@ fun PlayerStage(
                                     textAlign = lyricTextAlign,
                                     translationFontSize = (lyricFontSize * 0.7f).sp,
                                     rawLyrics = currentOrTargetLyricText,
+                                    translatedLyrics = currentOrTargetTranslations,
                                     karaokeEnabled = playerLyricsWordEffect,
                                     lyricBlurEnabled = playerLyricBlur,
                                     lyricBlurAmount = playerLyricBlurAmount,
@@ -1156,6 +1171,7 @@ private fun PlayerCoverCard(
     uiTint: Color,
     uiTintVariant: Color,
     lyricEntries: List<LyricEntry>,
+    isInstrumentalLyric: Boolean = false,
     lyricPreviewTimeMs: Long,
     lyricFontSize: Float,
     lyricFontWeight: FontWeight,
@@ -1367,9 +1383,8 @@ private fun PlayerCoverCard(
                     onLyricClick = { entry -> onSeekTo(entry.startTimeMs) }
                 )
             } else {
-                val isInst = song.title.contains("伴奏") || song.title.contains("Instrumental") || song.title.contains("纯音乐")
                 Text(
-                    text = if (isInst) "纯音乐，请欣赏" else "暂无歌词",
+                    text = if (isInstrumentalLyric) "纯音乐" else "暂无歌词",
                     style = MaterialTheme.typography.bodyMedium,
                     color = uiTintVariant.copy(alpha = 0.4f),
                     textAlign = TextAlign.Center
