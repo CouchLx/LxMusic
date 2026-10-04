@@ -6,7 +6,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -126,6 +129,13 @@ fun KaraokeBreathingDots(
         }
     }
 
+    val animationTick = remember { mutableLongStateOf(0L) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            animationTick.longValue = withFrameNanos { it }
+        }
+    }
+
     Box(modifier) {
         Canvas(
             Modifier
@@ -133,7 +143,7 @@ fun KaraokeBreathingDots(
                     when (alignment) {
                         KaraokeAlignment.Start -> Alignment.TopStart
                         KaraokeAlignment.End -> Alignment.TopEnd
-                        else -> Alignment.TopStart
+                        else -> Alignment.TopCenter
                     }
                 )
                 .padding(vertical = 8.dp, horizontal = 16.dp)
@@ -143,6 +153,7 @@ fun KaraokeBreathingDots(
                 )
         ) {
             if (totalWidthPx <= 0f) return@Canvas
+            val _tick = animationTick.longValue
 
             val currentTime = currentTimeProvider().toFloat()
             var scale: Float

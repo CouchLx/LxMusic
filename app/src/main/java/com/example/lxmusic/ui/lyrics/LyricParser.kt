@@ -36,9 +36,54 @@ private data class LrcTimelineEntry(
 
 fun isNeteaseYrc(content: String): Boolean = content.contains(NeteaseYrcLineRegex)
 
+fun isQrcLyrics(content: String): Boolean = QRCParser.canParse(content)
+
+fun isTtmlLyrics(content: String): Boolean {
+    val trimmed = content.trimStart()
+    return trimmed.startsWith("<?xml") || trimmed.startsWith("<tt") || trimmed.contains("http://www.w3.org/ns/ttml")
+}
+
+fun parseTtmlToLyricEntries(ttml: String): List<LyricEntry> {
+    return runCatching {
+        val synced = com.mocharealm.accompanist.lyrics.core.parser.TTMLParser().parse(ttml)
+        synced.lines.mapNotNull { line ->
+            when (line) {
+                is com.mocharealm.accompanist.lyrics.core.model.karaoke.KaraokeLine -> {
+                    LyricEntry(
+                        text = line.syllables.joinToString("") { it.content },
+                        startTimeMs = line.start.toLong(),
+                        endTimeMs = line.end.toLong(),
+                        translation = line.translation,
+                        words = line.syllables.map { syl ->
+                            WordTiming(
+                                startTimeMs = syl.start.toLong(),
+                                endTimeMs = syl.end.toLong(),
+                                charCount = syl.content.length
+                            )
+                        }
+                    )
+                }
+                is com.mocharealm.accompanist.lyrics.core.model.synced.SyncedLine -> {
+                    LyricEntry(
+                        text = line.content,
+                        startTimeMs = line.start.toLong(),
+                        endTimeMs = line.end.toLong(),
+                        translation = line.translation,
+                        words = null
+                    )
+                }
+                else -> null
+            }
+        }
+    }.getOrDefault(emptyList())
+}
+
 fun parseNeteaseLyricsAuto(content: String): List<LyricEntry> {
     return when {
+        isTtmlLyrics(content) -> parseTtmlToLyricEntries(content).takeIf { it.isNotEmpty() }
+            ?: runCatching { parseNeteaseYrc(content) }.getOrDefault(emptyList())
         isNeteaseYrc(content) -> runCatching { parseNeteaseYrc(content) }.getOrDefault(emptyList())
+        isQrcLyrics(content) -> runCatching { QRCParser.parseToLyricEntries(content) }.getOrDefault(emptyList())
         else -> parseNeteaseLrc(content)
     }
 }
@@ -149,11 +194,23 @@ fun parseNeteaseLrc(lrc: String): List<LyricEntry> {
     for (index in effectiveTimeline.lastIndex downTo 0) {
         val entry = effectiveTimeline[index]
         if (entry.text.isNotBlank()) {
+            val nextStart = nextTimestampMs
+            val naturalDuration = if (nextStart != null) {
+                val gap = nextStart - entry.startTimeMs
+                if (gap > 6_000L) {
+                    val singingEstimate = maxOf(3_000L, entry.text.length * 350L).coerceAtMost(gap - 3_500L)
+                    minOf(gap, singingEstimate)
+                } else {
+                    gap
+                }
+            } else {
+                5_000L
+            }
             out.add(
                 LyricEntry(
                     text = entry.text,
                     startTimeMs = entry.startTimeMs,
-                    endTimeMs = nextTimestampMs ?: (entry.startTimeMs + 5_000L),
+                    endTimeMs = entry.startTimeMs + naturalDuration,
                     words = null
                 )
             )

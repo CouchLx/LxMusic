@@ -20,6 +20,7 @@ import androidx.media3.session.SessionToken
 import com.example.lxmusic.model.SongInfo
 import com.example.lxmusic.util.SongDurationCache
 import com.google.gson.Gson
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -172,6 +173,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             }
             KuGouApi.lastBitRate = 0
             KuGouApi.lastExtName = null
+
+            val q = _uiState.value.queue
+            viewModelScope.launch(Dispatchers.IO) {
+                val app = getApplication<Application>()
+                com.example.lxmusic.data.LyricRepository.preload(app, q.getOrNull(idx))
+                com.example.lxmusic.data.LyricRepository.preload(app, q.getOrNull(idx + 1))
+                com.example.lxmusic.data.LyricRepository.preload(app, q.getOrNull(idx + 2))
+            }
         }
 
         override fun onIsPlayingChanged(playing: Boolean) {
@@ -233,6 +242,13 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         c.prepare()
         c.play()
         saveFullState()
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val app = getApplication<Application>()
+            com.example.lxmusic.data.LyricRepository.preload(app, songs.getOrNull(safeIndex))
+            com.example.lxmusic.data.LyricRepository.preload(app, songs.getOrNull(safeIndex + 1))
+            com.example.lxmusic.data.LyricRepository.preload(app, songs.getOrNull(safeIndex + 2))
+        }
     }
 
     fun playOnline(songs: List<SongInfo>, index: Int) {

@@ -37,6 +37,7 @@ fun PlayerBackdrop(
     dynamicBackground: Boolean,
     backgroundEnhance: Boolean,
     playerHyperBg: Boolean,
+    playerFluidAmbientBg: Boolean = false,
     playerAudioReactive: Boolean,
     // 页面顶偏移提供器（px）：流体 View 绘制裁剪到页面覆盖范围（防松手瞬间占满）
     hyperClipTopProvider: (() -> Float)? = null,
@@ -105,8 +106,16 @@ fun PlayerBackdrop(
                 modifier = Modifier.fillMaxSize()
             )
         }
+        // 灵动流体背景（仿 Apple Music 风格流体光场，多频有机流动与智能高饱和取色）
+        else if (playerFluidAmbientBg) {
+            FluidAmbientBackground(
+                coverModel = coverModel,
+                playing = playing,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
         // 动态渐变背景（与背景图片互斥，随专辑旋转流动）
-        if (!playerHyperBg && !playerCoverBlurBg && dynamicBackground) {
+        if (!playerHyperBg && !playerCoverBlurBg && !playerFluidAmbientBg && dynamicBackground) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -116,7 +125,7 @@ fun PlayerBackdrop(
                     )
             )
         }
-        if (!playerHyperBg && !playerCoverBlurBg && !dynamicBackground &&
+        if (!playerHyperBg && !playerCoverBlurBg && !playerFluidAmbientBg && !dynamicBackground &&
             backgroundEnhance
         ) {
             // 使用应用设置中的背景图片

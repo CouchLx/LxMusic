@@ -377,7 +377,7 @@ fun KaraokeLyricsView(
     val haveDotsIntro by remember(firstLine) {
         derivedStateOf {
             if (firstLine == null) false
-            else (firstLine.start > 5000)
+            else (firstLine.start > 3000)
         }
     }
 
@@ -415,7 +415,7 @@ fun KaraokeLyricsView(
             val line = lyrics.lines[index]
             val previousLine = lyrics.lines.getOrNull(index - 1)
             previousLine != null &&
-                (line.start - previousLine.end > 5000) &&
+                (line.start - previousLine.end > 3500) &&
                 currentTimeMs in previousLine.end..line.start
         }
         val activeIntro = haveDotsIntro && currentTimeMs in 0 until (firstLine?.start ?: 0)
@@ -603,7 +603,11 @@ fun KaraokeLyricsView(
                                     ),
                                     stiffness = dynamicStiffness
                                 ),
-                            horizontalAlignment = if (isVisualRightAligned) Alignment.End else Alignment.Start
+                            horizontalAlignment = when {
+                                stableNormalTextStyle.textAlign == androidx.compose.ui.text.style.TextAlign.Center -> Alignment.CenterHorizontally
+                                isVisualRightAligned -> Alignment.End
+                                else -> Alignment.Start
+                            }
                         ) {
                             val animDuration = 600
 
@@ -614,9 +618,9 @@ fun KaraokeLyricsView(
 
                             AnimatedVisibility(showDotsInterlude || showDotsIntro) {
                                 KaraokeBreathingDots(
-                                    alignment = when (val line = previousLine ?: firstLine) {
-                                        is KaraokeLine -> line.alignment
-                                        is SyncedLine -> if (line.content.isRtl()) KaraokeAlignment.End else KaraokeAlignment.Start
+                                    alignment = when {
+                                        stableNormalTextStyle.textAlign == androidx.compose.ui.text.style.TextAlign.Center -> KaraokeAlignment.Unspecified
+                                        isVisualRightAligned -> KaraokeAlignment.End
                                         else -> KaraokeAlignment.Start
                                     },
                                     startTimeMs = previousLine?.end ?: 0,

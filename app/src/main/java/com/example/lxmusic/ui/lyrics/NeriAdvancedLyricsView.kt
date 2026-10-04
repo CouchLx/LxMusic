@@ -7,15 +7,23 @@
 
 package com.example.lxmusic.ui.lyrics
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -43,11 +51,7 @@ private val FocusedLyricMaskSafePadding = 24.dp
 /** 歌词列表是否含逐字（word）时间戳 */
 private fun List<LyricEntry>.hasWordTimedEntries(): Boolean = any { !it.words.isNullOrEmpty() }
 
-/** TTML 特征检测（简单版）：XML 声明或 <tt 根标签 */
-private fun isTtmlLyrics(raw: String): Boolean {
-    val trimmed = raw.trimStart()
-    return trimmed.startsWith("<?xml") || trimmed.startsWith("<tt")
-}
+
 
 /**
  * 新歌词页面渲染器（NeriPlayer 高级歌词移植）：
@@ -96,10 +100,24 @@ fun NeriAdvancedLyricsView(
         )
     }
     if (syncedLyrics.lines.isEmpty()) {
+        Box(
+            modifier = modifier,
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "纯音乐，请欣赏",
+                style = TextStyle(
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = textColor.copy(alpha = 0.5f),
+                    textAlign = TextAlign.Center
+                )
+            )
+        }
         return
     }
 
-    val normalTextStyle = remember(fontSize, fontWeight) {
+    val normalTextStyle = remember(fontSize, fontWeight, textAlign) {
         TextStyle(
             fontSize = fontSize,
             fontWeight = fontWeight,
@@ -123,7 +141,12 @@ fun NeriAdvancedLyricsView(
             lineHeight = (translationFontSize.value * 1.12f).sp
         )
     }
-    val listState = rememberLazyListState()
+    val listKey = remember(rawLyrics, lyrics.size) { rawLyrics?.hashCode() ?: lyrics.hashCode() }
+    val listState = remember(listKey) { LazyListState() }
+    val lyricAlpha = remember(listKey) { Animatable(0.2f) }
+    LaunchedEffect(listKey) {
+        lyricAlpha.animateTo(1f, tween(250))
+    }
     val blurDelta = (lyricBlurAmount * 0.45f).coerceIn(0f, 4f)
     val safeCurrentPosition = (currentTimeMs + lyricOffsetMs)
         .coerceAtLeast(0L)
@@ -134,7 +157,9 @@ fun NeriAdvancedLyricsView(
         playbackSpeed = playbackSpeed
     )
 
-    BoxWithConstraints(modifier = modifier) {
+    BoxWithConstraints(
+        modifier = modifier.graphicsLayer { alpha = lyricAlpha.value }
+    ) {
         val density = LocalDensity.current
         val focusedLineVisualCompensation = with(density) {
             normalTextStyle.lineHeight.toDp() * FocusedLyricVisualCompensationRatio
@@ -248,12 +273,12 @@ private fun resolveAdvancedBaseSyncedLyrics(
     lyrics: List<LyricEntry>
 ): SyncedLyrics {
     val rawHasEmbeddedKaraoke = !rawLyrics.isNullOrBlank() &&
-        (isTtmlLyrics(rawLyrics) || isNeteaseYrc(rawLyrics))
+        (isTtmlLyrics(rawLyrics) || isNeteaseYrc(rawLyrics) || isQrcLyrics(rawLyrics))
     return when {
         // 有逐字时间戳、或纯 LRC/无 raw（toSyncedLine 会自动合成逐字时间戳）：直接用我们的条目
         lyrics.isNotEmpty() && (!rawHasEmbeddedKaraoke || lyrics.hasWordTimedEntries()) ->
             lyrics.toSyncedLyrics()
-        // TTML/YRC：优先 AutoParser（自带逐字）
+        // TTML/YRC/QRC：优先 AutoParser（自带逐字）
         else -> parseRawLyrics(rawLyrics).takeIf { it.lines.isNotEmpty() }
             ?: lyrics.toSyncedLyrics()
     }
@@ -264,7 +289,7 @@ private fun parseRawLyrics(rawLyrics: String?): SyncedLyrics {
         return SyncedLyrics(emptyList())
     }
     return runCatching {
-        if (isTtmlLyrics(rawLyrics) || isNeteaseYrc(rawLyrics)) {
+        if (isTtmlLyrics(rawLyrics) || isNeteaseYrc(rawLyrics) || isQrcLyrics(rawLyrics)) {
             AutoParser().parse(rawLyrics)
         } else {
             parseNeteaseLrc(rawLyrics).toSyncedLyrics()

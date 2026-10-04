@@ -71,6 +71,7 @@ data class NeteaseSongUrlData(
 data class NeteaseLyricResponse(
     val lrc: NeteaseLyricPart? = null,
     val yrc: NeteaseLyricPart? = null,
+    val ytlrc: NeteaseLyricPart? = null,
     val tlyric: NeteaseLyricPart? = null,
     val code: Int = 0
 )

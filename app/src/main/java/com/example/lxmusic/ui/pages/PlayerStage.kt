@@ -135,6 +135,7 @@ import com.example.lxmusic.ui.components.MinimalistFullControls
 import com.example.lxmusic.ui.lyrics.LyricEntry
 import com.example.lxmusic.ui.lyrics.LyricSeekHapticFeedback
 import com.example.lxmusic.ui.lyrics.NeriAdvancedLyricsView
+import com.example.lxmusic.ui.lyrics.MeiloxLiquidLyricsView
 import com.example.lxmusic.ui.lyrics.SyncedLyricsView
 import com.example.lxmusic.ui.lyrics.parseNeteaseLyricsAuto
 import com.example.lxmusic.ui.lyrics.rememberLyricSeekHapticFeedback
@@ -195,11 +196,13 @@ fun PlayerStage(
     playerDynamicBg: Boolean = false,
     playerBgEnhance: Boolean = false,
     playerHyperBg: Boolean = false,
+    playerFluidAmbientBg: Boolean = false,
     playerCoverBlurBg: Boolean = false,
     playerLyricBlur: Boolean = false,
     playerLyricBlurAmount: Float = 10f,
     // 逐字歌词动效（设置-播放器设置，默认开启；关闭=整行高亮）
     playerLyricsWordEffect: Boolean = true,
+    playerMeiloxLyrics: Boolean = false,
     playerWaveformSlider: Boolean = false,
     playerLyricsSeekPreview: Boolean = true,
     // 播放器 UI 显示设置（设置-播放器设置，默认全开启）
@@ -326,9 +329,9 @@ fun PlayerStage(
     val durationState = rememberUpdatedState(totalDuration)
     val lyricHaptic = rememberLyricSeekHapticFeedback(lyricEntries)
 
-    // 深色动态背景（流体/封面模糊/动态渐变/背景图片）开启时强制白色前景，保证文字与图标可读；
+    // 深色动态背景（流体/封面模糊/动态渐变/背景图片/灵动流体背景）开启时强制白色前景，保证文字与图标可读；
     // 默认关闭背景时跟随主题表面色（浅色主题下为深色/黑色），主页与歌词页保持一致
-    val deepBackdrop = playerHyperBg || playerCoverBlurBg || playerDynamicBg || playerBgEnhance
+    val deepBackdrop = playerHyperBg || playerCoverBlurBg || playerDynamicBg || playerBgEnhance || playerFluidAmbientBg
     val uiTint = if (deepBackdrop) Color.White else MaterialTheme.colorScheme.onSurface
     val uiTintVariant = if (deepBackdrop) {
         Color.White.copy(alpha = 0.75f)
@@ -568,28 +571,95 @@ fun PlayerStage(
                         onOpenLyrics = { scope.launch { pagerState.animateScrollToPage(1) } }
                     )
                     else -> {
-                        // 歌词卡：NeriPlayer 高级歌词渲染（滚动动效 + 点击跳转）；
-                        // 逐字歌词动效开关只控制逐字点亮，其余样式不变
-                        NeriAdvancedLyricsView(
-                            lyrics = lyricEntries,
-                            currentTimeMs = lyricPreviewTimeMs,
-                            lyricOffsetMs = LYRIC_TIME_OFFSET_MS,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 20.dp),
-                            textColor = uiTint,
-                            fontSize = lyricFontSize.sp,
-                            fontWeight = lyricFontWeightValue,
-                            textAlign = lyricTextAlign,
-                            translationFontSize = (lyricFontSize * 0.7f).sp,
-                            rawLyrics = lyricText,
-                            karaokeEnabled = playerLyricsWordEffect,
-                            lyricBlurEnabled = playerLyricBlur,
-                            lyricBlurAmount = playerLyricBlurAmount,
-                            isPlaying = isPlaying,
-                            animateViewportScroll = !isSeeking,
-                            onSeekTo = onSeek
-                        )
+                        val smoothGlideEasing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1.0f)
+                        val glideDurationMs = 380
+
+                        AnimatedContent(
+                            targetState = song,
+                            transitionSpec = {
+                                if (isNextSong) {
+                                    (slideInHorizontally(
+                                        animationSpec = tween(durationMillis = glideDurationMs, easing = smoothGlideEasing)
+                                    ) { fullWidth -> (fullWidth * 0.35f).toInt() } + fadeIn(animationSpec = tween(220)))
+                                        .togetherWith(
+                                            slideOutHorizontally(
+                                                animationSpec = tween(durationMillis = glideDurationMs, easing = smoothGlideEasing)
+                                            ) { fullWidth -> (-fullWidth * 0.35f).toInt() } + fadeOut(animationSpec = tween(180))
+                                        )
+                                } else {
+                                    (slideInHorizontally(
+                                        animationSpec = tween(durationMillis = glideDurationMs, easing = smoothGlideEasing)
+                                    ) { fullWidth -> (-fullWidth * 0.35f).toInt() } + fadeIn(animationSpec = tween(220)))
+                                        .togetherWith(
+                                            slideOutHorizontally(
+                                                animationSpec = tween(durationMillis = glideDurationMs, easing = smoothGlideEasing)
+                                            ) { fullWidth -> (fullWidth * 0.35f).toInt() } + fadeOut(animationSpec = tween(180))
+                                        )
+                                }
+                            },
+                            contentKey = { it.filePath },
+                            label = "lyricsTransition",
+                            modifier = Modifier.fillMaxSize()
+                        ) { targetSong ->
+                            val currentOrTargetLyricText = remember(targetSong.filePath, lyricsText) {
+                                if (targetSong.filePath == song.filePath) {
+                                    lyricsText?.takeIf { it.isNotBlank() } ?: targetSong.lyrics?.takeIf { it.isNotBlank() }
+                                } else {
+                                    com.example.lxmusic.data.LyricRepository.getMemoryCachedLyric(targetSong)
+                                        ?: targetSong.lyrics?.takeIf { it.isNotBlank() }
+                                }
+                            }
+                            val currentOrTargetEntries = remember(currentOrTargetLyricText) {
+                                currentOrTargetLyricText?.let { parseNeteaseLyricsAuto(it) }?.takeIf { it.isNotEmpty() }
+                                    ?: emptyList()
+                            }
+
+                            if (playerMeiloxLyrics) {
+                                MeiloxLiquidLyricsView(
+                                    lyrics = currentOrTargetEntries,
+                                    currentTimeMs = lyricPreviewTimeMs,
+                                    lyricOffsetMs = LYRIC_TIME_OFFSET_MS,
+                                    isPlaying = isPlaying,
+                                    playbackSpeed = 1f,
+                                    onSeekTo = onSeek,
+                                    onLyricLongClick = { entry ->
+                                        onSeek(entry.startTimeMs)
+                                    },
+                                    rawLyrics = currentOrTargetLyricText,
+                                    translatedLyrics = null,
+                                    showLyricTranslation = true,
+                                    textColor = uiTint,
+                                    fontSize = lyricFontSize.sp,
+                                    fontWeight = lyricFontWeightValue,
+                                    textAlign = lyricTextAlign,
+                                    translationFontSize = (lyricFontSize * 0.7f).sp,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 20.dp)
+                                )
+                            } else {
+                                NeriAdvancedLyricsView(
+                                    lyrics = currentOrTargetEntries,
+                                    currentTimeMs = lyricPreviewTimeMs,
+                                    lyricOffsetMs = LYRIC_TIME_OFFSET_MS,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 20.dp),
+                                    textColor = uiTint,
+                                    fontSize = lyricFontSize.sp,
+                                    fontWeight = lyricFontWeightValue,
+                                    textAlign = lyricTextAlign,
+                                    translationFontSize = (lyricFontSize * 0.7f).sp,
+                                    rawLyrics = currentOrTargetLyricText,
+                                    karaokeEnabled = playerLyricsWordEffect,
+                                    lyricBlurEnabled = playerLyricBlur,
+                                    lyricBlurAmount = playerLyricBlurAmount,
+                                    isPlaying = isPlaying,
+                                    animateViewportScroll = !isSeeking,
+                                    onSeekTo = onSeek
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1297,8 +1367,9 @@ private fun PlayerCoverCard(
                     onLyricClick = { entry -> onSeekTo(entry.startTimeMs) }
                 )
             } else {
+                val isInst = song.title.contains("伴奏") || song.title.contains("Instrumental") || song.title.contains("纯音乐")
                 Text(
-                    text = "歌词加载中...",
+                    text = if (isInst) "纯音乐，请欣赏" else "暂无歌词",
                     style = MaterialTheme.typography.bodyMedium,
                     color = uiTintVariant.copy(alpha = 0.4f),
                     textAlign = TextAlign.Center

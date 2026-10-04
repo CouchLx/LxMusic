@@ -677,41 +677,75 @@ fun AppScaffold(
 
     var showPlaylistSheet by remember { mutableStateOf(false) }
     // 在线歌词（播放页与全屏歌词页共享）
-    var onlineLyrics by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(currentSong?.filePath) {
-        onlineLyrics = null
-        val song = currentSong ?: return@LaunchedEffect
-        if (!song.lyrics.isNullOrBlank()) return@LaunchedEffect
-        try {
-            if (NeteaseApi.isNeteasePath(song.filePath)) {
-                // 网易云歌曲：/lyric 获取歌词，优先逐字 yrc，空则标准 lrc
-                val id = NeteaseApi.neteaseSongIdOf(song.filePath) ?: return@LaunchedEffect
-                val lyricResp = NeteaseApi.service.getLyric(id)
-                val content = if (!lyricResp.yrc?.lyric.isNullOrBlank()) {
-                    lyricResp.yrc!!.lyric
-                } else {
-                    lyricResp.lrc?.lyric
-                }
-                if (!content.isNullOrBlank()) onlineLyrics = content
-            } else {
-                val hash = song.filePath.split("|").firstOrNull()?.takeIf { it.isNotBlank() }
-                    ?: return@LaunchedEffect
-                val searchResp = KuGouApi.service.searchLyric(hash)
-                val candidate = searchResp.candidates?.firstOrNull()
-                if (candidate?.id != null && candidate.accesskey != null) {
-                    val lyricResp = KuGouApi.service.getLyric(candidate.id, candidate.accesskey)
-                    val content = lyricResp.content
-                    if (!content.isNullOrBlank()) {
-                        val decoded = try {
-                            String(android.util.Base64.decode(content, android.util.Base64.DEFAULT))
-                        } catch (_: Exception) { content }
-                        onlineLyrics = decoded
-                    }
-                }
-            }
-        } catch (_: Exception) {}
+    // 关键优化：使用 remember(currentSong?.filePath) 同步命中内存与磁盘缓存（0ms 响应，首帧即有歌词，彻底告别“正在加载”卡顿）
+    val initialCachedLyric = remember(currentSong?.filePath) {
+        currentSong?.let { song ->
+            com.example.lxmusic.data.LyricRepository.getCachedLyric(context, song)
+                ?: song.lyrics?.takeIf { it.isNotBlank() }
+        }
     }
-    val currentLyricsText = currentSong?.lyrics?.takeIf { it.isNotBlank() } ?: onlineLyrics
+    var onlineLyrics by remember(currentSong?.filePath) { mutableStateOf(initialCachedLyric) }
+
+    LaunchedEffect(currentSong?.filePath) {
+        val song = currentSong ?: return@LaunchedEffect
+
+        // 1. 立即在后台静默预加载后续曲目与前一首曲目，确保连续切歌 0ms 秒开
+        val next1 = currentSongList.getOrNull(currentSongIndex + 1)
+        val next2 = currentSongList.getOrNull(currentSongIndex + 2)
+        val prev1 = currentSongList.getOrNull(currentSongIndex - 1)
+        launch(Dispatchers.IO) {
+            com.example.lxmusic.data.LyricRepository.preload(context, next1)
+            com.example.lxmusic.data.LyricRepository.preload(context, next2)
+            com.example.lxmusic.data.LyricRepository.preload(context, prev1)
+        }
+
+        // 2. 若已有最高精度逐字歌词（TTML、YRC 或 QRC），无需重复发起网络拉取
+        val currentHasVerbatim = !onlineLyrics.isNullOrBlank() && (
+            com.example.lxmusic.ui.lyrics.isTtmlLyrics(onlineLyrics!!) ||
+            com.example.lxmusic.ui.lyrics.isNeteaseYrc(onlineLyrics!!) ||
+            com.example.lxmusic.ui.lyrics.isQrcLyrics(onlineLyrics!!)
+        )
+        if (currentHasVerbatim) return@LaunchedEffect
+
+        // 3. 双通路并发拉取（Native 极速通道 ~150ms 先顶上 + 高画质逐字通道平滑升级）
+        kotlinx.coroutines.coroutineScope {
+            // 通路 A：原生平台歌词（网易云或酷狗），通常 150ms 内极速返回
+            launch(Dispatchers.IO) {
+                try {
+                    val nativeContent = com.example.lxmusic.data.LyricRepository.fetchNativeLyric(song)
+                    if (!nativeContent.isNullOrBlank()) {
+                        withContext(Dispatchers.Main) {
+                            // 仅当当前还没有获取到更高规格的逐字时先展示原生歌词
+                            if (onlineLyrics == null || (!com.example.lxmusic.ui.lyrics.isTtmlLyrics(onlineLyrics!!) && !com.example.lxmusic.ui.lyrics.isNeteaseYrc(onlineLyrics!!) && !com.example.lxmusic.ui.lyrics.isQrcLyrics(onlineLyrics!!))) {
+                                onlineLyrics = nativeContent
+                            }
+                        }
+                        com.example.lxmusic.data.LyricRepository.putCachedLyric(context, song, nativeContent)
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // 通路 B：最高品质逐字通道（AMLL TTML -> 网易云 YRC -> QQ音乐 QRC）
+            launch(Dispatchers.IO) {
+                try {
+                    val bestVerbatim = com.example.lxmusic.data.LyricRepository.fetchAmllLyric(song)
+                    if (!bestVerbatim.isNullOrBlank()) {
+                        withContext(Dispatchers.Main) {
+                            onlineLyrics = bestVerbatim
+                        }
+                        com.example.lxmusic.data.LyricRepository.putCachedLyric(context, song, bestVerbatim)
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+    val currentSongLyrics = currentSong?.lyrics
+    val currentLyricsText = when {
+        !onlineLyrics.isNullOrBlank() && (com.example.lxmusic.ui.lyrics.isTtmlLyrics(onlineLyrics!!) || com.example.lxmusic.ui.lyrics.isNeteaseYrc(onlineLyrics!!) || com.example.lxmusic.ui.lyrics.isQrcLyrics(onlineLyrics!!)) -> onlineLyrics
+        !currentSongLyrics.isNullOrBlank() && (com.example.lxmusic.ui.lyrics.isTtmlLyrics(currentSongLyrics) || com.example.lxmusic.ui.lyrics.isNeteaseYrc(currentSongLyrics) || com.example.lxmusic.ui.lyrics.isQrcLyrics(currentSongLyrics)) -> currentSongLyrics
+        !onlineLyrics.isNullOrBlank() -> onlineLyrics
+        else -> currentSongLyrics
+    }
     var showRankDetail by remember { mutableStateOf<RankItem?>(null) }
     var showLoginPage by rememberSaveable { mutableStateOf(false) }
     var loginVersion by rememberSaveable { mutableIntStateOf(0) }
@@ -824,8 +858,10 @@ fun AppScaffold(
     var playerVinylBase by remember { mutableStateOf(settingsRepository.playerVinylBase) }
     var playerBgEnhance by remember { mutableStateOf(settingsRepository.playerBgEnhance) }
     var playerHyperBg by remember { mutableStateOf(settingsRepository.playerHyperBg) }
+    var playerFluidAmbientBg by remember { mutableStateOf(settingsRepository.playerFluidAmbientBg) }
     var playerWaveformSlider by remember { mutableStateOf(settingsRepository.playerWaveformSlider) }
     var playerLyricsWordEffect by remember { mutableStateOf(settingsRepository.playerLyricsWordEffect) }
+    var playerMeiloxLyrics by remember { mutableStateOf(settingsRepository.playerMeiloxLyrics) }
     var playerLyricsSeekPreview by remember { mutableStateOf(settingsRepository.playerLyricsSeekPreview) }
     var playerCoverBlurBg by remember { mutableStateOf(settingsRepository.playerCoverBlurBg) }
     var playerCoverBlurAmount by remember { mutableFloatStateOf(settingsRepository.playerCoverBlurAmount) }
@@ -2148,6 +2184,11 @@ fun AppScaffold(
                                 playerHyperBg = enabled
                                 settingsRepository.playerHyperBg = enabled
                             },
+                            playerFluidAmbientBg = playerFluidAmbientBg,
+                            onPlayerFluidAmbientBgChange = { enabled ->
+                                playerFluidAmbientBg = enabled
+                                settingsRepository.playerFluidAmbientBg = enabled
+                            },
                             playerWaveformSlider = playerWaveformSlider,
                             onPlayerWaveformSliderChange = { enabled ->
                                 playerWaveformSlider = enabled
@@ -2157,6 +2198,11 @@ fun AppScaffold(
                             onPlayerLyricsWordEffectChange = { enabled ->
                                 playerLyricsWordEffect = enabled
                                 settingsRepository.playerLyricsWordEffect = enabled
+                            },
+                            playerMeiloxLyrics = playerMeiloxLyrics,
+                            onPlayerMeiloxLyricsChange = { enabled ->
+                                playerMeiloxLyrics = enabled
+                                settingsRepository.playerMeiloxLyrics = enabled
                             },
                             playerLyricsSeekPreview = playerLyricsSeekPreview,
                             onPlayerLyricsSeekPreviewChange = { enabled ->
@@ -2611,6 +2657,7 @@ fun AppScaffold(
                         dynamicBackground = playerDynamicBg,
                         backgroundEnhance = playerBgEnhance,
                         playerHyperBg = playerHyperBg,
+                        playerFluidAmbientBg = playerFluidAmbientBg,
                         playerAudioReactive = playerAudioReactive,
                         hyperClipTopProvider = { hyperClipTopPx.floatValue },
                         playerCoverBlurBg = playerCoverBlurBg,
@@ -2742,8 +2789,10 @@ fun AppScaffold(
                         playerDynamicBg = playerDynamicBg,
                         playerBgEnhance = playerBgEnhance,
                         playerHyperBg = playerHyperBg,
+                        playerFluidAmbientBg = playerFluidAmbientBg,
                         playerCoverBlurBg = playerCoverBlurBg,
                         playerLyricsWordEffect = playerLyricsWordEffect,
+                        playerMeiloxLyrics = playerMeiloxLyrics,
                         playerWaveformSlider = playerWaveformSlider,
                         playerLyricsSeekPreview = playerLyricsSeekPreview,
                         playerLyricBlur = playerLyricBlur,

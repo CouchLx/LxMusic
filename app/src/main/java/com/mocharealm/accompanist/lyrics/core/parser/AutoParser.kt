@@ -17,6 +17,7 @@ class AutoParser(
     private val parsers: List<ILyricsParser> = listOf(
         TTMLParser(fallbackPhoneticProvider = fallbackPhoneticProvider),
         NeteaseYrcParser,
+        com.example.lxmusic.ui.lyrics.QRCParser,
         LyricifySyllableParser,
         EnhancedLrcParser,
         KugouKrcParser,

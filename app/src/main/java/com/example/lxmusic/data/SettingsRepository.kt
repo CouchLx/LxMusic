@@ -38,9 +38,12 @@ class SettingsRepository(context: Context) {
         const val PLAYER_VINYL_BASE = "player_vinyl_base"
         const val PLAYER_BG_ENHANCE = "player_bg_enhance"
         const val PLAYER_HYPER_BG = "player_hyper_bg"
+        const val PLAYER_FLUID_AMBIENT_BG = "player_fluid_ambient_bg"
         const val PLAYER_WAVEFORM_SLIDER = "player_waveform_slider"
         // 逐字歌词动效：当前行逐字点亮（关闭=整行高亮，其余样式不变）
         const val PLAYER_LYRICS_WORD_EFFECT = "player_lyrics_word_effect"
+        // MeiloX 风格液态动效歌词（与普通逐字排斥）
+        const val PLAYER_MEILOX_LYRICS = "player_meilox_lyrics"
         const val PLAYER_LYRICS_SEEK_PREVIEW = "player_lyrics_seek_preview"
         // 动效设置（对齐 Neri：封面模糊背景 / 音频律动 / 歌词模糊）
         const val PLAYER_COVER_BLUR_BG = "player_cover_blur_bg"
@@ -328,6 +331,16 @@ class SettingsRepository(context: Context) {
         prefs.getBoolean(Keys.PLAYER_HYPER_BG, true)
     )
 
+    var playerFluidAmbientBg: Boolean
+        get() = _playerFluidAmbientBg
+        set(value) {
+            _playerFluidAmbientBg = value
+            prefs.edit().putBoolean(Keys.PLAYER_FLUID_AMBIENT_BG, value).apply()
+        }
+    private var _playerFluidAmbientBg: Boolean by mutableStateOf(
+        prefs.getBoolean(Keys.PLAYER_FLUID_AMBIENT_BG, false)
+    )
+
     var playerWaveformSlider: Boolean
         get() = _playerWaveformSlider
         set(value) {
@@ -348,6 +361,16 @@ class SettingsRepository(context: Context) {
         }
     private var _playerLyricsWordEffect: Boolean by mutableStateOf(
         prefs.getBoolean(Keys.PLAYER_LYRICS_WORD_EFFECT, true)
+    )
+
+    var playerMeiloxLyrics: Boolean
+        get() = _playerMeiloxLyrics
+        set(value) {
+            _playerMeiloxLyrics = value
+            prefs.edit().putBoolean(Keys.PLAYER_MEILOX_LYRICS, value).apply()
+        }
+    private var _playerMeiloxLyrics: Boolean by mutableStateOf(
+        prefs.getBoolean(Keys.PLAYER_MEILOX_LYRICS, false)
     )
 
     var playerLyricsSeekPreview: Boolean

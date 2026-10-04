@@ -318,10 +318,14 @@ fun SettingsPage(
     onPlayerBgEnhanceChange: (Boolean) -> Unit = {},
     playerHyperBg: Boolean = true,
     onPlayerHyperBgChange: (Boolean) -> Unit = {},
+    playerFluidAmbientBg: Boolean = false,
+    onPlayerFluidAmbientBgChange: (Boolean) -> Unit = {},
     playerWaveformSlider: Boolean = false,
     onPlayerWaveformSliderChange: (Boolean) -> Unit = {},
     playerLyricsWordEffect: Boolean = true,
     onPlayerLyricsWordEffectChange: (Boolean) -> Unit = {},
+    playerMeiloxLyrics: Boolean = false,
+    onPlayerMeiloxLyricsChange: (Boolean) -> Unit = {},
     playerLyricsSeekPreview: Boolean = true,
     onPlayerLyricsSeekPreviewChange: (Boolean) -> Unit = {},
     playerCoverBlurBg: Boolean = false,
@@ -675,6 +679,8 @@ fun SettingsPage(
                         onPlayerWaveformSliderChange = onPlayerWaveformSliderChange,
                         playerLyricsWordEffect = playerLyricsWordEffect,
                         onPlayerLyricsWordEffectChange = onPlayerLyricsWordEffectChange,
+                        playerMeiloxLyrics = playerMeiloxLyrics,
+                        onPlayerMeiloxLyricsChange = onPlayerMeiloxLyricsChange,
                         playerLyricsSeekPreview = playerLyricsSeekPreview,
                         onPlayerLyricsSeekPreviewChange = onPlayerLyricsSeekPreviewChange,
                         playerCoverBlurBg = playerCoverBlurBg,
@@ -692,6 +698,8 @@ fun SettingsPage(
                     SettingsMotionContent(
                         playerHyperBg = playerHyperBg,
                         onPlayerHyperBgChange = onPlayerHyperBgChange,
+                        playerFluidAmbientBg = playerFluidAmbientBg,
+                        onPlayerFluidAmbientBgChange = onPlayerFluidAmbientBgChange,
                         playerCoverBlurBg = playerCoverBlurBg,
                         onPlayerCoverBlurBgChange = onPlayerCoverBlurBgChange,
                         playerCoverBlurAmount = playerCoverBlurAmount,
@@ -3260,6 +3268,8 @@ fun SettingsPlayerContent(
     onPlayerWaveformSliderChange: (Boolean) -> Unit,
     playerLyricsWordEffect: Boolean,
     onPlayerLyricsWordEffectChange: (Boolean) -> Unit,
+    playerMeiloxLyrics: Boolean,
+    onPlayerMeiloxLyricsChange: (Boolean) -> Unit,
     playerLyricsSeekPreview: Boolean,
     onPlayerLyricsSeekPreviewChange: (Boolean) -> Unit,
     playerCoverBlurBg: Boolean,
@@ -3521,7 +3531,28 @@ fun SettingsPlayerContent(
                 title = "逐字歌词动效",
                 subtitle = "当前歌词行逐字点亮推进；关闭后保持现有样式，仅整行高亮",
                 checked = playerLyricsWordEffect,
-                onCheckedChange = onPlayerLyricsWordEffectChange
+                onCheckedChange = {
+                    onPlayerLyricsWordEffectChange(it)
+                    if (it) onPlayerMeiloxLyricsChange(false)
+                }
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // MeiloX 液态动效歌词
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            PlayerSettingSwitchRow(
+                title = "MeiloX 液态歌词",
+                subtitle = "Apple Music 风格全屏液态发光歌词排版（与普通逐字互斥）",
+                checked = playerMeiloxLyrics,
+                onCheckedChange = {
+                    onPlayerMeiloxLyricsChange(it)
+                    if (it) onPlayerLyricsWordEffectChange(false)
+                }
             )
         }
 
@@ -3647,6 +3678,8 @@ private fun PlayerSettingSwitchRow(
 fun SettingsMotionContent(
     playerHyperBg: Boolean,
     onPlayerHyperBgChange: (Boolean) -> Unit,
+    playerFluidAmbientBg: Boolean,
+    onPlayerFluidAmbientBgChange: (Boolean) -> Unit,
     playerCoverBlurBg: Boolean,
     onPlayerCoverBlurBgChange: (Boolean) -> Unit,
     playerCoverBlurAmount: Float,
@@ -3673,6 +3706,31 @@ fun SettingsMotionContent(
         )
         Spacer(modifier = Modifier.height(8.dp))
 
+        // 灵动流体背景（仿 Apple Music 风格流体光场，多频有机流动与智能高饱和取色）
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            PlayerSettingSwitchRow(
+                title = "灵动流体背景",
+                subtitle = "仿 Apple Music 风格流体光场，多频有机流动与智能高饱和取色（与其它背景互斥）",
+                checked = playerFluidAmbientBg,
+                onCheckedChange = { enabled ->
+                    onPlayerFluidAmbientBgChange(enabled)
+                    // 与「流体动态背景」「封面模糊背景」「动态渐变背景」「应用背景图片」互斥
+                    if (enabled) {
+                        if (playerHyperBg) onPlayerHyperBgChange(false)
+                        if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
+                        if (playerDynamicBg) onPlayerDynamicBgChange(false)
+                        if (playerBgEnhance) onPlayerBgEnhanceChange(false)
+                    }
+                }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         // 流体动态背景（HyperBackground，API 33+ 生效）
         Surface(
             shape = RoundedCornerShape(12.dp),
@@ -3690,8 +3748,9 @@ fun SettingsMotionContent(
                 enabled = Build.VERSION.SDK_INT >= 33,
                 onCheckedChange = { enabled ->
                     onPlayerHyperBgChange(enabled)
-                    // 与「动态渐变背景」「应用背景图片」「封面模糊背景」互斥
+                    // 与「灵动流体背景」「动态渐变背景」「应用背景图片」「封面模糊背景」互斥
                     if (enabled) {
+                        if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
                         if (playerDynamicBg) onPlayerDynamicBgChange(false)
                         if (playerBgEnhance) onPlayerBgEnhanceChange(false)
                         if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
@@ -3719,8 +3778,9 @@ fun SettingsMotionContent(
                 enabled = Build.VERSION.SDK_INT >= 31,
                 onCheckedChange = { enabled ->
                     onPlayerCoverBlurBgChange(enabled)
-                    // 与「动态渐变背景」「应用背景图片」「流体动态背景」互斥
+                    // 与「灵动流体背景」「动态渐变背景」「应用背景图片」「流体动态背景」互斥
                     if (enabled) {
+                        if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
                         if (playerDynamicBg) onPlayerDynamicBgChange(false)
                         if (playerBgEnhance) onPlayerBgEnhanceChange(false)
                         if (playerHyperBg) onPlayerHyperBgChange(false)
