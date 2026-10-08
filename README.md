@@ -57,7 +57,7 @@ KEY_ALIAS=
 KEY_PASSWORD=
 ```
 
-> **注意**：`keystore.properties` 已被 .gitignore 排除，不会提交到仓库。
+>
 
 ## 自建后端
 
@@ -71,18 +71,7 @@ KEY_PASSWORD=
 3. 修改 `ACTIVATE_CODES` 生成激活码发给朋友
 4. 客户端设置页 → VIP 服务 → 输入激活码激活
 
-## 自动发布（全自动，一次配置永久省心）
 
-推送 `v*` 标签（如 `v3.7.56`）到 GitHub 会自动触发 [release.yml](.github/workflows/release.yml)：
-
-1. 构建签名 Release APK
-2. 生成 `publish/version.json`（客户端更新检查用）并同步到仓库
-3. 上传 APK 与 version.json 到 GitHub Releases
-
-**你只需要做一件事**：
-```bash
-git tag v3.7.56
-git push origin v3.7.56
 ```
 
 ### 一次性配置仓库 Secrets
