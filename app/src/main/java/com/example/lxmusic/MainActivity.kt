@@ -1800,7 +1800,8 @@ fun AppScaffold(
                                 listState = homeListState,
                                 recommendListState = homeRecommendListState,
                                 onClickRefresh = { homeClickRefresh = it },
-                                onRefreshStateChange = { isHomeRefreshing = it }
+                                onRefreshStateChange = { isHomeRefreshing = it },
+                                loginVersion = loginVersion
                             )
                         }
                         1 -> {
@@ -2421,6 +2422,10 @@ fun AppScaffold(
                             onLoginSuccess = { nickname ->
                                 showLoginPage = false
                                 loginVersion++
+                                // 登录成功后请求一次首页自动刷新：
+                                // 首页若正挂在组合里由 loginVersion 变化当场消费；
+                                // 若在其他 tab，则下次进首页（HomePage 重建）时消费标记
+                                settingsRepository.requestHomeRefresh()
                             }
                         )
                     }

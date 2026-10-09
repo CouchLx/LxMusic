@@ -202,7 +202,7 @@ fun PlayerStage(
     playerCoverBlurBg: Boolean = false,
     playerLyricBlur: Boolean = false,
     playerLyricBlurAmount: Float = 10f,
-    // 逐字歌词动效（设置-播放器设置，默认开启；关闭=整行高亮）
+    // 逐字歌词动效（设置-播放器设置；与 MeiloX 液态歌词互斥，2026-10 起新默认为液态歌词；关闭=整行高亮）
     playerLyricsWordEffect: Boolean = true,
     playerMeiloxLyrics: Boolean = false,
     // 翻译条目（网易云 tlyric / QQ trans 经 ±450ms 容差对齐，两个歌词视图共用）
@@ -641,6 +641,7 @@ fun PlayerStage(
                                     },
                                     rawLyrics = currentOrTargetLyricText,
                                     translatedLyrics = currentOrTargetTranslations,
+                                    emptyStateText = if (isInstrumentalLyric) "纯音乐" else "暂无歌词",
                                     showLyricTranslation = true,
                                     textColor = uiTint,
                                     fontSize = lyricFontSize.sp,
@@ -666,6 +667,7 @@ fun PlayerStage(
                                     translationFontSize = (lyricFontSize * 0.7f).sp,
                                     rawLyrics = currentOrTargetLyricText,
                                     translatedLyrics = currentOrTargetTranslations,
+                                    emptyStateText = if (isInstrumentalLyric) "纯音乐" else "暂无歌词",
                                     karaokeEnabled = playerLyricsWordEffect,
                                     lyricBlurEnabled = playerLyricBlur,
                                     lyricBlurAmount = playerLyricBlurAmount,
@@ -1339,57 +1341,68 @@ private fun PlayerCoverCard(
             // contentAlignment=Center 会让加宽后的 Box 自动居中布局，
             // 起点正好落在屏幕左缘，不能再加 offset（否则整体偏左）
             val overflowDp = 44.dp
+            // 无歌词时合成一行占位（"纯音乐"/"暂无歌词"），与真歌词走同一个
+            // SyncedLyricsView 管线：位置、字号、样式与正常当前行完全一致
+            // （原先单独绘制小号灰字居中，观感突兀）；endTime 拉满整曲保持当前行状态
+            val displayLyricEntries = remember(lyricEntries, isInstrumentalLyric) {
+                if (lyricEntries.isEmpty()) {
+                    listOf(
+                        LyricEntry(
+                            text = if (isInstrumentalLyric) "纯音乐" else "暂无歌词",
+                            startTimeMs = 0L,
+                            endTimeMs = 6L * 3_600_000L
+                        )
+                    )
+                } else {
+                    lyricEntries
+                }
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .requiredWidth(maxWidth + overflowDp * 2)
                     .fillMaxHeight()
                     .clickable(
-                        enabled = lyricEntries.isNotEmpty(),
+                        enabled = displayLyricEntries.isNotEmpty(),
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         onClick = onOpenLyrics
                     ),
                 contentAlignment = Alignment.Center
             ) {
-            if (lyricEntries.isNotEmpty()) {
-                // NeriPlayer 播放页嵌入式歌词预览同款：stableEmbeddedViewport 稳定视口，
-                // 当前行垂直居中（centerPad=(视口高-行高)/2 → 行中心=正中，上下对称留白），
-                // 逐字点亮 + 边缘渐隐 + 歌词模糊；点击歌词行 = 跳转；
-                // 整条空白处点击 = 翻到歌词卡（外层 clickable）
-                SyncedLyricsView(
-                    lyrics = lyricEntries,
-                    currentTimeMs = lyricPreviewTimeMs,
-                    lyricOffsetMs = LYRIC_TIME_OFFSET_MS,
-                    modifier = Modifier.fillMaxSize(),
-                    textColor = uiTint,
-                    fontSize = lyricFontSize.sp,
-                    fontWeight = lyricFontWeight,
-                    textAlign = lyricTextAlign,
-                    centerPadding = 8.dp,
-                    // 当前行微上移：上面显示比下面多，负值=上移（上方空间减小、下方增大）
-                    centerPaddingOffset = (-4).dp,
-                    karaokeEnabled = karaokeEnabled,
-                    visualEffectsEnabled = false,
-                    scaleActiveLine = false,
-                    smoothActiveLineProgress = false,
-                    edgeFadeHeight = 28.dp,
-                    lyricBlurEnabled = lyricBlurEnabled,
-                    lyricBlurAmount = lyricBlurAmount,
-                    isPlaying = isPlaying,
-                    interpolatePlaybackPosition = isPlaying && !isSeeking,
-                    playbackSessionKey = song.filePath,
-                    stableEmbeddedViewport = true,
-                    onLyricClick = { entry -> onSeekTo(entry.startTimeMs) }
-                )
-            } else {
-                Text(
-                    text = if (isInstrumentalLyric) "纯音乐" else "暂无歌词",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = uiTintVariant.copy(alpha = 0.4f),
-                    textAlign = TextAlign.Center
-                )
-            }
+            // NeriPlayer 播放页嵌入式歌词预览同款：stableEmbeddedViewport 稳定视口，
+            // 当前行垂直居中（centerPad=(视口高-行高)/2 → 行中心=正中，上下对称留白），
+            // 逐字点亮 + 边缘渐隐 + 歌词模糊；点击歌词行 = 跳转；
+            // 整条空白处点击 = 翻到歌词卡（外层 clickable）
+            SyncedLyricsView(
+                lyrics = displayLyricEntries,
+                currentTimeMs = lyricPreviewTimeMs,
+                lyricOffsetMs = LYRIC_TIME_OFFSET_MS,
+                modifier = Modifier.fillMaxSize(),
+                textColor = uiTint,
+                fontSize = lyricFontSize.sp,
+                fontWeight = lyricFontWeight,
+                textAlign = lyricTextAlign,
+                centerPadding = 8.dp,
+                // 当前行微上移：上面显示比下面多，负值=上移（上方空间减小、下方增大）
+                centerPaddingOffset = (-4).dp,
+                karaokeEnabled = karaokeEnabled,
+                visualEffectsEnabled = false,
+                scaleActiveLine = false,
+                smoothActiveLineProgress = false,
+                edgeFadeHeight = 28.dp,
+                lyricBlurEnabled = lyricBlurEnabled,
+                lyricBlurAmount = lyricBlurAmount,
+                isPlaying = isPlaying,
+                interpolatePlaybackPosition = isPlaying && !isSeeking,
+                playbackSessionKey = song.filePath,
+                stableEmbeddedViewport = true,
+                onLyricClick = { entry ->
+                    // 合成占位行（此时 lyricEntries 为空）点击 = 翻歌词卡，与该区域整体语义一致；
+                    // 真歌词行点击 = 跳转到该行
+                    if (lyricEntries.isEmpty()) onOpenLyrics() else onSeekTo(entry.startTimeMs)
+                }
+            )
             }
         }
     }

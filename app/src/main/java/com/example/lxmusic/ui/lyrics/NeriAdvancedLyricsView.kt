@@ -70,6 +70,8 @@ fun NeriAdvancedLyricsView(
     lyricOffsetMs: Long = 0L,
     rawLyrics: String? = null,
     translatedLyrics: List<LyricEntry>? = null,
+    // 无歌词时的占位文案（"纯音乐"/"暂无歌词"），作为一行真歌词渲染，位置与正常当前行一致
+    emptyStateText: String = "纯音乐",
     showLyricTranslation: Boolean = true,
     // 逐字歌词动效：true=当前行逐字点亮；false=整行高亮（其余样式/动效不变）
     karaokeEnabled: Boolean = true,
@@ -88,33 +90,32 @@ fun NeriAdvancedLyricsView(
     onSeekTo: (Long) -> Unit = {}
 ) {
     val effectiveTranslatedLyrics = translatedLyrics.orEmpty()
+    // 无歌词时合成一行占位文本，走与真歌词完全相同的渲染管线——
+    // 位置、样式、滚动状态都与正常"当前行"一致（原先单独垂直居中绘制，观感突兀）。
+    // endTime 足够长 → 整曲保持当前行状态，逐字填充几乎不可见（近似静态）。
+    val displayLyrics = remember(lyrics, emptyStateText) {
+        if (lyrics.isEmpty()) {
+            listOf(
+                LyricEntry(
+                    text = emptyStateText,
+                    startTimeMs = 0L,
+                    endTimeMs = 6L * 3_600_000L
+                )
+            )
+        } else {
+            lyrics
+        }
+    }
     val syncedLyrics = remember(
         rawLyrics,
-        lyrics,
+        displayLyrics,
         effectiveTranslatedLyrics
     ) {
         buildAdvancedSyncedLyrics(
-            rawLyrics = rawLyrics,
-            lyrics = lyrics,
+            rawLyrics = if (lyrics.isEmpty()) null else rawLyrics,
+            lyrics = displayLyrics,
             translatedLyrics = effectiveTranslatedLyrics
         )
-    }
-    if (syncedLyrics.lines.isEmpty()) {
-        Box(
-            modifier = modifier,
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "纯音乐",
-                style = TextStyle(
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = textColor.copy(alpha = 0.5f),
-                    textAlign = TextAlign.Center
-                )
-            )
-        }
-        return
     }
 
     val normalTextStyle = remember(fontSize, fontWeight, textAlign) {
@@ -141,7 +142,7 @@ fun NeriAdvancedLyricsView(
             lineHeight = (translationFontSize.value * 1.12f).sp
         )
     }
-    val listKey = remember(rawLyrics, lyrics.size) { rawLyrics?.hashCode() ?: lyrics.hashCode() }
+    val listKey = remember(displayLyrics) { displayLyrics.hashCode() }
     val listState = remember(listKey) { LazyListState() }
     val lyricAlpha = remember(listKey) { Animatable(0.2f) }
     LaunchedEffect(listKey) {
@@ -181,7 +182,7 @@ fun NeriAdvancedLyricsView(
                 renderCurrentPosition = renderPositionProvider,
                 onLineClicked = { line -> onSeekTo(line.start.toLong()) },
                 onLinePressed = { line ->
-                    val entry = resolvePressedLyricEntry(line, lyrics)
+                    val entry = resolvePressedLyricEntry(line, displayLyrics)
                     if (onLyricLongClick != null) {
                         onLyricLongClick(entry)
                     } else {

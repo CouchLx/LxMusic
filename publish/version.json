@@ -1,12 +1,12 @@
 {
-  "versionCode": 7,
-  "versionName": "3.7.60",
-  "desc": "新增睡眠定时器等新功能",
-  "apkUrl": "https://github.com/CouchLx/LxMusic/releases/download/v3.7.60/app-release.apk",
+  "versionCode": 8,
+  "versionName": "3.7.61",
+  "desc": "新增 Mesh 频谱背景等新功能",
+  "apkUrl": "https://github.com/CouchLx/LxMusic/releases/download/v3.7.61/app-release.apk",
   "apkMirrors": [
-    "https://gh-proxy.com/https://github.com/CouchLx/LxMusic/releases/download/v3.7.60/app-release.apk",
-    "https://ghproxy.net/https://github.com/CouchLx/LxMusic/releases/download/v3.7.60/app-release.apk",
-    "https://ghfast.top/https://github.com/CouchLx/LxMusic/releases/download/v3.7.60/app-release.apk",
-    "https://gh.llkk.cc/https://github.com/CouchLx/LxMusic/releases/download/v3.7.60/app-release.apk"
+    "https://gh-proxy.com/https://github.com/CouchLx/LxMusic/releases/download/v3.7.61/app-release.apk",
+    "https://ghproxy.net/https://github.com/CouchLx/LxMusic/releases/download/v3.7.61/app-release.apk",
+    "https://ghfast.top/https://github.com/CouchLx/LxMusic/releases/download/v3.7.61/app-release.apk",
+    "https://gh.llkk.cc/https://github.com/CouchLx/LxMusic/releases/download/v3.7.61/app-release.apk"
   ]
 }

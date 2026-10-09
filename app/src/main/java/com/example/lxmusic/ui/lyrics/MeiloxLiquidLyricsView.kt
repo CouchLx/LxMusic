@@ -2,13 +2,10 @@ package com.example.lxmusic.ui.lyrics
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.LocalTextStyle
-import androidx.compose.material3.Text
-import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -48,6 +45,8 @@ fun MeiloxLiquidLyricsView(
     onLyricLongClick: ((LyricEntry) -> Unit)? = null,
     rawLyrics: String? = null,
     translatedLyrics: List<LyricEntry>? = null,
+    // 无歌词时的占位文案（"纯音乐"/"暂无歌词"），作为一行真歌词渲染，位置与正常当前行一致
+    emptyStateText: String = "纯音乐",
     showLyricTranslation: Boolean = true,
     textColor: Color = Color.White,
     fontSize: TextUnit = 32.sp,
@@ -59,25 +58,28 @@ fun MeiloxLiquidLyricsView(
     modifier: Modifier = Modifier
 ) {
     val effectiveTranslatedLyrics = translatedLyrics.orEmpty()
-    val syncedLyrics = remember(rawLyrics, lyrics, effectiveTranslatedLyrics) {
-        buildAdvancedSyncedLyrics(rawLyrics, lyrics, effectiveTranslatedLyrics)
-    }
-    if (syncedLyrics.lines.isEmpty()) {
-        Box(
-            modifier = modifier,
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "纯音乐",
-                style = TextStyle(
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = textColor.copy(alpha = 0.5f),
-                    textAlign = TextAlign.Center
+    // 无歌词时合成一行占位文本，走与真歌词完全相同的渲染管线——
+    // 位置、样式、滚动状态都与正常"当前行"一致（原先单独垂直居中绘制，观感突兀）。
+    // endTime 足够长 → 整曲保持当前行状态，逐字填充几乎不可见（近似静态）。
+    val displayLyrics = remember(lyrics, emptyStateText) {
+        if (lyrics.isEmpty()) {
+            listOf(
+                LyricEntry(
+                    text = emptyStateText,
+                    startTimeMs = 0L,
+                    endTimeMs = 6L * 3_600_000L
                 )
             )
+        } else {
+            lyrics
         }
-        return
+    }
+    val syncedLyrics = remember(rawLyrics, displayLyrics, effectiveTranslatedLyrics) {
+        buildAdvancedSyncedLyrics(
+            rawLyrics = if (lyrics.isEmpty()) null else rawLyrics,
+            lyrics = displayLyrics,
+            translatedLyrics = effectiveTranslatedLyrics
+        )
     }
 
     val normalTextStyle = remember(fontSize, fontWeight, textAlign) {
@@ -106,7 +108,7 @@ fun MeiloxLiquidLyricsView(
         )
     }
 
-    val listKey = remember(rawLyrics, lyrics.size) { rawLyrics?.hashCode() ?: lyrics.hashCode() }
+    val listKey = remember(displayLyrics) { displayLyrics.hashCode() }
     val listState = remember(listKey) { LazyListState() }
     val lyricAlpha = remember(listKey) { Animatable(0.2f) }
     LaunchedEffect(listKey) {
@@ -135,7 +137,7 @@ fun MeiloxLiquidLyricsView(
                     is SyncedLine -> line.content
                     else -> ""
                 }
-                val entry = lyrics.find { it.startTimeMs == line.start.toLong() }
+                val entry = displayLyrics.find { it.startTimeMs == line.start.toLong() }
                     ?: LyricEntry(plain, line.start.toLong(), line.end.toLong())
                 if (onLyricLongClick != null) onLyricLongClick(entry) else onSeekTo(line.start.toLong())
             },

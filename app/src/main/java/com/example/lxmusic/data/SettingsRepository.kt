@@ -108,6 +108,11 @@ class SettingsRepository(context: Context) {
         const val USB_EXCLUSIVE_BIT_DEPTH = "usb_exclusive_bit_depth"
         // 自动更新
         const val AUTO_CHECK_UPDATE_DIALOG = "auto_check_update_dialog"
+        // 一次性首页刷新请求：切换播放页背景/歌词动效开关或登录成功时置位，
+        // 首页进入时消费一次（刷新后清除），平时进首页不刷新
+        const val PENDING_HOME_REFRESH = "home_pending_refresh"
+        // 默认值换代迁移标记（2026-10：背景默认→MeiloX 网格渐变，歌词动效默认→液态歌词，底栏高度默认→85%）
+        const val SETTINGS_DEFAULT_V4 = "settings_default_v4"
     }
 
     // ==================== 主题 ====================
@@ -259,6 +264,7 @@ class SettingsRepository(context: Context) {
         set(value) {
             _playerDynamicBg = value
             prefs.edit().putBoolean(Keys.PLAYER_DYNAMIC_BG, value).apply()
+            requestHomeRefresh()
         }
     private var _playerDynamicBg: Boolean by mutableStateOf(
         prefs.getBoolean(Keys.PLAYER_DYNAMIC_BG, false)
@@ -327,9 +333,11 @@ class SettingsRepository(context: Context) {
         set(value) {
             _playerHyperBg = value
             prefs.edit().putBoolean(Keys.PLAYER_HYPER_BG, value).apply()
+            requestHomeRefresh()
         }
     private var _playerHyperBg: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_HYPER_BG, true)
+        // 2026-10 默认换代：流体动态背景让位 MeiloX 网格渐变（老用户由 init 的 V3 迁移负责切换）
+        prefs.getBoolean(Keys.PLAYER_HYPER_BG, false)
     )
 
     var playerFluidAmbientBg: Boolean
@@ -337,6 +345,7 @@ class SettingsRepository(context: Context) {
         set(value) {
             _playerFluidAmbientBg = value
             prefs.edit().putBoolean(Keys.PLAYER_FLUID_AMBIENT_BG, value).apply()
+            requestHomeRefresh()
         }
     private var _playerFluidAmbientBg: Boolean by mutableStateOf(
         prefs.getBoolean(Keys.PLAYER_FLUID_AMBIENT_BG, false)
@@ -347,6 +356,7 @@ class SettingsRepository(context: Context) {
         set(value) {
             _playerMeshBg = value
             prefs.edit().putBoolean(Keys.PLAYER_MESH_BG, value).apply()
+            requestHomeRefresh()
         }
     private var _playerMeshBg: Boolean by mutableStateOf(
         prefs.getBoolean(Keys.PLAYER_MESH_BG, false)
@@ -369,6 +379,7 @@ class SettingsRepository(context: Context) {
         set(value) {
             _playerLyricsWordEffect = value
             prefs.edit().putBoolean(Keys.PLAYER_LYRICS_WORD_EFFECT, value).apply()
+            requestHomeRefresh()
         }
     private var _playerLyricsWordEffect: Boolean by mutableStateOf(
         prefs.getBoolean(Keys.PLAYER_LYRICS_WORD_EFFECT, true)
@@ -379,6 +390,7 @@ class SettingsRepository(context: Context) {
         set(value) {
             _playerMeiloxLyrics = value
             prefs.edit().putBoolean(Keys.PLAYER_MEILOX_LYRICS, value).apply()
+            requestHomeRefresh()
         }
     private var _playerMeiloxLyrics: Boolean by mutableStateOf(
         prefs.getBoolean(Keys.PLAYER_MEILOX_LYRICS, false)
@@ -399,6 +411,7 @@ class SettingsRepository(context: Context) {
         set(value) {
             _playerCoverBlurBg = value
             prefs.edit().putBoolean(Keys.PLAYER_COVER_BLUR_BG, value).apply()
+            requestHomeRefresh()
         }
     private var _playerCoverBlurBg: Boolean by mutableStateOf(
         prefs.getBoolean(Keys.PLAYER_COVER_BLUR_BG, false)
@@ -694,14 +707,46 @@ class SettingsRepository(context: Context) {
         if (oldPrefs.contains("background_enhance") && !prefs.contains(Keys.PLAYER_BG_ENHANCE)) {
             playerBgEnhance = oldPrefs.getBoolean("background_enhance", false)
         }
-        // 新版默认配置迁移：圆形封面 / 旋转 / 黑胶唱片 / 指针 / 流体动态背景默认开启。
+        // 新版默认配置迁移：圆形封面 / 旋转 / 黑胶唱片 / 指针默认开启。
         // 只补写用户从未动过的项（无 key 才写 true），用户明确关过的保持不动；
         // 新装用户 key 本来就不存在，读默认值即 true，老用户升级同样生效。
         if (!prefs.contains(Keys.PLAYER_ROUND_ALBUM)) playerRoundAlbum = true
         if (!prefs.contains(Keys.PLAYER_ROTATE)) playerRotate = true
         if (!prefs.contains(Keys.PLAYER_VINYL_STYLE)) playerVinylStyle = true
         if (!prefs.contains(Keys.PLAYER_VINYL_POINTER)) playerVinylPointer = true
-        if (!prefs.contains(Keys.PLAYER_HYPER_BG)) playerHyperBg = true
+        // 2026-10-09 发布换代迁移（SETTINGS_DEFAULT_V4 一次性，强制作废 v3 的"只动没动过的"版本）：
+        // 播放页背景默认「流体动态」→「MeiloX 网格渐变」，歌词动效默认「逐字点亮」→「MeiloX 液态歌词」，
+        // 底栏高度默认 → 85%。
+        // 本版是无条件统一代换：真机上凡是试过开关又切回默认的用户（prefs 里留了 key）
+        // 之前会被"尊重现状"拦住、永远看不到新默认，这与"版本换代"语义相悖，故本版强制写入；
+        // 动过设置的用户会被覆盖一次（有意为之），之后 V4 标记写掉，永不再跑、不再覆盖。
+        // 注意：迁移会经过带 requestHomeRefresh() 的 setter，末尾必须清一次标记，
+        // 保证「版本升级」本身不触发首页自动刷新（只有用户手动切开关才触发）。
+        if (!prefs.getBoolean(Keys.SETTINGS_DEFAULT_V4, false)) {
+            // 背景统一切到 MeiloX 网格渐变：互斥组全部收干净（对齐设置页 UI 的手动互斥行为）
+            playerMeshBg = true
+            if (playerHyperBg) playerHyperBg = false
+            if (playerFluidAmbientBg) playerFluidAmbientBg = false
+            if (playerCoverBlurBg) playerCoverBlurBg = false
+            if (playerDynamicBg) playerDynamicBg = false
+            if (playerBgEnhance) playerBgEnhance = false
+            // 歌词动效统一切到 MeiloX 液态歌词（与普通逐字互斥，对齐设置页 UI 层逻辑）
+            playerMeiloxLyrics = true
+            if (playerLyricsWordEffect) playerLyricsWordEffect = false
+            // 底栏高度统一回到新默认 85%（覆盖用户调整过的值一次）。
+            // 注意：在这里走属性 setter 会编译报 "Variable cannot be initialized before declaration"
+            // —— _bottomBarHeightScale 的声明物理位置在本 init 之后；直接写 prefs，
+            // 之后执行到该属性声明时 getFloat 即读到刚写入的 0.85。
+            prefs.edit().putFloat(Keys.BOTTOM_BAR_HEIGHT_SCALE, 0.85f).apply()
+            prefs.edit().putBoolean(Keys.PENDING_HOME_REFRESH, false).apply()
+            prefs.edit().putBoolean(Keys.SETTINGS_DEFAULT_V4, true).apply()
+        }
+    }
+
+    /** 请求一次首页自动刷新（首页进入时消费一次，刷新后清除）。
+     *  由播放页背景 / 歌词动效开关的 setter 与「登录成功」调用；版本升级迁移不调用。 */
+    fun requestHomeRefresh() {
+        prefs.edit().putBoolean(Keys.PENDING_HOME_REFRESH, true).apply()
     }
 
     var bgOpacity: Float
@@ -817,7 +862,8 @@ class SettingsRepository(context: Context) {
             prefs.edit().putFloat(Keys.BOTTOM_BAR_HEIGHT_SCALE, value).apply()
         }
     private var _bottomBarHeightScale: Float by mutableFloatStateOf(
-        prefs.getFloat(Keys.BOTTOM_BAR_HEIGHT_SCALE, 1.0f)
+        // 2026-10 起默认 85%；用户动过这个设置（prefs 已有 key）则保持其自己的值
+        prefs.getFloat(Keys.BOTTOM_BAR_HEIGHT_SCALE, 0.85f)
     )
 
     var playbackServiceIdleShutdownMinutes: Int

@@ -258,6 +258,8 @@ fun HomePage(
     onClickRefresh: (((() -> Unit)) -> Unit)? = null,
     onRefreshStateChange: ((Boolean) -> Unit)? = null,
     onAddToQueueNext: (SongInfo) -> Unit = {},
+    // 登录成功世代号（MainActivity 登录成功时 +1）：>0 时消费"待首页刷新"标记自动刷一次
+    loginVersion: Int = 0,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -862,6 +864,16 @@ fun HomePage(
         }
     }
 
+    // 一次性首页刷新请求（settings 的 home_pending_refresh）：
+    // 切换播放页背景 / 歌词动效开关、或登录成功时由 SettingsRepository.requestHomeRefresh() 置位；
+    // 这里进首页时消费一次（读到即清除），保证"只在置位后进首页的那一刻刷一次"，
+    // 平时进首页、以及开机后反复进首页都不会平白无故刷新。
+    fun consumePendingHomeRefresh(): Boolean {
+        val pending = settingsPrefs.getBoolean("home_pending_refresh", false)
+        if (pending) settingsPrefs.edit().putBoolean("home_pending_refresh", false).apply()
+        return pending
+    }
+
     // 统一的刷新逻辑
     // ===== 一键全量刷新 =====
     // 所有区块请求一次性并行发出；每个请求成功后只产出「局部更新函数」，
@@ -1116,6 +1128,20 @@ fun HomePage(
             conceptSongs = cachedConcept?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
             trendSongs = cachedTrend?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList()
         )
+
+        // 进首页消费一次性刷新请求：仅在用户切过背景/歌词开关（或登录成功）后才刷，
+        // 无标记时保持原样不刷新
+        if (consumePendingHomeRefresh()) {
+            performRefresh(isAuto = true)
+        }
+    }
+
+    // 登录成功世代号变化（含登录时首页正挂在组合里的场景）：消费一次性刷新标记。
+    // loginVersion 从 rememberSaveable 恢复 >0 时也会检查标记，标记为无则不刷。
+    LaunchedEffect(loginVersion) {
+        if (loginVersion > 0 && consumePendingHomeRefresh()) {
+            performRefresh(isAuto = true)
+        }
     }
 
     // 暴露刷新方法给父组件

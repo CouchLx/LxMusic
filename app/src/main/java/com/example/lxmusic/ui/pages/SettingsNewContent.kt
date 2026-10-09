@@ -290,7 +290,7 @@ internal fun BottomBarHeightDialog(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "100% 为默认高度；仅原生主题底栏生效，播放条会自动贴紧",
+                    text = "85% 为默认高度；仅原生主题底栏生效，播放条会自动贴紧",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -307,7 +307,7 @@ internal fun BottomBarHeightDialog(
         dismissButton = {
             Row {
                 TextButton(
-                    onClick = { sliderValue = 1.0f }
+                    onClick = { sliderValue = 0.85f }
                 ) { Text("重置") }
                 TextButton(onClick = onDismiss) { Text("取消") }
             }
