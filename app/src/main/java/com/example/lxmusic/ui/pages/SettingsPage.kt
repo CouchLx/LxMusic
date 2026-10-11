@@ -569,8 +569,12 @@ fun SettingsPage(
                                             authPrefs.edit().clear().apply()
                                             KuGouApi.token = ""
                                             KuGouApi.userid = ""
-                                            KuGouApi.ownerToken = ""
-                                            KuGouApi.ownerUserid = ""
+                                            // 清掉旧账号的会话 Cookie（t1/vip_type 等），防止与下一个
+                                            // 登录账号的凭据混搭导致数据串号；设备类 Cookie 保留
+                                            KuGouApi.clearAuthCookies()
+                                            // 注意：不要清 ownerToken/ownerUserid（VIP 借号凭据）。
+                                            // 激活是按设备绑定的，与登录哪个账号无关；清掉后取流会退化用
+                                            // 当前账号 token，未激活账号将无法播放 VIP 歌，直到下次重启才恢复。
                                             val homePrefs = context.getSharedPreferences("home_cache", Context.MODE_PRIVATE)
                                             homePrefs.edit()
                                                 .remove("daily_songs_json")

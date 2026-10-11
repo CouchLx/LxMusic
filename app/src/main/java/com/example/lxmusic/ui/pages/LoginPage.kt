@@ -19,6 +19,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.lxmusic.ui.components.IOLoadingIndicator
 import com.example.lxmusic.KuGouApi
+import com.example.lxmusic.LoginTokenKeeper
+import com.example.lxmusic.VipConfigManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -205,6 +207,11 @@ fun LoginPage(onBack: () -> Unit, onLoginSuccess: (String) -> Unit) {
                             // 更新 API 认证信息
                             KuGouApi.token = token ?: ""
                             KuGouApi.userid = userid.toString()
+                            // 登录即最新：记录续期时间，避免当天又触发 LoginTokenKeeper 保活刷新
+                            LoginTokenKeeper.markFresh(context)
+                            // 恢复本机的 VIP 借号凭据（ownerToken）：激活按设备绑定、与登录账号无关；
+                            // 不恢复会导致"退出→登录其他账号"后取流退化为用当前账号 token（无会员则不能听）
+                            VipConfigManager.applySavedVipToApi(context)
                             // 切换账号后清掉上一个账号的「喜欢」歌单缓存
                             KuGouApi.clearKugouLikeCache()
                             // 清除旧用户的个性化推荐缓存

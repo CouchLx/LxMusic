@@ -1040,17 +1040,59 @@ fun AppScaffold(
                 }
             }
         }
+        // 服务端会话 Cookie 持久化：登录/设备注册时服务器下发的 t1、vip_token 等凭证
+        // 存进 prefs，重启后恢复——概念版 /login/token 刷新登录需要登录时的 t1，
+        // 只放内存 cookieStore 会随进程重启丢失，导致刷新永远失败（实测 error_code=20018）
+        val cookieGson = com.google.gson.Gson()
+        var lastCookieJson: String? = null
+        KuGouApi.onServerCookiesChanged = { cookies ->
+            runCatching {
+                val json = cookieGson.toJson(cookies)
+                if (json != lastCookieJson) {
+                    lastCookieJson = json
+                    settingsPrefs.edit().putString("kugou_server_cookies", json).apply()
+                }
+            }
+        }
         // 获取或注册 dfid
         KuGouApi.clearServerCookies()
+        // 恢复上次持久化的服务端 Cookie（核心是登录下发的 t1）
+        runCatching {
+            val saved = settingsPrefs.getString("kugou_server_cookies", null)
+            if (!saved.isNullOrBlank()) {
+                val type = object : com.google.gson.reflect.TypeToken<Map<String, String>>() {}.type
+                KuGouApi.restoreServerCookies(cookieGson.fromJson(saved, type))
+            }
+        }
         try {
             val resp = KuGouApi.service.registerDev()
-            if (!resp.data?.dfid.isNullOrBlank()) {
-                KuGouApi.dfid = resp.data!!.dfid!!
-                settingsRepository.dfid = KuGouApi.dfid
+            val newDfid = resp.data?.dfid
+            // 服务器 /register/dev 偶发返回空或 "undefined"（其调酷狗失败时的容错缺陷）：
+            // 无效时回退到本地保存的 dfid，避免 Cookie/请求缺失设备标识
+            if (!newDfid.isNullOrBlank() && newDfid != "undefined") {
+                KuGouApi.dfid = newDfid
+                settingsRepository.dfid = newDfid
+            } else {
+                val savedDfid = settingsRepository.dfid
+                if (!savedDfid.isNullOrBlank()) KuGouApi.dfid = savedDfid
             }
         } catch (_: Exception) {
             val savedDfid = settingsRepository.dfid
             if (!savedDfid.isNullOrBlank()) KuGouApi.dfid = savedDfid
+        }
+        // 登录 token 保活：距上次续期超过 7 天则（后台）调酷狗 /login/token 延长过期时间，
+        // 避免用户 token 过期后必须重新验证码登录（酷狗 token 约 1 个月过期）。
+        // 必须放在 registerDev 之后：概念版(lite)刷新要用 dfid + 服务器下发的设备指纹
+        // cookie（KUGOU_API_GUID/DEV/MAC），提前发会因缺设备参数被拒（实测 502/20018）
+        if (LoginTokenKeeper.shouldRefresh(context)) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val result = LoginTokenKeeper.refresh(context)
+                    android.util.Log.d("LxMusic", "登录 token 保活: ${result.getOrElse { it.message ?: "失败" }}")
+                } catch (e: Exception) {
+                    android.util.Log.e("LxMusic", "登录 token 保活失败", e)
+                }
+            }
         }
         playerViewModel.onApiReady()
         android.util.Log.d("LxMusic", "API就绪: dfid=${KuGouApi.dfid}, owner=${KuGouApi.ownerUserid}")

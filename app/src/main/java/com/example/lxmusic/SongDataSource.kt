@@ -102,10 +102,9 @@ class SongDataSource : DataSource {
                 var resultUrl: String? = null
                 lastTimeLength = 0
                 try {
-                    KuGouApi.useOwnerAuth = true
-                    android.util.Log.d("LxMusic", "SongDataSource: vipUserid='${KuGouApi.vipUserid}', ownerToken='${KuGouApi.ownerToken.take(5)}', token='${KuGouApi.token.take(5)}'")
+                    // 借号取流：走独立的 ownerService（Cookie 上下文与普通请求隔离，
+                    // 已激活时固定用 owner 账号身份，未激活回退当前用户），不再用全局开关
                     val authMethod = when {
-                        KuGouApi.vipUserid.isNotBlank() -> "vipUserid=${KuGouApi.vipUserid}"
                         KuGouApi.ownerToken.isNotBlank() -> "ownerToken"
                         else -> "userToken"
                     }
@@ -113,7 +112,7 @@ class SongDataSource : DataSource {
                     val lastIndex = qualityChain.size - 1
                     for ((idx, quality) in qualityChain.withIndex()) {
                         val qParam = quality.ifBlank { null }
-                        val resp = KuGouApi.service.getSongUrl(hash, albumAudioId, qParam)
+                        val resp = KuGouApi.ownerService.getSongUrl(hash, albumAudioId, qParam)
                         val url = resp.play_url
                         val isLast = idx == lastIndex
                         // 成功条件：status=1、有URL、bitRate>0
@@ -137,9 +136,7 @@ class SongDataSource : DataSource {
                         }
                         android.util.Log.d("LxMusic", "SongDataSource: hash=$hash, quality=$qParam 不可用($reason), 尝试下一音质")
                     }
-                    KuGouApi.useOwnerAuth = false
                 } catch (e: Exception) {
-                    KuGouApi.useOwnerAuth = false
                     KuGouApi.lastBitRate = 0
                     KuGouApi.lastExtName = null
                     android.util.Log.e("LxMusic", "SongDataSource: 获取URL失败", e)

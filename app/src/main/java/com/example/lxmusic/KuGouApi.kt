@@ -1305,6 +1305,14 @@ interface KuGouService {
         @Query("code") code: String
     ): LoginResponse
 
+    // 刷新登录：延长 token 过期时间（酷狗滑动续期，返回新 token/userid 等）。
+    // 注意不要频繁调用（上游说明可能被风控），客户端由 LoginTokenKeeper 做天级低频调用。
+    @GET("login/token")
+    suspend fun refreshLoginToken(
+        @Query("token") token: String,
+        @Query("userid") userid: Long
+    ): LoginResponse
+
     @GET("user/detail")
     suspend fun getUserDetail(
         @Query("token") token: String,
@@ -1672,10 +1680,6 @@ object KuGouApi {
     @Volatile
     var vipUserid: String = ""
 
-    // 标记当前请求是否使用 VIP 账号
-    @Volatile
-    var useOwnerAuth: Boolean = false
-
     // 播放音质: "flac"=无损(默认), "128", "320", "high"
     @Volatile
     var audioQuality: String? = "flac"
@@ -1688,22 +1692,62 @@ object KuGouApi {
 
     private var _cookieStore: MutableMap<String, String>? = null
 
+    // 服务端注入/下发的会话 Cookie 变更回调（用于持久化 t1/vip_token 等凭证）；
+    // 概念版 /login/token 刷新登录需要登录时下发的 t1 cookie，重启后必须恢复，否则刷新必失败
+    @Volatile
+    var onServerCookiesChanged: ((Map<String, String>) -> Unit)? = null
+
+    // service 懒创建前的暂存（启动时先 restore、后首次请求时并入）
+    private val pendingServerCookies = mutableMapOf<String, String>()
+
+    /** 恢复持久化的服务端 Cookie（每次启动、clearServerCookies 之后调用） */
+    fun restoreServerCookies(cookies: Map<String, String>) {
+        if (cookies.isEmpty()) return
+        pendingServerCookies.putAll(cookies)
+        _cookieStore?.putAll(cookies)
+        android.util.Log.d("LxMusic", "已恢复服务端 Cookie: ${cookies.keys.joinToString(",")}")
+    }
+
     /** 清除服务器 Cookie（每次启动时调用，确保获取新设备标识） */
     fun clearServerCookies() {
         _cookieStore?.clear()
+        pendingServerCookies.clear()
         android.util.Log.d("LxMusic", "已清除服务器 Cookie")
+    }
+
+    /** 清除登录态相关的服务端 Cookie（token/userid/t1/vip_type/vip_token），
+     *  保留设备类（dfid/KUGOU_API_*）。退出登录时调用：防止切换账号后旧账号凭据残留，
+     *  与下一个账号的会话混搭（曾导致歌单等数据串号）。 */
+    fun clearAuthCookies() {
+        val authKeys = listOf("token", "userid", "t1", "vip_type", "vip_token")
+        _cookieStore?.let { store -> authKeys.forEach { store.remove(it) } }
+        authKeys.forEach { pendingServerCookies.remove(it) }
+        // 同步持久化快照（清掉 auth 类后写回）
+        onServerCookiesChanged?.invoke(_cookieStore?.toMap() ?: emptyMap())
+        android.util.Log.d("LxMusic", "已清除登录态 Cookie")
     }
 
     /** 重建 API 服务（服务器地址变更后调用） */
     fun rebuildService() {
         _service = null
+        _ownerService = null
         _cookieStore = null
+        pendingServerCookies.clear()
         android.util.Log.d("LxMusic", "API 服务已重建，baseUrl=$baseUrl")
     }
 
     private var _service: KuGouService? = null
     val service: KuGouService
         get() = _service ?: createService().also { _service = it }
+
+    private var _ownerService: KuGouService? = null
+
+    /** 取流专用（借号身份）的 API：独立 OkHttpClient，Cookie 固定为 owner 账号
+     *  （未激活时回退当前用户），与普通请求（[service]）的 Cookie 上下文完全隔离。
+     *  旧实现用全局 useOwnerAuth 开关切换身份，并发时会把 owner 身份泄漏给同时进行的
+     *  歌单/收藏等请求，导致用户列表显示 owner 账号数据（2026-10-11 改为结构隔离）。 */
+    val ownerService: KuGouService
+        get() = _ownerService ?: createOwnerService().also { _ownerService = it }
 
     // ==================== 收藏到酷狗（喜欢/歌单增删） ====================
 
@@ -2431,6 +2475,8 @@ object KuGouApi {
 
         // 自动保存和回传 Cookie
         val cookieStore = mutableMapOf<String, String>()
+        // 先并入启动时恢复的持久化会话 Cookie（t1 等），再由本次响应覆盖更新
+        cookieStore.putAll(pendingServerCookies)
         // 暴露 cookieStore 以便清除
         this._cookieStore = cookieStore
         val cookieJar = object : okhttp3.CookieJar {
@@ -2443,33 +2489,20 @@ object KuGouApi {
                         cookieStore.remove(cookie.name)
                     }
                 }
+                // 通知外部持久化（登录下发的 t1/vip_token 等，重启后恢复用）
+                onServerCookiesChanged?.invoke(cookieStore.toMap())
             }
             override fun loadForRequest(url: okhttp3.HttpUrl): List<okhttp3.Cookie> {
                 // 合并服务器 Cookie 和自定义认证 Cookie
                 val allCookies = cookieStore.toMutableMap()
                 if (dfid.isNotBlank()) allCookies["dfid"] = dfid
 
-                // 根据 useOwnerAuth 选择使用 VIP 账号或当前用户账号
-                val authToken: String
-                val authUserid: String
-                if (useOwnerAuth) {
-                    // 优先使用手动设置的 vipUserid，其次用 ownerToken
-                    if (vipUserid.isNotBlank()) {
-                        authToken = token  // 用当前用户的 token
-                        authUserid = vipUserid
-                    } else if (ownerToken.isNotBlank()) {
-                        authToken = ownerToken
-                        authUserid = ownerUserid
-                    } else {
-                        authToken = token
-                        authUserid = userid
-                    }
-                } else {
-                    authToken = token
-                    authUserid = userid
-                }
-                if (authToken.isNotBlank()) allCookies["token"] = authToken
-                if (authUserid.isNotBlank()) allCookies["userid"] = authUserid
+                // 普通请求固定使用「当前登录用户」身份。
+                // 取流借号（owner 身份）走独立的 ownerService（Cookie 上下文完全隔离），
+                // 不再用全局开关——旧 useOwnerAuth 在并发时会给同时进行的歌单/收藏请求
+                // 注入 owner 账号凭据，导致用户列表显示 owner 数据（2026-10-11 修复）。
+                if (token.isNotBlank()) allCookies["token"] = token
+                if (userid.isNotBlank()) allCookies["userid"] = userid
 
                 // 过滤掉空值 cookie
                 val result = allCookies.filter { it.value.isNotBlank() }.map { (name, value) ->
@@ -2504,6 +2537,51 @@ object KuGouApi {
             .dispatcher(okhttp3.Dispatcher().apply { maxRequestsPerHost = 16 })
             .build()
 
+        return Retrofit.Builder()
+            .baseUrl(baseUrl)
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(KuGouService::class.java)
+    }
+
+    /**
+     * 构建「借号取流」专用的服务：独立 OkHttpClient，Cookie 上下文与普通 [service] 完全隔离。
+     *
+     * 身份规则（每次请求动态读取，激活凭据变化立即生效）：
+     * - 已激活（ownerToken 非空）→ 以 owner 账号（VIP 借号）身份请求；
+     * - 未激活 → 回退当前登录用户身份（与旧行为一致）。
+     *
+     * 注意不能用 cookieJar：OkHttp 的 BridgeInterceptor 会以「覆盖」语义写入 cookieJar 的
+     * Cookie 头，拦截器里预设的 Cookie 会被冲掉；因此这里不挂 cookieJar，直接用应用拦截器
+     * 设置 Cookie 头（应用拦截器最先执行、且无 cookieJar 时不会被覆盖）。
+     */
+    private fun createOwnerService(): KuGouService {
+        val ownerCookieInterceptor = okhttp3.Interceptor { chain ->
+            val useOwner = ownerToken.isNotBlank()
+            val useToken = if (useOwner) ownerToken else token
+            val useUserid = if (useOwner) ownerUserid else userid
+            val cookies = mutableListOf<String>()
+            if (dfid.isNotBlank()) cookies.add("dfid=$dfid")
+            if (useToken.isNotBlank()) cookies.add("token=$useToken")
+            if (useUserid.isNotBlank()) cookies.add("userid=$useUserid")
+            val req = chain.request().newBuilder()
+                .header("Cookie", cookies.joinToString("; "))
+                .build()
+            chain.proceed(req)
+        }
+        val bodyLogInterceptor = okhttp3.Interceptor { chain ->
+            val response = chain.proceed(chain.request())
+            if (response.request.url.toString().contains("song/url")) {
+                android.util.Log.d("LxMusic", "song/url(owner) response body: ${response.peekBody(4096).string()}")
+            }
+            response
+        }
+        val client = okhttp3.OkHttpClient.Builder()
+            .addInterceptor(ownerCookieInterceptor)
+            .addInterceptor(bodyLogInterceptor)
+            .dispatcher(okhttp3.Dispatcher().apply { maxRequestsPerHost = 16 })
+            .build()
         return Retrofit.Builder()
             .baseUrl(baseUrl)
             .client(client)
