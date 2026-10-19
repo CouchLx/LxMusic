@@ -16,12 +16,14 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -223,6 +225,7 @@ internal fun SettingsGroupItemRow(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
+    statusBadge: String? = null,
     showDivider: Boolean = true
 ) {
     Column(
@@ -256,6 +259,21 @@ internal fun SettingsGroupItemRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            if (!statusBadge.isNullOrBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                    modifier = Modifier.padding(end = 6.dp)
+                ) {
+                    Text(
+                        text = statusBadge,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
@@ -268,6 +286,147 @@ internal fun SettingsGroupItemRow(
                 modifier = Modifier.padding(start = 58.dp, end = 16.dp),
                 thickness = 0.6.dp,
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+            )
+        }
+    }
+}
+
+/**
+ * 现代化胶囊分段选择器（用于 2~4 个互斥选项切换，如歌词渲染模式、控制栏形态等）
+ */
+@Composable
+internal fun ModernSegmentedPill(
+    options: List<Pair<String, String>>,
+    selectedKey: String,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            options.forEach { (key, label) ->
+                val isSelected = key == selectedKey
+                Surface(
+                    onClick = { onSelect(key) },
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 播放器视觉背景预设卡片
+ */
+@Composable
+internal fun BackgroundPresetCard(
+    title: String,
+    tag: String,
+    subtitle: String,
+    selected: Boolean,
+    enabled: Boolean = true,
+    previewBrush: Brush,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(16.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+        border = if (selected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+                 else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (enabled) 1f else 0.45f)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(previewBrush)
+                    .border(0.8.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (selected) {
+                    Box(
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f)
+                    ) {
+                        Text(
+                            text = tag,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2
+                )
+            }
+            RadioButton(
+                selected = selected,
+                onClick = onClick,
+                enabled = enabled
             )
         }
     }
@@ -451,68 +610,75 @@ fun SettingsPage(
                 null -> {
                     // ==================== 主菜单 ====================
                     Column {
-                        // —— 新分类规划（新架构文件夹） ——
+                        // 计算动态状态徽标（大厂级交互：主页一览即知当前关键配置）
+                        val appearanceModeText = when (themeDarkMode) {
+                            "dark" -> "深色"
+                            "light" -> "浅色"
+                            else -> "跟随系统"
+                        }
+                        val appearanceThemeText = if (settingsPrefs.getString("theme_mode", "dynamic") == "modern") "现代化" else "原生"
+                        val appearanceBadge = "$appearanceModeText · $appearanceThemeText"
+
+                        val playerStageBadge = when {
+                            playerHyperBg -> "灵动流体"
+                            playerMeshBg -> "Mesh频谱"
+                            playerCoverBlurBg -> "封面模糊"
+                            playerDynamicBg -> "封面渐变"
+                            playerFluidAmbientBg -> "极简弥散"
+                            else -> "极简黑调"
+                        }
+
+                        val audioQualityBadge = when (settingsPrefs.getString("audio_quality", null)) {
+                            "128" -> "标准 128k"
+                            "320" -> "高品质 320k"
+                            "high" -> "Hi-Res"
+                            else -> "无损 FLAC"
+                        }
+
+                        // —— 第 1 组：视听体验（外观与个性化 / 播放界面与动效 / 声音与播放） ——
                         SettingsGroupCard {
                             SettingsGroupItemRow(
-                                icon = Icons.Default.Tune,
-                                title = "通用",
-                                subtitle = "播放音质、偏好设置",
-                                onClick = { onSettingsSubPageChange("common") },
-                                showDivider = true
-                            )
-                            SettingsGroupItemRow(
                                 icon = Icons.Default.Palette,
-                                title = "外观",
-                                subtitle = "主题模式、色彩与背景壁纸",
+                                title = "外观与个性化",
+                                subtitle = "主题色彩、深浅模式、动效与背景壁纸",
+                                statusBadge = appearanceBadge,
                                 onClick = { onSettingsSubPageChange("appearance") },
                                 showDivider = true
                             )
                             SettingsGroupItemRow(
                                 icon = Icons.Default.MusicNote,
-                                title = "播放界面",
-                                subtitle = "黑胶唱机、动效氛围、歌词特效",
+                                title = "播放界面与动效",
+                                subtitle = "黑胶唱机、动效氛围、歌词排版与播放控制",
+                                statusBadge = playerStageBadge,
                                 onClick = { onSettingsSubPageChange("player_stage") },
-                                showDivider = false
+                                showDivider = true
                             )
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // —— 第一组：主题高级与导航栏 ——
-                        SettingsGroupCard {
-                            SettingsGroupItemRow(
-                                icon = Icons.Default.Palette,
-                                title = "主题高级与导航栏",
-                                subtitle = "液态玻璃、色彩平滑过渡与导航底栏设置",
-                                onClick = { onSettingsSubPageChange("display") },
-                                showDivider = false
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // —— 第二组：播放 / 通用 / USB独占 ——
-                        SettingsGroupCard {
                             SettingsGroupItemRow(
                                 icon = Icons.AutoMirrored.Filled.PlaylistPlay,
-                                title = "播放设置",
-                                subtitle = "淡入淡出、响度均衡、下一首交叉淡化",
-                                onClick = { onSettingsSubPageChange("playback") }
+                                title = "声音与播放",
+                                subtitle = "播放音质、淡入淡出、响度均衡与输出偏好",
+                                statusBadge = audioQualityBadge,
+                                onClick = { onSettingsSubPageChange("playback") },
+                                showDivider = false
                             )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // —— 第 2 组：系统与交互（通用与交互 / USB 独占模式） ——
+                        SettingsGroupCard {
                             SettingsGroupItemRow(
                                 icon = Icons.Default.Settings,
-                                title = "通用设置",
-                                subtitle = "首页排序、交互与反馈",
-                                onClick = { onSettingsSubPageChange("general") }
+                                title = "通用与交互",
+                                subtitle = "首页模块排序、触觉反馈、高刷新率",
+                                onClick = { onSettingsSubPageChange("general") },
+                                showDivider = true
                             )
                             SettingsGroupItemRow(
                                 icon = Icons.Default.Usb,
                                 title = "USB 独占模式",
-                                subtitle = if (settingsPrefs.getBoolean("usb_exclusive_playback", false)) {
-                                    "已开启 · 原生驱动直连 USB DAC"
-                                } else {
-                                    "已关闭 · 绕过系统混音器输出"
-                                },
+                                subtitle = "原生驱动直连 USB DAC，绕过系统混音输出",
+                                statusBadge = if (settingsPrefs.getBoolean("usb_exclusive_playback", false)) "已开启" else "已关闭",
                                 onClick = { onSettingsSubPageChange("usb") },
                                 showDivider = false
                             )
@@ -520,24 +686,26 @@ fun SettingsPage(
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // —— 第三组：存储 / 代理 / 关于应用 ——
+                        // —— 第 3 组：数据与关于（存储与缓存 / 代理设置 / 关于应用） ——
                         SettingsGroupCard {
                             SettingsGroupItemRow(
                                 icon = Icons.Default.Storage,
                                 title = "存储与缓存",
-                                subtitle = "缓存占用、缓存上限、清除缓存",
-                                onClick = { onSettingsSubPageChange("storage") }
+                                subtitle = "歌曲缓存占用、缓存上限与清理临时数据",
+                                onClick = { onSettingsSubPageChange("storage") },
+                                showDivider = true
                             )
                             SettingsGroupItemRow(
                                 icon = Icons.Default.Cloud,
                                 title = "代理设置",
-                                subtitle = "服务器地址、VIP 账号",
-                                onClick = { onSettingsSubPageChange("proxy") }
+                                subtitle = "自定义代理服务器、VIP 账号与网络连接",
+                                onClick = { onSettingsSubPageChange("proxy") },
+                                showDivider = true
                             )
                             SettingsGroupItemRow(
                                 icon = Icons.Default.Info,
                                 title = "关于应用",
-                                subtitle = "版本信息、检查更新、开源仓库",
+                                subtitle = "版本信息、开源仓库与检查更新",
                                 onClick = { onSettingsSubPageChange("about") },
                                 showDivider = false
                             )
@@ -623,13 +791,7 @@ fun SettingsPage(
                     }
                 }
 
-                "common" -> {
-                    SettingsCommonContent(
-                        settingsPrefs = settingsPrefs
-                    )
-                }
-
-                "appearance" -> {
+                "appearance", "display", "customize" -> {
                     SettingsAppearanceContent(
                         themeDarkMode = themeDarkMode,
                         onThemeDarkModeChange = onThemeDarkModeChange,
@@ -637,8 +799,23 @@ fun SettingsPage(
                         onThemeSeedColorChange = onThemeSeedColorChange,
                         themePaletteStyle = themePaletteStyle,
                         onThemePaletteStyleChange = onThemePaletteStyleChange,
+                        themeColorAnimation = themeColorAnimation,
+                        onThemeColorAnimationChange = onThemeColorAnimationChange,
                         onDynamicColorChange = onDynamicColorChange,
+                        floatingBottomBar = floatingBottomBar,
                         onFloatingBottomBarChange = onFloatingBottomBarChange,
+                        liquidGlass = liquidGlass,
+                        onLiquidGlassChange = onLiquidGlassChange,
+                        navBarOpacity = navBarOpacity,
+                        onNavBarOpacityChange = onNavBarOpacityChange,
+                        playerBarOpacity = playerBarOpacity,
+                        onPlayerBarOpacityChange = onPlayerBarOpacityChange,
+                        followThemeColor = followThemeColor,
+                        onFollowThemeColorChange = onFollowThemeColorChange,
+                        playerBarWhiteBlend = playerBarWhiteBlend,
+                        onPlayerBarWhiteBlendChange = onPlayerBarWhiteBlendChange,
+                        floatingBarOpacity = floatingBarOpacity,
+                        onFloatingBarOpacityChange = onFloatingBarOpacityChange,
                         settingsPrefs = settingsPrefs,
                         currentUri = currentUri,
                         bgOpacity = bgOpacity,
@@ -650,7 +827,7 @@ fun SettingsPage(
                     )
                 }
 
-                "player_stage" -> {
+                "player_stage", "player", "motion" -> {
                     SettingsPlayerStageContent(
                         playerDynamicBg = playerDynamicBg,
                         onPlayerDynamicBgChange = onPlayerDynamicBgChange,
@@ -705,120 +882,7 @@ fun SettingsPage(
                     )
                 }
 
-                "customize" -> {
-                    SettingsCustomizeContent(
-                        currentUri = currentUri,
-                        bgOpacity = bgOpacity,
-                        onOpacityChange = onOpacityChange,
-                        onReset = onReset,
-                        onDynamicColorChange = onDynamicColorChange,
-                        onThemeColorChange = onThemeColorChange,
-                        onBackgroundImageChange = onBackgroundImageChange,
-                        floatingBottomBar = floatingBottomBar,
-                        onFloatingBottomBarChange = onFloatingBottomBarChange,
-                        settingsPrefs = settingsPrefs,
-                        onRegisterPickAction = { action ->
-                            onAddWallpaperAction = action
-                        }
-                    )
-                }
-
-                "display" -> {
-                    SettingsDisplayContent(
-                        floatingBottomBar = floatingBottomBar,
-                        onFloatingBottomBarChange = onFloatingBottomBarChange,
-                        liquidGlass = liquidGlass,
-                        onLiquidGlassChange = onLiquidGlassChange,
-                        navBarOpacity = navBarOpacity,
-                        onNavBarOpacityChange = onNavBarOpacityChange,
-                        playerBarOpacity = playerBarOpacity,
-                        onPlayerBarOpacityChange = onPlayerBarOpacityChange,
-                        followThemeColor = followThemeColor,
-                        onFollowThemeColorChange = onFollowThemeColorChange,
-                        playerBarWhiteBlend = playerBarWhiteBlend,
-                        onPlayerBarWhiteBlendChange = onPlayerBarWhiteBlendChange,
-                        floatingBarOpacity = floatingBarOpacity,
-                        onFloatingBarOpacityChange = onFloatingBarOpacityChange,
-                        themeDarkMode = themeDarkMode,
-                        onThemeDarkModeChange = onThemeDarkModeChange,
-                        themeSeedColor = themeSeedColor,
-                        onThemeSeedColorChange = onThemeSeedColorChange,
-                        themePaletteStyle = themePaletteStyle,
-                        onThemePaletteStyleChange = onThemePaletteStyleChange,
-                        themeColorAnimation = themeColorAnimation,
-                        onThemeColorAnimationChange = onThemeColorAnimationChange,
-                        onDynamicColorChange = onDynamicColorChange,
-                        settingsPrefs = settingsPrefs
-                    )
-                }
-
-                "player" -> {
-                    SettingsPlayerContent(
-                        playerBgOpacity = playerBgOpacity,
-                        onPlayerBgOpacityChange = onPlayerBgOpacityChange,
-                        playerBlur = playerBlur,
-                        onPlayerBlurChange = onPlayerBlurChange,
-                        playerDynamicBg = playerDynamicBg,
-                        onPlayerDynamicBgChange = onPlayerDynamicBgChange,
-                        playerRoundAlbum = playerRoundAlbum,
-                        onPlayerRoundAlbumChange = onPlayerRoundAlbumChange,
-                        playerRotate = playerRotate,
-                        onPlayerRotateChange = onPlayerRotateChange,
-                        playerVinylStyle = playerVinylStyle,
-                        onPlayerVinylStyleChange = onPlayerVinylStyleChange,
-                        playerVinylPointer = playerVinylPointer,
-                        onPlayerVinylPointerChange = onPlayerVinylPointerChange,
-                        playerVinylBase = playerVinylBase,
-                        onPlayerVinylBaseChange = onPlayerVinylBaseChange,
-                        playerBgEnhance = playerBgEnhance,
-                        onPlayerBgEnhanceChange = onPlayerBgEnhanceChange,
-                        playerWaveformSlider = playerWaveformSlider,
-                        onPlayerWaveformSliderChange = onPlayerWaveformSliderChange,
-                        playerLyricsWordEffect = playerLyricsWordEffect,
-                        onPlayerLyricsWordEffectChange = onPlayerLyricsWordEffectChange,
-                        playerMeiloxLyrics = playerMeiloxLyrics,
-                        onPlayerMeiloxLyricsChange = onPlayerMeiloxLyricsChange,
-                        playerLyricsSeekPreview = playerLyricsSeekPreview,
-                        onPlayerLyricsSeekPreviewChange = onPlayerLyricsSeekPreviewChange,
-                        playerCoverBlurBg = playerCoverBlurBg,
-                        onPlayerCoverBlurBgChange = onPlayerCoverBlurBgChange,
-                        playerTapCoverToLyrics = playerTapCoverToLyrics,
-                        onPlayerTapCoverToLyricsChange = onPlayerTapCoverToLyricsChange,
-                        playerCompactControls = playerCompactControls,
-                        onPlayerCompactControlsChange = onPlayerCompactControlsChange,
-                        playerMinimalistControls = playerMinimalistControls,
-                        onPlayerMinimalistControlsChange = onPlayerMinimalistControlsChange
-                    )
-                }
-
-                "motion" -> {
-                    SettingsMotionContent(
-                        playerHyperBg = playerHyperBg,
-                        onPlayerHyperBgChange = onPlayerHyperBgChange,
-                        playerFluidAmbientBg = playerFluidAmbientBg,
-                        onPlayerFluidAmbientBgChange = onPlayerFluidAmbientBgChange,
-                        playerMeshBg = playerMeshBg,
-                        onPlayerMeshBgChange = onPlayerMeshBgChange,
-                        playerCoverBlurBg = playerCoverBlurBg,
-                        onPlayerCoverBlurBgChange = onPlayerCoverBlurBgChange,
-                        playerCoverBlurAmount = playerCoverBlurAmount,
-                        onPlayerCoverBlurAmountChange = onPlayerCoverBlurAmountChange,
-                        playerCoverBlurDarken = playerCoverBlurDarken,
-                        onPlayerCoverBlurDarkenChange = onPlayerCoverBlurDarkenChange,
-                        playerAudioReactive = playerAudioReactive,
-                        onPlayerAudioReactiveChange = onPlayerAudioReactiveChange,
-                        playerLyricBlur = playerLyricBlur,
-                        onPlayerLyricBlurChange = onPlayerLyricBlurChange,
-                        playerLyricBlurAmount = playerLyricBlurAmount,
-                        onPlayerLyricBlurAmountChange = onPlayerLyricBlurAmountChange,
-                        playerDynamicBg = playerDynamicBg,
-                        onPlayerDynamicBgChange = onPlayerDynamicBgChange,
-                        playerBgEnhance = playerBgEnhance,
-                        onPlayerBgEnhanceChange = onPlayerBgEnhanceChange
-                    )
-                }
-
-                "playback" -> {
+                "playback", "common" -> {
                     SettingsPlaybackContent(
                         playbackKeepProgress = playbackKeepProgress,
                         onPlaybackKeepProgressChange = onPlaybackKeepProgressChange,
@@ -924,413 +988,6 @@ fun SettingsPage(
     }
 }
 
-@Composable
-internal fun SettingsDisplayContent(
-    floatingBottomBar: Boolean,
-    onFloatingBottomBarChange: (Boolean) -> Unit,
-    liquidGlass: Boolean,
-    onLiquidGlassChange: (Boolean) -> Unit,
-    navBarOpacity: Float,
-    onNavBarOpacityChange: (Float) -> Unit,
-    playerBarOpacity: Float,
-    onPlayerBarOpacityChange: (Float) -> Unit,
-    followThemeColor: Boolean,
-    onFollowThemeColorChange: (Boolean) -> Unit,
-    playerBarWhiteBlend: Float,
-    onPlayerBarWhiteBlendChange: (Float) -> Unit,
-    floatingBarOpacity: Float,
-    onFloatingBarOpacityChange: (Float) -> Unit,
-    themeDarkMode: String = "auto",
-    onThemeDarkModeChange: (String) -> Unit = {},
-    themeSeedColor: String = "0061A4",
-    onThemeSeedColorChange: (String) -> Unit = {},
-    themePaletteStyle: String = "TonalSpot",
-    onThemePaletteStyleChange: (String) -> Unit = {},
-    themeColorAnimation: Boolean = true,
-    onThemeColorAnimationChange: (Boolean) -> Unit = {},
-    onDynamicColorChange: (Boolean) -> Unit = {},
-    settingsPrefs: android.content.SharedPreferences
-) {
-    // 主题模式（此处只读判断是否为现代化主题）
-    val themeMode = settingsPrefs.getString("theme_mode", "dynamic") ?: "dynamic"
-
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // ==================== 1. 动效与特效卡片 ====================
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = "动效与特效",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 4.dp)
-            )
-
-            SettingsGroupCard {
-                // (1) 颜色平滑过渡动画
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 18.dp, vertical = 15.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Animation,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "颜色平滑过渡动画",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = "切换主题或切歌色彩变化时，全界面颜色进行 420ms 柔和过渡",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Switch(
-                        checked = themeColorAnimation,
-                        onCheckedChange = { enabled ->
-                            settingsPrefs.edit().putBoolean("theme_color_animation", enabled).apply()
-                            onThemeColorAnimationChange(enabled)
-                        }
-                    )
-                }
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
-
-                // (2) 液态玻璃（实验功能）
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 18.dp, vertical = 15.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.WaterDrop,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "液态玻璃",
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "实验功能",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                        Text(
-                            text = "底栏启用 Shader 流体折射与高级毛玻璃模糊，需 GPU 支持",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Switch(
-                        checked = liquidGlass,
-                        onCheckedChange = { onLiquidGlassChange(it) }
-                    )
-                }
-            }
-        }
-
-        // ==================== 4. 底栏与导航设置 ====================
-        if (themeMode == "modern") {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "悬浮底栏设置",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 4.dp)
-                )
-
-                SettingsGroupCard {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 18.dp, vertical = 15.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.TouchApp,
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "随主题颜色变化",
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "悬浮指示器与选中高亮颜色跟随主题主色变化",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Switch(
-                            checked = followThemeColor,
-                            onCheckedChange = { onFollowThemeColorChange(it) }
-                        )
-                    }
-                }
-            }
-        }
-
-        // --- 导航栏高级自定义 ---
-        var navBarSectionExpanded by remember { mutableStateOf(settingsPrefs.getBoolean("nav_bar_section_expanded", false)) }
-        var clickAnimationSpeed by remember {
-            mutableFloatStateOf(settingsPrefs.getFloat("click_animation_speed", 700f))
-        }
-        NavBarCustomizationSection(
-            isExpanded = navBarSectionExpanded,
-            onExpandedChange = { expanded ->
-                navBarSectionExpanded = expanded
-                settingsPrefs.edit().putBoolean("nav_bar_section_expanded", expanded).apply()
-            },
-            isModernTheme = themeMode == "modern",
-            navBarOpacity = navBarOpacity,
-            onNavBarOpacityChange = onNavBarOpacityChange,
-            playerBarOpacity = playerBarOpacity,
-            onPlayerBarOpacityChange = onPlayerBarOpacityChange,
-            playerBarWhiteBlend = playerBarWhiteBlend,
-            onPlayerBarWhiteBlendChange = onPlayerBarWhiteBlendChange,
-            floatingBarOpacity = floatingBarOpacity,
-            onFloatingBarOpacityChange = onFloatingBarOpacityChange,
-            clickAnimationSpeed = clickAnimationSpeed,
-            onClickAnimationSpeedChange = { value ->
-                clickAnimationSpeed = value
-                settingsPrefs.edit().putFloat("click_animation_speed", value).apply()
-            },
-            onResetDefaults = {
-                onNavBarOpacityChange(1f)
-                onPlayerBarOpacityChange(1f)
-                onPlayerBarWhiteBlendChange(0.8f)
-                onFloatingBarOpacityChange(1f)
-                clickAnimationSpeed = 700f
-                settingsPrefs.edit()
-                    .putFloat("nav_bar_opacity", 1f)
-                    .putFloat("player_bar_opacity", 1f)
-                    .putFloat("player_bar_white_blend", 0.8f)
-                    .putFloat("floating_bar_opacity", 1f)
-                    .putFloat("click_animation_speed", 700f)
-                    .apply()
-            },
-            onAutoBalance = {
-                onNavBarOpacityChange(0.85f)
-                onPlayerBarOpacityChange(0.85f)
-                onPlayerBarWhiteBlendChange(0.5f)
-                onFloatingBarOpacityChange(0.85f)
-                settingsPrefs.edit()
-                    .putFloat("nav_bar_opacity", 0.85f)
-                    .putFloat("player_bar_opacity", 0.85f)
-                    .putFloat("player_bar_white_blend", 0.5f)
-                    .putFloat("floating_bar_opacity", 0.85f)
-                    .apply()
-            }
-        )
-    }
-}
-
-@Composable
-internal fun SettingsCustomizeContent(
-    currentUri: String?,
-    bgOpacity: Float,
-    onOpacityChange: (Float) -> Unit,
-    onReset: () -> Unit,
-    onDynamicColorChange: (Boolean) -> Unit,
-    onThemeColorChange: (String) -> Unit,
-    onBackgroundImageChange: (String?) -> Unit,
-    floatingBottomBar: Boolean,
-    onFloatingBottomBarChange: (Boolean) -> Unit,
-    settingsPrefs: android.content.SharedPreferences,
-    onRegisterPickAction: (() -> Unit) -> Unit = {}
-) {
-    Column {
-        // --- 全新手机标准壁纸相册与裁剪系统 ---
-        ThemeCustomizationSection(
-            onAddPreset = { filePath, _ ->
-                onBackgroundImageChange(filePath.toString())
-            },
-            currentBgImageUri = currentUri,
-            hasBackgroundImage = currentUri != null,
-            bgOpacity = bgOpacity,
-            onOpacityChange = onOpacityChange,
-            onResetDefaults = {
-                onBackgroundImageChange(null)
-                onOpacityChange(0.5f)
-            },
-            onClearBackgroundImage = {
-                onBackgroundImageChange(null)
-            },
-            onRegisterPickAction = onRegisterPickAction
-        )
-    }
-}
-
-/**
- * 新通用设置页面（包含播放音质等基础与偏好设置）
- */
-@Composable
-internal fun SettingsCommonContent(
-    settingsPrefs: android.content.SharedPreferences
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        // ==================== 1. 播放音质 ====================
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = "播放音质",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 4.dp)
-            )
-
-            var selectedQuality by remember {
-                mutableStateOf(settingsPrefs.getString("audio_quality", null) ?: "flac")
-            }
-            val qualityOptions = listOf(
-                "default" to "默认",
-                "128" to "标准 (128kbps)",
-                "320" to "高品质 (320kbps)",
-                "flac" to "无损 (FLAC)",
-                "high" to "Hi-Res 无损"
-            )
-            var showQualityDialog by remember { mutableStateOf(false) }
-            val currentQualityLabel = qualityOptions.find { it.first == selectedQuality }?.second ?: "无损 (FLAC)"
-
-            SettingsGroupCard {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showQualityDialog = true }
-                        .padding(horizontal = 18.dp, vertical = 15.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MusicNote,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Text(
-                        text = "当前音质",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        text = currentQualityLabel,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            if (showQualityDialog) {
-                AlertDialog(
-                    onDismissRequest = { showQualityDialog = false },
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    title = { Text("选择播放音质", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
-                    text = {
-                        Column {
-                            qualityOptions.forEach { (value, label) ->
-                                Surface(
-                                    onClick = {
-                                        selectedQuality = value
-                                        val qualityValue = if (value == "default") null else value
-                                        KuGouApi.audioQuality = qualityValue
-                                        settingsPrefs.edit().putString("audio_quality", qualityValue).apply()
-                                        showQualityDialog = false
-                                    },
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = if (selectedQuality == value)
-                                        MaterialTheme.colorScheme.primaryContainer
-                                    else
-                                        Color.Transparent,
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        RadioButton(
-                                            selected = selectedQuality == value,
-                                            onClick = {
-                                                selectedQuality = value
-                                                val qualityValue = if (value == "default") null else value
-                                                KuGouApi.audioQuality = qualityValue
-                                                settingsPrefs.edit().putString("audio_quality", qualityValue).apply()
-                                                showQualityDialog = false
-                                            }
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = label,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            fontWeight = if (selectedQuality == value) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (selectedQuality == value)
-                                                MaterialTheme.colorScheme.onPrimaryContainer
-                                            else
-                                                MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    confirmButton = {
-                        TextButton(onClick = { showQualityDialog = false }) {
-                            Text("取消")
-                        }
-                    }
-                )
-            }
-        }
-    }
-}
-
 /**
  * 新外观设置页面（包含主题风格、外观模式、色彩与风格等功能项）
  */
@@ -1342,8 +999,23 @@ internal fun SettingsAppearanceContent(
     onThemeSeedColorChange: (String) -> Unit,
     themePaletteStyle: String,
     onThemePaletteStyleChange: (String) -> Unit,
-    onDynamicColorChange: (Boolean) -> Unit,
-    onFloatingBottomBarChange: (Boolean) -> Unit,
+    themeColorAnimation: Boolean = true,
+    onThemeColorAnimationChange: (Boolean) -> Unit = {},
+    onDynamicColorChange: (Boolean) -> Unit = {},
+    floatingBottomBar: Boolean = false,
+    onFloatingBottomBarChange: (Boolean) -> Unit = {},
+    liquidGlass: Boolean = false,
+    onLiquidGlassChange: (Boolean) -> Unit = {},
+    navBarOpacity: Float = 1f,
+    onNavBarOpacityChange: (Float) -> Unit = {},
+    playerBarOpacity: Float = 1f,
+    onPlayerBarOpacityChange: (Float) -> Unit = {},
+    followThemeColor: Boolean = true,
+    onFollowThemeColorChange: (Boolean) -> Unit = {},
+    playerBarWhiteBlend: Float = 0.8f,
+    onPlayerBarWhiteBlendChange: (Float) -> Unit = {},
+    floatingBarOpacity: Float = 1f,
+    onFloatingBarOpacityChange: (Float) -> Unit = {},
     settingsPrefs: android.content.SharedPreferences,
     currentUri: String? = null,
     bgOpacity: Float = 0.5f,
@@ -1707,10 +1379,202 @@ internal fun SettingsAppearanceContent(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (4) 颜色平滑过渡动画
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 15.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Animation,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "颜色平滑过渡动画",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "切换主题或切歌色彩变化时，全界面颜色进行 420ms 柔和过渡",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Switch(
+                        checked = themeColorAnimation,
+                        onCheckedChange = { enabled ->
+                            settingsPrefs.edit().putBoolean("theme_color_animation", enabled).apply()
+                            onThemeColorAnimationChange(enabled)
+                        }
+                    )
+                }
             }
         }
 
-        // ==================== 4. 背景壁纸与相册 ====================
+        // ==================== 4. 悬浮底栏与质感折射 ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "悬浮底栏与质感折射",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            SettingsGroupCard {
+                // (1) 液态玻璃
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 15.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.WaterDrop,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "液态玻璃",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "实验功能",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                        Text(
+                            text = "底栏启用 Shader 流体折射与高级毛玻璃模糊，需 GPU 支持",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Switch(
+                        checked = liquidGlass,
+                        onCheckedChange = { onLiquidGlassChange(it) }
+                    )
+                }
+
+                if (themeMode == "modern") {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                    )
+
+                    // (2) 随主题颜色变化
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp, vertical = 15.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.TouchApp,
+                            contentDescription = null,
+                            modifier = Modifier.size(24.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "随主题颜色变化",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "悬浮指示器与选中高亮颜色跟随主题主色变化",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = followThemeColor,
+                            onCheckedChange = { onFollowThemeColorChange(it) }
+                        )
+                    }
+                }
+            }
+
+            // 导航栏高级自定义折叠面板
+            var navBarSectionExpanded by remember { mutableStateOf(settingsPrefs.getBoolean("nav_bar_section_expanded", false)) }
+            var clickAnimationSpeed by remember {
+                mutableFloatStateOf(settingsPrefs.getFloat("click_animation_speed", 700f))
+            }
+            NavBarCustomizationSection(
+                isExpanded = navBarSectionExpanded,
+                onExpandedChange = { expanded ->
+                    navBarSectionExpanded = expanded
+                    settingsPrefs.edit().putBoolean("nav_bar_section_expanded", expanded).apply()
+                },
+                isModernTheme = themeMode == "modern",
+                navBarOpacity = navBarOpacity,
+                onNavBarOpacityChange = onNavBarOpacityChange,
+                playerBarOpacity = playerBarOpacity,
+                onPlayerBarOpacityChange = onPlayerBarOpacityChange,
+                playerBarWhiteBlend = playerBarWhiteBlend,
+                onPlayerBarWhiteBlendChange = onPlayerBarWhiteBlendChange,
+                floatingBarOpacity = floatingBarOpacity,
+                onFloatingBarOpacityChange = onFloatingBarOpacityChange,
+                clickAnimationSpeed = clickAnimationSpeed,
+                onClickAnimationSpeedChange = { value ->
+                    clickAnimationSpeed = value
+                    settingsPrefs.edit().putFloat("click_animation_speed", value).apply()
+                },
+                onResetDefaults = {
+                    onNavBarOpacityChange(1f)
+                    onPlayerBarOpacityChange(1f)
+                    onPlayerBarWhiteBlendChange(0.8f)
+                    onFloatingBarOpacityChange(1f)
+                    clickAnimationSpeed = 700f
+                    settingsPrefs.edit()
+                        .putFloat("nav_bar_opacity", 1f)
+                        .putFloat("player_bar_opacity", 1f)
+                        .putFloat("player_bar_white_blend", 0.8f)
+                        .putFloat("floating_bar_opacity", 1f)
+                        .putFloat("click_animation_speed", 700f)
+                        .apply()
+                },
+                onAutoBalance = {
+                    onNavBarOpacityChange(0.85f)
+                    onPlayerBarOpacityChange(0.85f)
+                    onPlayerBarWhiteBlendChange(0.5f)
+                    onFloatingBarOpacityChange(0.85f)
+                    settingsPrefs.edit()
+                        .putFloat("nav_bar_opacity", 0.85f)
+                        .putFloat("player_bar_opacity", 0.85f)
+                        .putFloat("player_bar_white_blend", 0.5f)
+                        .putFloat("floating_bar_opacity", 0.85f)
+                        .apply()
+                }
+            )
+        }
+
+        // ==================== 5. 背景壁纸与相册 ====================
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 text = "背景壁纸与相册",
@@ -3412,397 +3276,6 @@ internal fun SettingsAboutContent() {
     }
 }
 
-// ==================== 播放器设置子页面 ====================
-
-@Composable
-fun SettingsPlayerContent(
-    playerBgOpacity: Float,
-    onPlayerBgOpacityChange: (Float) -> Unit,
-    playerBlur: Boolean,
-    onPlayerBlurChange: (Boolean) -> Unit,
-    playerDynamicBg: Boolean,
-    onPlayerDynamicBgChange: (Boolean) -> Unit,
-    playerRoundAlbum: Boolean,
-    onPlayerRoundAlbumChange: (Boolean) -> Unit,
-    playerRotate: Boolean,
-    onPlayerRotateChange: (Boolean) -> Unit,
-    playerVinylStyle: Boolean = true,
-    onPlayerVinylStyleChange: (Boolean) -> Unit = {},
-    playerVinylPointer: Boolean = true,
-    onPlayerVinylPointerChange: (Boolean) -> Unit = {},
-    playerVinylBase: Boolean = false,
-    onPlayerVinylBaseChange: (Boolean) -> Unit = {},
-    playerBgEnhance: Boolean,
-    onPlayerBgEnhanceChange: (Boolean) -> Unit,
-    playerWaveformSlider: Boolean,
-    onPlayerWaveformSliderChange: (Boolean) -> Unit,
-    playerLyricsWordEffect: Boolean,
-    onPlayerLyricsWordEffectChange: (Boolean) -> Unit,
-    playerMeiloxLyrics: Boolean,
-    onPlayerMeiloxLyricsChange: (Boolean) -> Unit,
-    playerLyricsSeekPreview: Boolean,
-    onPlayerLyricsSeekPreviewChange: (Boolean) -> Unit,
-    playerCoverBlurBg: Boolean,
-    onPlayerCoverBlurBgChange: (Boolean) -> Unit,
-    playerTapCoverToLyrics: Boolean,
-    onPlayerTapCoverToLyricsChange: (Boolean) -> Unit,
-    playerCompactControls: Boolean,
-    onPlayerCompactControlsChange: (Boolean) -> Unit,
-    playerMinimalistControls: Boolean = true,
-    onPlayerMinimalistControlsChange: (Boolean) -> Unit = {}
-) {
-    val context = LocalContext.current
-
-    Column {
-        Text(
-            text = "背景效果",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 动态渐变背景
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "动态渐变背景",
-                subtitle = "根据专辑封面颜色生成全屏渐变，随播放旋转流动",
-                checked = playerDynamicBg,
-                onCheckedChange = { enabled ->
-                    onPlayerDynamicBgChange(enabled)
-                    // 与「应用背景图片」「封面模糊背景」互斥
-                    if (enabled) {
-                        if (playerBgEnhance) onPlayerBgEnhanceChange(false)
-                        if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
-                    }
-                }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = "背景不透明度",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "调节播放器背景图片的清晰度（仅对背景图片生效）",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text("透明", style = MaterialTheme.typography.bodySmall)
-                    Slider(
-                        value = playerBgOpacity,
-                        onValueChange = onPlayerBgOpacityChange,
-                        valueRange = 0.1f..1f,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text("清晰", style = MaterialTheme.typography.bodySmall)
-                }
-                Text(
-                    text = String.format("当前: %.0f%%", playerBgOpacity * 100),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text(
-            text = "高级效果",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 波浪进度条
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "波浪进度条",
-                subtitle = "自绘正弦波进度条，播放时波浪流动，加载时脉冲动画",
-                checked = playerWaveformSlider,
-                onCheckedChange = { enabled ->
-                    onPlayerWaveformSliderChange(enabled)
-                    // 与「简约风控件」互斥：开启一方自动关闭另一方
-                    if (enabled && playerMinimalistControls) onPlayerMinimalistControlsChange(false)
-                }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 高斯模糊
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "高斯模糊",
-                subtitle = "给背景图片添加模糊和高级质感",
-                checked = playerBlur,
-                onCheckedChange = onPlayerBlurChange
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 圆形专辑封面
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "圆形专辑封面",
-                subtitle = "将专辑封面显示为圆形，开启时自动开启旋转",
-                checked = playerRoundAlbum,
-                onCheckedChange = { enabled ->
-                    onPlayerRoundAlbumChange(enabled)
-                    if (!enabled) {
-                        if (playerRotate) onPlayerRotateChange(false)
-                        if (playerVinylStyle) onPlayerVinylStyleChange(false)
-                        if (playerVinylPointer) onPlayerVinylPointerChange(false)
-                        if (playerVinylBase) onPlayerVinylBaseChange(false)
-                    }
-                }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 播放旋转动画（依赖圆形封面）
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "播放旋转动画",
-                subtitle = "播放时专辑封面旋转",
-                checked = playerRotate,
-                onCheckedChange = onPlayerRotateChange,
-                enabled = playerRoundAlbum
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 应用背景图片（与动态渐变互斥）
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "应用背景图片",
-                subtitle = "使用显示设置中选择的背景图片",
-                checked = playerBgEnhance,
-                onCheckedChange = { enabled ->
-                    onPlayerBgEnhanceChange(enabled)
-                    // 与「动态渐变背景」「封面模糊背景」互斥
-                    if (enabled) {
-                        if (playerDynamicBg) onPlayerDynamicBgChange(false)
-                        if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
-                    }
-                }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text(
-            text = "唱片样式",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 唱片样式卡片组（三个选项常驻显示，自由搭配）
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                // 主选项：黑胶唱片
-                PlayerSettingSwitchRow(
-                    title = "黑胶唱片",
-                    subtitle = "以黑胶唱片盘与拟真音轨展示专辑封面",
-                    checked = playerVinylStyle,
-                    onCheckedChange = onPlayerVinylStyleChange,
-                    enabled = playerRoundAlbum
-                )
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                )
-                // 选项一：仅指针
-                PlayerSettingSwitchRow(
-                    title = "仅指针",
-                    subtitle = "显示金属唱臂、配重块与动态唱针",
-                    checked = playerVinylPointer,
-                    onCheckedChange = onPlayerVinylPointerChange,
-                    enabled = playerRoundAlbum
-                )
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                )
-                // 选项二：底板
-                PlayerSettingSwitchRow(
-                    title = "底板",
-                    subtitle = "显示白玉唱机底座卡片与右下角徽标",
-                    checked = playerVinylBase,
-                    onCheckedChange = onPlayerVinylBaseChange,
-                    enabled = playerRoundAlbum
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text(
-            text = "歌词效果",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 逐字歌词动效
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "逐字歌词动效",
-                subtitle = "当前歌词行逐字点亮推进；关闭后保持现有样式，仅整行高亮",
-                checked = playerLyricsWordEffect,
-                onCheckedChange = {
-                    onPlayerLyricsWordEffectChange(it)
-                    if (it) onPlayerMeiloxLyricsChange(false)
-                }
-            )
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // MeiloX 液态动效歌词
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "MeiloX 液态歌词",
-                subtitle = "Apple Music 风格全屏液态发光歌词排版（与普通逐字互斥）",
-                checked = playerMeiloxLyrics,
-                onCheckedChange = {
-                    onPlayerMeiloxLyricsChange(it)
-                    if (it) onPlayerLyricsWordEffectChange(false)
-                }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 拖动歌词预览
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "拖动歌词预览",
-                subtitle = "拖动进度条时实时预览歌词位置，划过歌词行产生震动反馈",
-                checked = playerLyricsSeekPreview,
-                onCheckedChange = onPlayerLyricsSeekPreviewChange
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Text(
-            text = "界面显示",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 点击封面切换歌词
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "点击封面切换歌词",
-                subtitle = "点击专辑封面卡直接滑到歌词卡（左滑/点歌词预览条始终可用）",
-                checked = playerTapCoverToLyrics,
-                onCheckedChange = onPlayerTapCoverToLyricsChange
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 精简控制栏
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "精简控制栏",
-                subtitle = "仅歌词卡生效：隐藏播放模式与播放列表按钮，控制键贴底、进度条下沉到最底",
-                checked = playerCompactControls,
-                onCheckedChange = onPlayerCompactControlsChange
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 简约风控件
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "简约风控件",
-                subtitle = "采用胶囊形扁平进度条与极简实心播放控制按钮",
-                checked = playerMinimalistControls,
-                onCheckedChange = { enabled ->
-                    onPlayerMinimalistControlsChange(enabled)
-                    // 与「波浪进度条」互斥：开启一方自动关闭另一方
-                    if (enabled && playerWaveformSlider) onPlayerWaveformSliderChange(false)
-                }
-            )
-        }
-    }
-}
-
 /**
  * 新「播放界面」设置统一页面
  * 包含：
@@ -3882,132 +3355,120 @@ internal fun SettingsPlayerStageContent(
                 modifier = Modifier.padding(horizontal = 4.dp)
             )
 
-            SettingsGroupCard {
-                // (1) 灵动流体背景
-                PlayerSettingSwitchRow(
+            val currentBgPreset = when {
+                playerFluidAmbientBg -> "fluid"
+                playerMeshBg -> "mesh"
+                playerHyperBg -> "hyper"
+                playerCoverBlurBg -> "blur"
+                playerDynamicBg -> "dynamic"
+                playerBgEnhance -> "wallpaper"
+                else -> "pure"
+            }
+
+            fun selectBgPreset(key: String) {
+                onPlayerFluidAmbientBgChange(key == "fluid")
+                onPlayerMeshBgChange(key == "mesh")
+                onPlayerHyperBgChange(key == "hyper")
+                onPlayerCoverBlurBgChange(key == "blur")
+                onPlayerDynamicBgChange(key == "dynamic")
+                onPlayerBgEnhanceChange(key == "wallpaper")
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                BackgroundPresetCard(
                     title = "灵动流体背景",
-                    subtitle = "仿 Apple Music 风格流体光场，多频有机流动与智能高饱和取色",
-                    checked = playerFluidAmbientBg,
-                    onCheckedChange = { enabled ->
-                        onPlayerFluidAmbientBgChange(enabled)
-                        if (enabled) {
-                            if (playerMeshBg) onPlayerMeshBgChange(false)
-                            if (playerHyperBg) onPlayerHyperBgChange(false)
-                            if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
-                            if (playerDynamicBg) onPlayerDynamicBgChange(false)
-                            if (playerBgEnhance) onPlayerBgEnhanceChange(false)
-                        }
-                    }
+                    tag = "推荐 · Apple 风格",
+                    subtitle = "仿 Apple Music 流体光场，多频有机流动与智能高饱和取色",
+                    selected = currentBgPreset == "fluid",
+                    previewBrush = Brush.linearGradient(
+                        listOf(Color(0xFFE94057), Color(0xFF8A2387), Color(0xFFF27121))
+                    ),
+                    onClick = { selectBgPreset("fluid") }
                 )
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                BackgroundPresetCard(
+                    title = "Mesh 频谱背景",
+                    tag = "自适应律动",
+                    subtitle = "封面取色驱动 GL 网格流体形变，随音乐鼓点与频谱律动",
+                    selected = currentBgPreset == "mesh",
+                    previewBrush = Brush.sweepGradient(
+                        listOf(Color(0xFF2193b0), Color(0xFF6dd5ed), Color(0xFF8E2DE2), Color(0xFF2193b0))
+                    ),
+                    onClick = { selectBgPreset("mesh") }
                 )
 
-                // (2) MeiloX 网格渐变
-                PlayerSettingSwitchRow(
-                    title = "MeiloX 网格渐变",
-                    subtitle = "封面取色驱动 GL 网格流体形变，随音乐鼓点频谱律动",
-                    checked = playerMeshBg,
-                    onCheckedChange = { enabled ->
-                        onPlayerMeshBgChange(enabled)
-                        if (enabled) {
-                            if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
-                            if (playerHyperBg) onPlayerHyperBgChange(false)
-                            if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
-                            if (playerDynamicBg) onPlayerDynamicBgChange(false)
-                            if (playerBgEnhance) onPlayerBgEnhanceChange(false)
-                        }
-                    }
-                )
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
-
-                // (3) 流体动态背景 (GLSL 着色器)
-                PlayerSettingSwitchRow(
-                    title = "流体动态背景",
-                    subtitle = if (Build.VERSION.SDK_INT >= 33) {
-                        "GLSL 流体着色器，随专辑封面颜色流动、随音乐律动（需 Android 13+）"
-                    } else {
-                        "需要 Android 13 及以上版本"
-                    },
-                    checked = playerHyperBg,
+                BackgroundPresetCard(
+                    title = "极简弥散背景",
+                    tag = if (Build.VERSION.SDK_INT >= 33) "Android 13+" else "不可用",
+                    subtitle = "GLSL 弥散动态光晕，随封面色彩呼吸流动（需 Android 13+）",
+                    selected = currentBgPreset == "hyper",
                     enabled = Build.VERSION.SDK_INT >= 33,
-                    onCheckedChange = { enabled ->
-                        onPlayerHyperBgChange(enabled)
-                        if (enabled) {
-                            if (playerMeshBg) onPlayerMeshBgChange(false)
-                            if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
-                            if (playerDynamicBg) onPlayerDynamicBgChange(false)
-                            if (playerBgEnhance) onPlayerBgEnhanceChange(false)
-                            if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
-                        }
-                    }
+                    previewBrush = Brush.radialGradient(
+                        listOf(Color(0xFFFF8008), Color(0xFFFFC837), Color(0xFF1F1C2C))
+                    ),
+                    onClick = { selectBgPreset("hyper") }
                 )
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
-
-                // (4) 音频律动（依赖流体动态背景）
-                PlayerSettingSwitchRow(
-                    title = "音频律动",
-                    subtitle = if (Build.VERSION.SDK_INT >= 33) {
-                        "流体动态背景随音乐音量实时起伏律动（需开启流体动态背景）"
-                    } else {
-                        "需要 Android 13 及以上版本"
-                    },
-                    checked = playerAudioReactive,
-                    enabled = Build.VERSION.SDK_INT >= 33 && playerHyperBg,
-                    onCheckedChange = onPlayerAudioReactiveChange
-                )
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
-
-                // (5) 封面模糊背景
-                PlayerSettingSwitchRow(
-                    title = "封面模糊背景",
-                    subtitle = if (Build.VERSION.SDK_INT >= 31) {
-                        "将当前专辑封面全屏虚化模糊铺满底图（需 Android 12+）"
-                    } else {
-                        "需要 Android 12 及以上版本"
-                    },
-                    checked = playerCoverBlurBg,
+                BackgroundPresetCard(
+                    title = "封面高斯模糊",
+                    tag = if (Build.VERSION.SDK_INT >= 31) "Android 12+" else "不可用",
+                    subtitle = "全屏专辑封面高保真虚化铺底，深邃沉浸高级质感（需 Android 12+）",
+                    selected = currentBgPreset == "blur",
                     enabled = Build.VERSION.SDK_INT >= 31,
-                    onCheckedChange = { enabled ->
-                        onPlayerCoverBlurBgChange(enabled)
-                        if (enabled) {
-                            if (playerMeshBg) onPlayerMeshBgChange(false)
-                            if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
-                            if (playerDynamicBg) onPlayerDynamicBgChange(false)
-                            if (playerBgEnhance) onPlayerBgEnhanceChange(false)
-                            if (playerHyperBg) onPlayerHyperBgChange(false)
-                        }
-                    }
+                    previewBrush = Brush.linearGradient(
+                        listOf(Color(0xFF2C3E50), Color(0xFF4CA1AF))
+                    ),
+                    onClick = { selectBgPreset("blur") }
                 )
 
-                if (playerCoverBlurBg) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                    )
+                BackgroundPresetCard(
+                    title = "封面动态渐变",
+                    tag = "旋转流动",
+                    subtitle = "根据专辑封面自适应全屏渐变，随播放旋转流动",
+                    selected = currentBgPreset == "dynamic",
+                    previewBrush = Brush.linearGradient(
+                        listOf(Color(0xFF4776E6), Color(0xFF8E54E9))
+                    ),
+                    onClick = { selectBgPreset("dynamic") }
+                )
 
-                    // 封面模糊强度滑块
-                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                BackgroundPresetCard(
+                    title = "应用壁纸背景",
+                    tag = "相册壁纸",
+                    subtitle = "使用在外观设置中选择的背景图片作为播放器底图",
+                    selected = currentBgPreset == "wallpaper",
+                    previewBrush = Brush.linearGradient(
+                        listOf(Color(0xFF667EEA), Color(0xFF764BA2))
+                    ),
+                    onClick = { selectBgPreset("wallpaper") }
+                )
+
+                BackgroundPresetCard(
+                    title = "纯净极简黑调",
+                    tag = "纯黑省电",
+                    subtitle = "关闭所有动效背景，经典纯黑深邃沉浸，低功耗省电",
+                    selected = currentBgPreset == "pure",
+                    previewBrush = Brush.linearGradient(
+                        listOf(Color(0xFF232526), Color(0xFF0F0C29))
+                    ),
+                    onClick = { selectBgPreset("pure") }
+                )
+            }
+
+            // 封面模糊参数展开调节
+            androidx.compose.animation.AnimatedVisibility(
+                visible = currentBgPreset == "blur",
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                SettingsGroupCard {
+                    Column(modifier = Modifier.padding(16.dp)) {
                         Text(
                             text = "封面模糊强度",
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Medium
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -4023,25 +3484,17 @@ internal fun SettingsPlayerStageContent(
                             Text("强烈", style = MaterialTheme.typography.bodySmall)
                         }
                         Text(
-                            text = String.format("当前: %.0f", playerCoverBlurAmount),
+                            text = String.format("当前模糊: %.0f", playerCoverBlurAmount),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary
                         )
-                    }
-
-                    HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                    )
-
-                    // 背景调暗滑块
-                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Spacer(modifier = Modifier.height(14.dp))
                         Text(
-                            text = "背景调暗",
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = "背景调暗遮罩",
+                            style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.Medium
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -4054,80 +3507,34 @@ internal fun SettingsPlayerStageContent(
                                 steps = 15,
                                 modifier = Modifier.weight(1f)
                             )
-                            Text("暗", style = MaterialTheme.typography.bodySmall)
+                            Text("暗沉", style = MaterialTheme.typography.bodySmall)
                         }
                         Text(
-                            text = String.format("当前: %.0f%%", playerCoverBlurDarken * 100),
+                            text = String.format("遮罩深度: %.0f%%", playerCoverBlurDarken * 100),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
+            }
 
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
-
-                // (6) 动态渐变背景
-                PlayerSettingSwitchRow(
-                    title = "动态渐变背景",
-                    subtitle = "根据专辑封面颜色生成全屏渐变，随播放旋转流动",
-                    checked = playerDynamicBg,
-                    onCheckedChange = { enabled ->
-                        onPlayerDynamicBgChange(enabled)
-                        if (enabled) {
-                            if (playerBgEnhance) onPlayerBgEnhanceChange(false)
-                            if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
-                            if (playerMeshBg) onPlayerMeshBgChange(false)
-                            if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
-                            if (playerHyperBg) onPlayerHyperBgChange(false)
-                        }
-                    }
-                )
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
-
-                // (7) 应用壁纸背景
-                PlayerSettingSwitchRow(
-                    title = "应用壁纸背景",
-                    subtitle = "使用在外观设置中选择的背景图片作为播放器底图",
-                    checked = playerBgEnhance,
-                    onCheckedChange = { enabled ->
-                        onPlayerBgEnhanceChange(enabled)
-                        if (enabled) {
-                            if (playerDynamicBg) onPlayerDynamicBgChange(false)
-                            if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
-                            if (playerMeshBg) onPlayerMeshBgChange(false)
-                            if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
-                            if (playerHyperBg) onPlayerHyperBgChange(false)
-                        }
-                    }
-                )
-
-                if (playerBgEnhance) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                    )
-
-                    // 高斯模糊
+            // 壁纸背景参数展开调节
+            androidx.compose.animation.AnimatedVisibility(
+                visible = currentBgPreset == "wallpaper",
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                SettingsGroupCard {
                     PlayerSettingSwitchRow(
                         title = "壁纸高斯模糊",
                         subtitle = "给背景壁纸添加模糊与高级质感",
                         checked = playerBlur,
                         onCheckedChange = onPlayerBlurChange
                     )
-
                     HorizontalDivider(
                         modifier = Modifier.padding(horizontal = 16.dp),
                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
                     )
-
-                    // 背景透明度滑块
                     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                         Text(
                             text = "背景壁纸透明度",
@@ -4156,6 +3563,18 @@ internal fun SettingsPlayerStageContent(
                     }
                 }
             }
+
+            // 动效细项调节卡片
+            if (currentBgPreset in listOf("fluid", "mesh", "hyper")) {
+                SettingsGroupCard {
+                    PlayerSettingSwitchRow(
+                        title = "音频律动响应",
+                        subtitle = "背景流动与形变随当前播放的音量频谱自适应律动",
+                        checked = playerAudioReactive,
+                        onCheckedChange = onPlayerAudioReactiveChange
+                    )
+                }
+            }
         }
 
         // ==================== 2. 黑胶唱片与封面 ====================
@@ -4169,84 +3588,92 @@ internal fun SettingsPlayerStageContent(
             )
 
             SettingsGroupCard {
-                // (1) 圆形专辑封面
+                // (1) 黑胶唱机模式主开关
                 PlayerSettingSwitchRow(
-                    title = "圆形专辑封面",
-                    subtitle = "将专辑封面显示为圆形；关闭后显示矩形封面卡",
+                    title = "黑胶唱机模式",
+                    subtitle = "启用复古黑胶唱机与旋转动效；关闭后显示矩形封面卡",
                     checked = playerRoundAlbum,
                     onCheckedChange = { enabled ->
                         onPlayerRoundAlbumChange(enabled)
-                        if (!enabled) {
-                            if (playerRotate) onPlayerRotateChange(false)
-                            if (playerVinylStyle) onPlayerVinylStyleChange(false)
-                            if (playerVinylPointer) onPlayerVinylPointerChange(false)
-                            if (playerVinylBase) onPlayerVinylBaseChange(false)
+                        if (enabled) {
+                            onPlayerRotateChange(true)
+                            onPlayerVinylStyleChange(true)
+                        } else {
+                            onPlayerRotateChange(false)
+                            onPlayerVinylStyleChange(false)
+                            onPlayerVinylPointerChange(false)
+                            onPlayerVinylBaseChange(false)
                         }
                     }
                 )
 
+                // 唱机细节折叠卡片
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = playerRoundAlbum,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Column {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                        )
+
+                        // 播放旋转动画
+                        PlayerSettingSwitchRow(
+                            title = "播放平滑旋转",
+                            subtitle = "播放时唱片缓缓匀速旋转，暂停时轻柔停转",
+                            checked = playerRotate,
+                            onCheckedChange = onPlayerRotateChange
+                        )
+
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                        )
+
+                        // 黑胶唱片质感
+                        PlayerSettingSwitchRow(
+                            title = "黑胶同心音轨质感",
+                            subtitle = "在封面外圈展示拟真黑胶唱盘与精细同心音轨光泽",
+                            checked = playerVinylStyle,
+                            onCheckedChange = onPlayerVinylStyleChange
+                        )
+
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                        )
+
+                        // 金属机械唱针
+                        PlayerSettingSwitchRow(
+                            title = "金属复古唱针",
+                            subtitle = "显示金属唱臂与配重块，播放时落针，暂停时抬起复位",
+                            checked = playerVinylPointer,
+                            onCheckedChange = onPlayerVinylPointerChange
+                        )
+
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                        )
+
+                        // 复古唱机底座
+                        PlayerSettingSwitchRow(
+                            title = "复古唱机底座",
+                            subtitle = "显示白玉质感唱机底座卡片与精致徽标",
+                            checked = playerVinylBase,
+                            onCheckedChange = onPlayerVinylBaseChange
+                        )
+                    }
+                }
+
                 HorizontalDivider(
                     modifier = Modifier.padding(horizontal = 16.dp),
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
                 )
 
-                // (2) 播放旋转动画
-                PlayerSettingSwitchRow(
-                    title = "播放旋转动画",
-                    subtitle = "播放时唱片缓缓匀速旋转，暂停时轻柔停转",
-                    checked = playerRotate,
-                    onCheckedChange = onPlayerRotateChange,
-                    enabled = playerRoundAlbum
-                )
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
-
-                // (3) 黑胶唱片质感
-                PlayerSettingSwitchRow(
-                    title = "黑胶唱片质感",
-                    subtitle = "在封面外圈展示拟真黑胶唱盘与精细同心音轨光泽",
-                    checked = playerVinylStyle,
-                    onCheckedChange = onPlayerVinylStyleChange,
-                    enabled = playerRoundAlbum
-                )
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
-
-                // (4) 金属机械唱针
-                PlayerSettingSwitchRow(
-                    title = "金属机械唱针",
-                    subtitle = "显示金属唱臂与配重块，播放时落针，暂停时抬起复位",
-                    checked = playerVinylPointer,
-                    onCheckedChange = onPlayerVinylPointerChange,
-                    enabled = playerRoundAlbum
-                )
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
-
-                // (5) 复古唱机底座
-                PlayerSettingSwitchRow(
-                    title = "复古唱机底座",
-                    subtitle = "显示白玉质感唱机底座卡片与精致徽标",
-                    checked = playerVinylBase,
-                    onCheckedChange = onPlayerVinylBaseChange,
-                    enabled = playerRoundAlbum
-                )
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
-
-                // (6) 轻触封面翻转歌词
+                // 轻触封面翻转歌词
                 PlayerSettingSwitchRow(
                     title = "轻触封面翻转歌词",
                     subtitle = "点击专辑封面区域直接翻转或滑到歌词页面",
@@ -4259,7 +3686,7 @@ internal fun SettingsPlayerStageContent(
         // ==================== 3. 歌词特效与体验 ====================
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                text = "歌词特效与体验",
+                text = "歌词特效与排版",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
@@ -4267,39 +3694,59 @@ internal fun SettingsPlayerStageContent(
             )
 
             SettingsGroupCard {
-                // (1) 逐字卡拉OK动效
-                PlayerSettingSwitchRow(
-                    title = "逐字卡拉OK动效",
-                    subtitle = "当前演唱行根据字级时间戳逐字点亮推进；关闭后仅整行高亮",
-                    checked = playerLyricsWordEffect,
-                    onCheckedChange = {
-                        onPlayerLyricsWordEffectChange(it)
-                        if (it) onPlayerMeiloxLyricsChange(false)
+                // (1) 歌词渲染引擎分段选择
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    Text(
+                        text = "歌词高亮动效形态",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "选择当前正在演唱歌词行的动态渲染风格",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    val currentLyricStyle = when {
+                        playerMeiloxLyrics -> "meilox"
+                        playerLyricsWordEffect -> "word"
+                        else -> "classic"
                     }
-                )
+
+                    ModernSegmentedPill(
+                        options = listOf(
+                            "classic" to "整行高亮",
+                            "word" to "逐字微光",
+                            "meilox" to "MeiloX 液态"
+                        ),
+                        selectedKey = currentLyricStyle,
+                        onSelect = { key ->
+                            when (key) {
+                                "classic" -> {
+                                    onPlayerLyricsWordEffectChange(false)
+                                    onPlayerMeiloxLyricsChange(false)
+                                }
+                                "word" -> {
+                                    onPlayerLyricsWordEffectChange(true)
+                                    onPlayerMeiloxLyricsChange(false)
+                                }
+                                "meilox" -> {
+                                    onPlayerLyricsWordEffectChange(false)
+                                    onPlayerMeiloxLyricsChange(true)
+                                }
+                            }
+                        }
+                    )
+                }
 
                 HorizontalDivider(
                     modifier = Modifier.padding(horizontal = 16.dp),
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
                 )
 
-                // (2) MeiloX 液态流体歌词
-                PlayerSettingSwitchRow(
-                    title = "MeiloX 液态歌词",
-                    subtitle = "Apple Music 风格全屏液态发光歌词排版（与普通逐字互斥）",
-                    checked = playerMeiloxLyrics,
-                    onCheckedChange = {
-                        onPlayerMeiloxLyricsChange(it)
-                        if (it) onPlayerLyricsWordEffectChange(false)
-                    }
-                )
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
-
-                // (3) 歌词景深虚化
+                // (2) 歌词景深虚化
                 PlayerSettingSwitchRow(
                     title = "歌词景深虚化",
                     subtitle = "非当前歌词行添加景深模糊效果，自然聚焦当前演唱行",
@@ -4307,16 +3754,14 @@ internal fun SettingsPlayerStageContent(
                     onCheckedChange = onPlayerLyricBlurChange
                 )
 
-                if (playerLyricBlur) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                    )
-
-                    // 歌词模糊强度滑块
-                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = playerLyricBlur,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                         Text(
-                            text = "歌词模糊强度",
+                            text = "虚化模糊强度",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium
                         )
@@ -4336,7 +3781,7 @@ internal fun SettingsPlayerStageContent(
                             Text("重", style = MaterialTheme.typography.bodySmall)
                         }
                         Text(
-                            text = String.format("当前: %.0f", playerLyricBlurAmount),
+                            text = String.format("当前虚化: %.0f", playerLyricBlurAmount),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -4348,7 +3793,7 @@ internal fun SettingsPlayerStageContent(
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
                 )
 
-                // (4) 拖动歌词预览
+                // (3) 拖动歌词预览
                 PlayerSettingSwitchRow(
                     title = "拖动歌词进度预览",
                     subtitle = "拖动进度条时实时预览对应时间歌词，划过每行产生轻微震动反馈",
@@ -4369,39 +3814,58 @@ internal fun SettingsPlayerStageContent(
             )
 
             SettingsGroupCard {
-                // (1) 简约风控件
-                PlayerSettingSwitchRow(
-                    title = "简约风控件",
-                    subtitle = "采用胶囊形扁平进度条与极简实心播放控制按钮",
-                    checked = playerMinimalistControls,
-                    onCheckedChange = { enabled ->
-                        onPlayerMinimalistControlsChange(enabled)
-                        if (enabled && playerWaveformSlider) onPlayerWaveformSliderChange(false)
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    Text(
+                        text = "控件与进度条样式",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "选择底部播放控制栏与进度条的视觉与交互形态",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    val currentControlStyle = when {
+                        playerMinimalistControls -> "minimalist"
+                        playerWaveformSlider -> "waveform"
+                        else -> "default"
                     }
-                )
+
+                    ModernSegmentedPill(
+                        options = listOf(
+                            "minimalist" to "简约胶囊",
+                            "waveform" to "波浪进度",
+                            "default" to "经典标准"
+                        ),
+                        selectedKey = currentControlStyle,
+                        onSelect = { key ->
+                            when (key) {
+                                "minimalist" -> {
+                                    onPlayerMinimalistControlsChange(true)
+                                    onPlayerWaveformSliderChange(false)
+                                }
+                                "waveform" -> {
+                                    onPlayerMinimalistControlsChange(false)
+                                    onPlayerWaveformSliderChange(true)
+                                }
+                                "default" -> {
+                                    onPlayerMinimalistControlsChange(false)
+                                    onPlayerWaveformSliderChange(false)
+                                }
+                            }
+                        }
+                    )
+                }
 
                 HorizontalDivider(
                     modifier = Modifier.padding(horizontal = 16.dp),
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
                 )
 
-                // (2) 波浪动态进度条
-                PlayerSettingSwitchRow(
-                    title = "波浪动态进度条",
-                    subtitle = "自绘正弦波声波进度条，播放时波浪流动，加载时脉冲动画",
-                    checked = playerWaveformSlider,
-                    onCheckedChange = { enabled ->
-                        onPlayerWaveformSliderChange(enabled)
-                        if (enabled && playerMinimalistControls) onPlayerMinimalistControlsChange(false)
-                    }
-                )
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
-
-                // (3) 紧凑控制栏
+                // 紧凑控制栏
                 PlayerSettingSwitchRow(
                     title = "紧凑控制栏",
                     subtitle = "仅歌词页生效：隐藏播放模式与列表按钮，控制键与进度条紧凑下沉",
@@ -4452,317 +3916,7 @@ internal fun PlayerSettingSwitchRow(
     }
 }
 
-// ==================== 动效设置子页面（对齐 Neri 动效设置） ====================
-
-@Composable
-fun SettingsMotionContent(
-    playerHyperBg: Boolean,
-    onPlayerHyperBgChange: (Boolean) -> Unit,
-    playerFluidAmbientBg: Boolean,
-    onPlayerFluidAmbientBgChange: (Boolean) -> Unit,
-    playerMeshBg: Boolean,
-    onPlayerMeshBgChange: (Boolean) -> Unit,
-    playerCoverBlurBg: Boolean,
-    onPlayerCoverBlurBgChange: (Boolean) -> Unit,
-    playerCoverBlurAmount: Float,
-    onPlayerCoverBlurAmountChange: (Float) -> Unit,
-    playerCoverBlurDarken: Float,
-    onPlayerCoverBlurDarkenChange: (Float) -> Unit,
-    playerAudioReactive: Boolean,
-    onPlayerAudioReactiveChange: (Boolean) -> Unit,
-    playerLyricBlur: Boolean,
-    onPlayerLyricBlurChange: (Boolean) -> Unit,
-    playerLyricBlurAmount: Float,
-    onPlayerLyricBlurAmountChange: (Float) -> Unit,
-    playerDynamicBg: Boolean,
-    onPlayerDynamicBgChange: (Boolean) -> Unit,
-    playerBgEnhance: Boolean,
-    onPlayerBgEnhanceChange: (Boolean) -> Unit
-) {
-    Column {
-        // ==================== 播放页背景 ====================
-        Text(
-            text = "播放页背景",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // MeiloX 网格渐变背景（移植自 MeiloX 旗舰动态背景：GL 网格 + 封面取色 + 频谱律动）
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "MeiloX 网格渐变",
-                subtitle = "封面取色驱动 GL 网格流体形变，随音乐鼓点律动（与其它背景互斥）",
-                checked = playerMeshBg,
-                onCheckedChange = { enabled ->
-                    onPlayerMeshBgChange(enabled)
-                    // 与「灵动流体背景」「流体动态背景」「封面模糊背景」「动态渐变背景」「应用背景图片」互斥
-                    if (enabled) {
-                        if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
-                        if (playerHyperBg) onPlayerHyperBgChange(false)
-                        if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
-                        if (playerDynamicBg) onPlayerDynamicBgChange(false)
-                        if (playerBgEnhance) onPlayerBgEnhanceChange(false)
-                    }
-                }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 灵动流体背景（仿 Apple Music 风格流体光场，多频有机流动与智能高饱和取色）
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "灵动流体背景",
-                subtitle = "仿 Apple Music 风格流体光场，多频有机流动与智能高饱和取色（与其它背景互斥）",
-                checked = playerFluidAmbientBg,
-                onCheckedChange = { enabled ->
-                    onPlayerFluidAmbientBgChange(enabled)
-                    // 与「MeiloX 网格渐变」「流体动态背景」「封面模糊背景」「动态渐变背景」「应用背景图片」互斥
-                    if (enabled) {
-                        if (playerMeshBg) onPlayerMeshBgChange(false)
-                        if (playerHyperBg) onPlayerHyperBgChange(false)
-                        if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
-                        if (playerDynamicBg) onPlayerDynamicBgChange(false)
-                        if (playerBgEnhance) onPlayerBgEnhanceChange(false)
-                    }
-                }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 流体动态背景（HyperBackground，API 33+ 生效）
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "流体动态背景",
-                subtitle = if (Build.VERSION.SDK_INT >= 33) {
-                    "GLSL 流体着色器，随专辑封面颜色流动、随音乐律动（需 Android 13+）"
-                } else {
-                    "需要 Android 13 及以上版本"
-                },
-                checked = playerHyperBg,
-                enabled = Build.VERSION.SDK_INT >= 33,
-                onCheckedChange = { enabled ->
-                    onPlayerHyperBgChange(enabled)
-                    // 与「MeiloX 网格渐变」「灵动流体背景」「动态渐变背景」「应用背景图片」「封面模糊背景」互斥
-                    if (enabled) {
-                        if (playerMeshBg) onPlayerMeshBgChange(false)
-                        if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
-                        if (playerDynamicBg) onPlayerDynamicBgChange(false)
-                        if (playerBgEnhance) onPlayerBgEnhanceChange(false)
-                        if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
-                    }
-                }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 封面模糊背景（Android 12+，与动态背景/流体背景互斥）
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "封面模糊背景",
-                subtitle = if (Build.VERSION.SDK_INT >= 31) {
-                    "将当前专辑封面模糊铺满屏幕（与动态背景互斥）"
-                } else {
-                    "需要 Android 12 及以上版本"
-                },
-                checked = playerCoverBlurBg,
-                enabled = Build.VERSION.SDK_INT >= 31,
-                onCheckedChange = { enabled ->
-                    onPlayerCoverBlurBgChange(enabled)
-                    // 与「MeiloX 网格渐变」「灵动流体背景」「动态渐变背景」「应用背景图片」「流体动态背景」互斥
-                    if (enabled) {
-                        if (playerMeshBg) onPlayerMeshBgChange(false)
-                        if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
-                        if (playerDynamicBg) onPlayerDynamicBgChange(false)
-                        if (playerBgEnhance) onPlayerBgEnhanceChange(false)
-                        if (playerHyperBg) onPlayerHyperBgChange(false)
-                    }
-                }
-            )
-        }
-
-        if (playerCoverBlurBg) {
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // 封面模糊强度
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "封面模糊强度",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text("柔和", style = MaterialTheme.typography.bodySmall)
-                        Slider(
-                            value = playerCoverBlurAmount,
-                            onValueChange = onPlayerCoverBlurAmountChange,
-                            valueRange = 0f..100f,
-                            steps = 19,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text("强烈", style = MaterialTheme.typography.bodySmall)
-                    }
-                    Text(
-                        text = String.format("当前: %.0f", playerCoverBlurAmount),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // 背景调暗
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "背景调暗",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text("明亮", style = MaterialTheme.typography.bodySmall)
-                        Slider(
-                            value = playerCoverBlurDarken,
-                            onValueChange = onPlayerCoverBlurDarkenChange,
-                            valueRange = 0f..0.8f,
-                            steps = 15,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text("暗", style = MaterialTheme.typography.bodySmall)
-                    }
-                    Text(
-                        text = String.format("当前: %.0f%%", playerCoverBlurDarken * 100),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 音频律动（依赖流体动态背景）
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "音频律动",
-                subtitle = if (Build.VERSION.SDK_INT >= 33) {
-                    "流体动态背景随音乐音量律动（需开启流体动态背景）"
-                } else {
-                    "需要 Android 13 及以上版本"
-                },
-                checked = playerAudioReactive,
-                enabled = Build.VERSION.SDK_INT >= 33 && playerHyperBg,
-                onCheckedChange = onPlayerAudioReactiveChange
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // ==================== 歌词动效 ====================
-        Text(
-            text = "歌词动效",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 高级歌词动效（对齐 Neri：现代排版与动效；关闭=朴素排版）
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "歌词模糊",
-                subtitle = "非当前歌词行添加模糊效果，突出当前行",
-                checked = playerLyricBlur,
-                onCheckedChange = onPlayerLyricBlurChange
-            )
-        }
-
-        if (playerLyricBlur) {
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // 歌词模糊强度
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "歌词模糊强度",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text("轻", style = MaterialTheme.typography.bodySmall)
-                        Slider(
-                            value = playerLyricBlurAmount,
-                            onValueChange = onPlayerLyricBlurAmountChange,
-                            valueRange = 0f..30f,
-                            steps = 29,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text("重", style = MaterialTheme.typography.bodySmall)
-                    }
-                    Text(
-                        text = String.format("当前: %.0f", playerLyricBlurAmount),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-        }
-    }
-}
-
-// ==================== 播放设置子页面（对齐 Neri 播放设置） ====================
+// ==================== 声音与播放设置子页面 ====================
 
 @Composable
 fun SettingsPlaybackContent(
@@ -4794,117 +3948,294 @@ fun SettingsPlaybackContent(
 ) {
     val context = LocalContext.current
 
-    Column {
-        // ==================== 播放行为 ====================
-        Text(
-            text = "播放行为",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "保留上次播放进度",
-                subtitle = "重启应用后恢复上次播放位置",
-                checked = playbackKeepProgress,
-                onCheckedChange = onPlaybackKeepProgressChange
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // ==================== 1. 播放音质偏好 ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "播放音质偏好",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp)
             )
-        }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "保留播放状态",
-                subtitle = "重启后保留列表循环/随机播放模式",
-                checked = playbackKeepMode,
-                onCheckedChange = onPlaybackKeepModeChange
+            var selectedQuality by remember {
+                mutableStateOf(settingsPrefs.getString("audio_quality", null) ?: "flac")
+            }
+            val qualityOptions = listOf(
+                "default" to "默认",
+                "128" to "128k",
+                "320" to "320k",
+                "flac" to "FLAC",
+                "high" to "Hi-Res"
             )
-        }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "蓝牙断开自动停止",
-                subtitle = "蓝牙/耳机断开后自动暂停播放（采样确认防误判）",
-                checked = playbackBluetoothStop,
-                onCheckedChange = onPlaybackBluetoothStopChange
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 播放服务空闲退出（分钟选择）
-        val idleMinutes = settingsPrefs.getInt("playback_service_idle_shutdown_minutes", 0)
-        var showIdleDialog by remember { mutableStateOf(false) }
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { showIdleDialog = true }
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "暂停后退出播放服务",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        text = if (idleMinutes > 0) {
-                            "暂停 $idleMinutes 分钟后自动退出"
-                        } else {
-                            "不自动退出"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+            SettingsGroupCard {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    qualityOptions.forEach { (value, label) ->
+                        val isSelected = selectedQuality == value
+                        Surface(
+                            onClick = {
+                                selectedQuality = value
+                                val qualityValue = if (value == "default") null else value
+                                KuGouApi.audioQuality = qualityValue
+                                settingsPrefs.edit().putString("audio_quality", qualityValue).apply()
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+                            border = if (isSelected) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(modifier = Modifier.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
                 }
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+
+                val qualityDesc = when (selectedQuality) {
+                    "default" -> "自适应流媒体音质，依据网络与源端智能切换"
+                    "128" -> "标准 MP3 格式 (128kbps)，节省流量，极速加载"
+                    "320" -> "高品质 MP3 格式 (320kbps)，听感通透饱满，均衡音质与速度"
+                    "high" -> "Hi-Res 24-bit/96kHz+ 超高清采样率，母带级音频还原"
+                    else -> "无损 FLAC 格式，CD 级 16-bit/44.1kHz 音质，还原丰富音乐细节"
+                }
+                Text(
+                    text = qualityDesc,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
                 )
             }
         }
-        if (showIdleDialog) {
-            AlertDialog(
-                onDismissRequest = { showIdleDialog = false },
-                title = { Text("暂停后退出播放服务") },
-                text = {
-                    Column {
-                        listOf(
-                            0 to "不自动退出",
-                            5 to "5 分钟",
-                            15 to "15 分钟",
-                            30 to "30 分钟",
-                            60 to "60 分钟",
-                            120 to "120 分钟"
-                        ).forEach { (minutes, label) ->
-                            val selected = idleMinutes == minutes
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
+
+        // ==================== 2. 音频引擎与输出 ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "音频引擎与输出",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            SettingsGroupCard {
+                // (1) 32-bit 高解析输出
+                PlayerSettingSwitchRow(
+                    title = "32-bit 高解析输出",
+                    subtitle = "优先使用 32 位高精度浮点处理音频数据（重启应用生效）",
+                    checked = playbackHighRes,
+                    onCheckedChange = onPlaybackHighResChange
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (2) 响度均衡
+                PlayerSettingSwitchRow(
+                    title = "响度均衡",
+                    subtitle = "自动平衡不同歌曲与专辑的动态响度，避免音量骤变",
+                    checked = playbackVolumeNormalization,
+                    onCheckedChange = onPlaybackVolumeNormalizationChange
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (3) 抢占音频焦点
+                PlayerSettingSwitchRow(
+                    title = "抢占音频焦点",
+                    subtitle = "启动播放时主动请求系统独占焦点，暂停其他媒体声音",
+                    checked = playbackPreemptFocus,
+                    onCheckedChange = onPlaybackPreemptFocusChange
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (4) 声道平衡
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "声道平衡",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            val balanceText = when {
+                                playbackVolumeBalance == 0f -> "居中 (L 100% · R 100%)"
+                                playbackVolumeBalance < 0f -> "偏左 ${(kotlin.math.abs(playbackVolumeBalance) * 100).toInt()}%"
+                                else -> "偏右 ${(playbackVolumeBalance * 100).toInt()}%"
+                            }
+                            Text(
+                                text = balanceText,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (playbackVolumeBalance != 0f) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "复位",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(MaterialTheme.colorScheme.primary)
+                                        .clickable { onPlaybackVolumeBalanceChange(0f) }
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("左", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Slider(
+                            value = playbackVolumeBalance,
+                            onValueChange = onPlaybackVolumeBalanceChange,
+                            valueRange = -1f..1f,
+                            steps = 39,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text("右", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+
+        // ==================== 3. 播放行为与后台策略 ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "播放行为与后台策略",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            val idleMinutes = settingsPrefs.getInt("playback_service_idle_shutdown_minutes", 0)
+            var showIdleDialog by remember { mutableStateOf(false) }
+
+            SettingsGroupCard {
+                // (1) 保留上次播放进度
+                PlayerSettingSwitchRow(
+                    title = "保留上次播放进度",
+                    subtitle = "重启应用后自动恢复上次中断的具体进度点",
+                    checked = playbackKeepProgress,
+                    onCheckedChange = onPlaybackKeepProgressChange
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (2) 保留播放状态
+                PlayerSettingSwitchRow(
+                    title = "保留播放状态",
+                    subtitle = "重启后保留列表循环、单曲循环或随机播放模式",
+                    checked = playbackKeepMode,
+                    onCheckedChange = onPlaybackKeepModeChange
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (3) 蓝牙断开自动停止
+                PlayerSettingSwitchRow(
+                    title = "蓝牙断开自动暂停",
+                    subtitle = "蓝牙耳机断开后平滑暂停播放，避免外放打扰",
+                    checked = playbackBluetoothStop,
+                    onCheckedChange = onPlaybackBluetoothStopChange
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (4) 暂停后退出播放服务
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showIdleDialog = true }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "暂停后退出播放服务",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = if (idleMinutes > 0) "暂停 $idleMinutes 分钟后自动退出常驻服务" else "始终保持常驻服务（不自动退出）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        text = if (idleMinutes > 0) "${idleMinutes} 分钟" else "常驻",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            if (showIdleDialog) {
+                AlertDialog(
+                    onDismissRequest = { showIdleDialog = false },
+                    title = { Text("暂停后退出播放服务", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column {
+                            listOf(
+                                0 to "始终保持常驻（推荐）",
+                                5 to "5 分钟",
+                                15 to "15 分钟",
+                                30 to "30 分钟",
+                                60 to "60 分钟",
+                                120 to "120 分钟"
+                            ).forEach { (minutes, label) ->
+                                val selected = idleMinutes == minutes
+                                Surface(
+                                    onClick = {
                                         settingsPrefs.edit()
                                             .putInt("playback_service_idle_shutdown_minutes", minutes)
                                             .apply()
@@ -4912,249 +4243,184 @@ fun SettingsPlaybackContent(
                                             Intent("com.example.lxmusic.SETTINGS_CHANGED")
                                         )
                                         showIdleDialog = false
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        RadioButton(
+                                            selected = selected,
+                                            onClick = {
+                                                settingsPrefs.edit()
+                                                    .putInt("playback_service_idle_shutdown_minutes", minutes)
+                                                    .apply()
+                                                context.sendBroadcast(
+                                                    Intent("com.example.lxmusic.SETTINGS_CHANGED")
+                                                )
+                                                showIdleDialog = false
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                        )
                                     }
-                                    .padding(vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = label,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                if (selected) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
                                 }
                             }
                         }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { showIdleDialog = false }) { Text("取消") }
-                }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // ==================== 音频输出 ====================
-        Text(
-            text = "音频输出",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "32-bit 高解析输出",
-                subtitle = "优先使用高精度浮点输出（重启生效）",
-                checked = playbackHighRes,
-                onCheckedChange = onPlaybackHighResChange
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "响度均衡",
-                subtitle = "自动平衡不同歌曲的音量",
-                checked = playbackVolumeNormalization,
-                onCheckedChange = onPlaybackVolumeNormalizationChange
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 声道平衡滑块
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "声道平衡",
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text("偏左", style = MaterialTheme.typography.bodySmall)
-                    Slider(
-                        value = playbackVolumeBalance,
-                        onValueChange = onPlaybackVolumeBalanceChange,
-                        valueRange = -1f..1f,
-                        steps = 40,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text("偏右", style = MaterialTheme.typography.bodySmall)
-                }
-                Text(
-                    text = when {
-                        playbackVolumeBalance == 0f -> "居中"
-                        playbackVolumeBalance < 0f -> "偏左 ${(abs(playbackVolumeBalance) * 100).toInt()}%"
-                        else -> "偏右 ${(playbackVolumeBalance * 100).toInt()}%"
                     },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary
+                    confirmButton = {
+                        TextButton(onClick = { showIdleDialog = false }) { Text("关闭") }
+                    }
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "抢占音频焦点",
-                subtitle = "启动时主动获取系统音频焦点",
-                checked = playbackPreemptFocus,
-                onCheckedChange = onPlaybackPreemptFocusChange
+        // ==================== 4. 无缝过渡与淡入淡出 ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "无缝过渡与淡入淡出",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp)
             )
-        }
 
-        Spacer(modifier = Modifier.height(24.dp))
+            SettingsGroupCard {
+                // (1) 播放淡入淡出
+                PlayerSettingSwitchRow(
+                    title = "播放淡入淡出",
+                    subtitle = "开始播放与暂停时音量平滑渐入渐出，告别生硬爆音",
+                    checked = playbackFadeIn,
+                    onCheckedChange = onPlaybackFadeInChange
+                )
 
-        // ==================== 播放淡入淡出 ====================
-        Text(
-            text = "播放淡入淡出",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "播放淡入淡出",
-                subtitle = "开始播放时音量平滑渐入",
-                checked = playbackFadeIn,
-                onCheckedChange = onPlaybackFadeInChange
-            )
-        }
-
-        if (playbackFadeIn) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "淡入时长",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Slider(
-                        value = playbackFadeInMs.toFloat(),
-                        onValueChange = { onPlaybackFadeInMsChange(it.toInt()) },
-                        valueRange = 0f..3000f,
-                        steps = 29,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Text(
-                        text = "${playbackFadeInMs} ms",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = playbackFadeIn,
+                    enter = fadeIn(tween(200)) + expandVertically(tween(250)),
+                    exit = fadeOut(tween(150)) + shrinkVertically(tween(200))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.35f))
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "淡入时长",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "${playbackFadeInMs} ms",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Slider(
+                            value = playbackFadeInMs.toFloat(),
+                            onValueChange = { onPlaybackFadeInMsChange(it.toInt()) },
+                            valueRange = 0f..3000f,
+                            steps = 29,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
-            }
-        }
 
-        Spacer(modifier = Modifier.height(24.dp))
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
 
-        // ==================== 下一首淡入淡出 ====================
-        Text(
-            text = "下一首淡入淡出",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
+                // (2) 切歌交叉淡化
+                PlayerSettingSwitchRow(
+                    title = "切歌交叉淡化 (Crossfade)",
+                    subtitle = "切歌时当前歌曲渐出同时下一首平滑淡入，DJ 无缝衔接",
+                    checked = playbackCrossfadeNext,
+                    onCheckedChange = onPlaybackCrossfadeNextChange
+                )
 
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            PlayerSettingSwitchRow(
-                title = "交叉淡化",
-                subtitle = "切歌时淡出当前曲并淡入下一首",
-                checked = playbackCrossfadeNext,
-                onCheckedChange = onPlaybackCrossfadeNextChange
-            )
-        }
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = playbackCrossfadeNext,
+                    enter = fadeIn(tween(200)) + expandVertically(tween(250)),
+                    exit = fadeOut(tween(150)) + shrinkVertically(tween(200))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.35f))
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "下一首淡入时长",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "${playbackCrossfadeInMs} ms",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Slider(
+                            value = playbackCrossfadeInMs.toFloat(),
+                            onValueChange = { onPlaybackCrossfadeInMsChange(it.toInt()) },
+                            valueRange = 0f..3000f,
+                            steps = 29,
+                            modifier = Modifier.fillMaxWidth()
+                        )
 
-        if (playbackCrossfadeNext) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "下一首淡入时长",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Slider(
-                        value = playbackCrossfadeInMs.toFloat(),
-                        onValueChange = { onPlaybackCrossfadeInMsChange(it.toInt()) },
-                        valueRange = 0f..3000f,
-                        steps = 29,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Text(
-                        text = "${playbackCrossfadeInMs} ms",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = "当前曲淡出时长",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Slider(
-                        value = playbackCrossfadeOutMs.toFloat(),
-                        onValueChange = { onPlaybackCrossfadeOutMsChange(it.toInt()) },
-                        valueRange = 0f..3000f,
-                        steps = 29,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Text(
-                        text = "${playbackCrossfadeOutMs} ms",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "当前曲淡出时长",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "${playbackCrossfadeOutMs} ms",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Slider(
+                            value = playbackCrossfadeOutMs.toFloat(),
+                            onValueChange = { onPlaybackCrossfadeOutMsChange(it.toInt()) },
+                            valueRange = 0f..3000f,
+                            steps = 29,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
         }
     }
 }
+

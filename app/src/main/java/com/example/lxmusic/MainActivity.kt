@@ -1484,19 +1484,15 @@ fun AppScaffold(
                                 } else {
                                     Text(
                                         text = when (settingsSubPage) {
-                                            "common" -> "通用"
-                                            "appearance" -> "外观"
-                                            "player_stage" -> "播放界面"
-                                            "display" -> "主题设置"
-                                            "customize" -> "壁纸风格"
-                                            "motion" -> "动效设置"
-                                            "player" -> "播放器设置"
-                                            "playback" -> "播放设置"
+                                            "appearance", "display", "customize" -> "外观与个性化"
+                                            "player_stage", "player", "motion" -> "播放界面与动效"
+                                            "playback", "common" -> "声音与播放"
                                             "usb" -> "USB 独占模式"
-                                            "general" -> "通用设置"
+                                            "general" -> "通用与交互"
                                             "storage" -> "存储与缓存"
                                             "proxy" -> "代理设置"
                                             "about" -> "关于应用"
+                                            "home_order" -> "首页推荐排序"
                                             else -> stringResource(R.string.title_settings)
                                         },
                                         style = MaterialTheme.typography.titleLarge,
