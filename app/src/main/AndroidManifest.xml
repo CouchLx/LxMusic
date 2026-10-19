@@ -38,6 +38,7 @@
             android:exported="true"
             android:label="@string/app_name"
             android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize"
             android:theme="@style/Theme.LxMusic.Splash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

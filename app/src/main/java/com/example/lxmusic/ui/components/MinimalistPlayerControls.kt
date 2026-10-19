@@ -57,6 +57,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.example.lxmusic.R
@@ -459,7 +460,13 @@ fun MinimalistFullControls(
     primaryColor: Color,
     uiTint: Color,
     uiTintVariant: Color,
-    modifier: Modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)
+    modifier: Modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+    // 控制键行（上一首/播放/下一首）整体上移量：默认 0（竖屏现状不变）；
+    // 横屏传 ~20dp 缩短"时间行 ↔ 控制键"的视觉间距，贴近参考布局
+    playRowLift: Dp = 0.dp,
+    // 底部行（播放模式/列表）上移量：默认 0（竖屏现状不变）；
+    // 横屏传值缩小"控制键 ↔ 模式/列表"的空白，同时自然加大底部留白
+    bottomRowLift: Dp = 0.dp
 ) {
     // 高度与下沉动画参数（与原版保持完全一致的高低错开层级）
     val ctrlHeight by animateDpAsState(
@@ -497,17 +504,23 @@ fun MinimalistFullControls(
         }
 
         // 播放模式 - 左下角对齐（与主播放键高低错开）
+        // 用精确 24dp 图标盒（而非 IconButton 的 48dp 触摸盒）：图标视觉边界与进度条/时间行严格对齐
         AnimatedVisibility(
             visible = !isLyricsCompact,
             enter = fadeIn(tween(200)),
             exit = fadeOut(tween(150)),
-            modifier = Modifier.align(Alignment.BottomStart)
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .offset(y = -bottomRowLift)
         ) {
-            IconButton(
-                onClick = {
-                    val newMode = (playMode + 1) % 3
-                    onPlayModeChange(newMode)
-                }
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clickable {
+                        val newMode = (playMode + 1) % 3
+                        onPlayModeChange(newMode)
+                    },
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = when (playMode) {
@@ -532,7 +545,7 @@ fun MinimalistFullControls(
             tint = controlTint,
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .offset { IntOffset(0, sideDrop.roundToPx()) }
+                .offset { IntOffset(0, sideDrop.roundToPx() - playRowLift.roundToPx()) }
                 .padding(start = 60.dp)
         )
 
@@ -543,7 +556,7 @@ fun MinimalistFullControls(
             tint = controlTint,
             modifier = Modifier
                 .align(Alignment.Center)
-                .offset { IntOffset(0, playDrop.roundToPx()) }
+                .offset { IntOffset(0, playDrop.roundToPx() - playRowLift.roundToPx()) }
         )
 
         // 下一首 - 右中居中（圆润双三角）
@@ -552,7 +565,7 @@ fun MinimalistFullControls(
             tint = controlTint,
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .offset { IntOffset(0, sideDrop.roundToPx()) }
+                .offset { IntOffset(0, sideDrop.roundToPx() - playRowLift.roundToPx()) }
                 .padding(end = 60.dp)
         )
 
@@ -561,10 +574,16 @@ fun MinimalistFullControls(
             visible = !isLyricsCompact,
             enter = fadeIn(tween(200)),
             exit = fadeOut(tween(150)),
-            modifier = Modifier.align(Alignment.BottomEnd)
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(y = -bottomRowLift)
         ) {
-            IconButton(
-                onClick = onPlaylistClick
+            // 精确 24dp 图标盒：右边界与进度条/时间行严格对齐（同播放模式按钮）
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clickable(onClick = onPlaylistClick),
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Menu,

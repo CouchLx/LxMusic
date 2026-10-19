@@ -451,39 +451,48 @@ fun SettingsPage(
                 null -> {
                     // ==================== 主菜单 ====================
                     Column {
-                        // —— 第一组：主题 / 自定义个性化 / 动效 ——
+                        // —— 新分类规划（新架构文件夹） ——
                         SettingsGroupCard {
                             SettingsGroupItemRow(
+                                icon = Icons.Default.Tune,
+                                title = "通用",
+                                subtitle = "播放音质、偏好设置",
+                                onClick = { onSettingsSubPageChange("common") },
+                                showDivider = true
+                            )
+                            SettingsGroupItemRow(
                                 icon = Icons.Default.Palette,
-                                title = "主题设置",
-                                subtitle = "明暗模式、动态取色、液态玻璃、导航栏",
-                                onClick = { onSettingsSubPageChange("display") }
+                                title = "外观",
+                                subtitle = "主题模式、色彩与背景壁纸",
+                                onClick = { onSettingsSubPageChange("appearance") },
+                                showDivider = true
                             )
                             SettingsGroupItemRow(
-                                icon = Icons.Default.Checkroom,
-                                title = "壁纸风格",
-                                subtitle = "主题模式、背景壁纸与相册管理",
-                                onClick = { onSettingsSubPageChange("customize") }
-                            )
-                            SettingsGroupItemRow(
-                                icon = Icons.Default.Bolt,
-                                title = "动效设置",
-                                subtitle = "流体背景、封面模糊、音频律动、歌词模糊",
-                                onClick = { onSettingsSubPageChange("motion") },
+                                icon = Icons.Default.MusicNote,
+                                title = "播放界面",
+                                subtitle = "黑胶唱机、动效氛围、歌词特效",
+                                onClick = { onSettingsSubPageChange("player_stage") },
                                 showDivider = false
                             )
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // —— 第二组：播放器 / 播放 / 通用 / USB独占 ——
+                        // —— 第一组：主题高级与导航栏 ——
                         SettingsGroupCard {
                             SettingsGroupItemRow(
-                                icon = Icons.Default.MusicNote,
-                                title = "播放器设置",
-                                subtitle = "背景不透明度、高斯模糊",
-                                onClick = { onSettingsSubPageChange("player") }
+                                icon = Icons.Default.Palette,
+                                title = "主题高级与导航栏",
+                                subtitle = "液态玻璃、色彩平滑过渡与导航底栏设置",
+                                onClick = { onSettingsSubPageChange("display") },
+                                showDivider = false
                             )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // —— 第二组：播放 / 通用 / USB独占 ——
+                        SettingsGroupCard {
                             SettingsGroupItemRow(
                                 icon = Icons.AutoMirrored.Filled.PlaylistPlay,
                                 title = "播放设置",
@@ -493,7 +502,7 @@ fun SettingsPage(
                             SettingsGroupItemRow(
                                 icon = Icons.Default.Settings,
                                 title = "通用设置",
-                                subtitle = "播放音质",
+                                subtitle = "首页排序、交互与反馈",
                                 onClick = { onSettingsSubPageChange("general") }
                             )
                             SettingsGroupItemRow(
@@ -612,6 +621,88 @@ fun SettingsPage(
                             }
                         }
                     }
+                }
+
+                "common" -> {
+                    SettingsCommonContent(
+                        settingsPrefs = settingsPrefs
+                    )
+                }
+
+                "appearance" -> {
+                    SettingsAppearanceContent(
+                        themeDarkMode = themeDarkMode,
+                        onThemeDarkModeChange = onThemeDarkModeChange,
+                        themeSeedColor = themeSeedColor,
+                        onThemeSeedColorChange = onThemeSeedColorChange,
+                        themePaletteStyle = themePaletteStyle,
+                        onThemePaletteStyleChange = onThemePaletteStyleChange,
+                        onDynamicColorChange = onDynamicColorChange,
+                        onFloatingBottomBarChange = onFloatingBottomBarChange,
+                        settingsPrefs = settingsPrefs,
+                        currentUri = currentUri,
+                        bgOpacity = bgOpacity,
+                        onOpacityChange = onOpacityChange,
+                        onBackgroundImageChange = onBackgroundImageChange,
+                        onRegisterPickAction = { action ->
+                            onAddWallpaperAction = action
+                        }
+                    )
+                }
+
+                "player_stage" -> {
+                    SettingsPlayerStageContent(
+                        playerDynamicBg = playerDynamicBg,
+                        onPlayerDynamicBgChange = onPlayerDynamicBgChange,
+                        playerHyperBg = playerHyperBg,
+                        onPlayerHyperBgChange = onPlayerHyperBgChange,
+                        playerFluidAmbientBg = playerFluidAmbientBg,
+                        onPlayerFluidAmbientBgChange = onPlayerFluidAmbientBgChange,
+                        playerMeshBg = playerMeshBg,
+                        onPlayerMeshBgChange = onPlayerMeshBgChange,
+                        playerCoverBlurBg = playerCoverBlurBg,
+                        onPlayerCoverBlurBgChange = onPlayerCoverBlurBgChange,
+                        playerCoverBlurAmount = playerCoverBlurAmount,
+                        onPlayerCoverBlurAmountChange = onPlayerCoverBlurAmountChange,
+                        playerCoverBlurDarken = playerCoverBlurDarken,
+                        onPlayerCoverBlurDarkenChange = onPlayerCoverBlurDarkenChange,
+                        playerAudioReactive = playerAudioReactive,
+                        onPlayerAudioReactiveChange = onPlayerAudioReactiveChange,
+                        playerBgEnhance = playerBgEnhance,
+                        onPlayerBgEnhanceChange = onPlayerBgEnhanceChange,
+                        playerBgOpacity = playerBgOpacity,
+                        onPlayerBgOpacityChange = onPlayerBgOpacityChange,
+                        playerBlur = playerBlur,
+                        onPlayerBlurChange = onPlayerBlurChange,
+                        playerRoundAlbum = playerRoundAlbum,
+                        onPlayerRoundAlbumChange = onPlayerRoundAlbumChange,
+                        playerRotate = playerRotate,
+                        onPlayerRotateChange = onPlayerRotateChange,
+                        playerVinylStyle = playerVinylStyle,
+                        onPlayerVinylStyleChange = onPlayerVinylStyleChange,
+                        playerVinylPointer = playerVinylPointer,
+                        onPlayerVinylPointerChange = onPlayerVinylPointerChange,
+                        playerVinylBase = playerVinylBase,
+                        onPlayerVinylBaseChange = onPlayerVinylBaseChange,
+                        playerTapCoverToLyrics = playerTapCoverToLyrics,
+                        onPlayerTapCoverToLyricsChange = onPlayerTapCoverToLyricsChange,
+                        playerLyricsWordEffect = playerLyricsWordEffect,
+                        onPlayerLyricsWordEffectChange = onPlayerLyricsWordEffectChange,
+                        playerMeiloxLyrics = playerMeiloxLyrics,
+                        onPlayerMeiloxLyricsChange = onPlayerMeiloxLyricsChange,
+                        playerLyricBlur = playerLyricBlur,
+                        onPlayerLyricBlurChange = onPlayerLyricBlurChange,
+                        playerLyricBlurAmount = playerLyricBlurAmount,
+                        onPlayerLyricBlurAmountChange = onPlayerLyricBlurAmountChange,
+                        playerLyricsSeekPreview = playerLyricsSeekPreview,
+                        onPlayerLyricsSeekPreviewChange = onPlayerLyricsSeekPreviewChange,
+                        playerMinimalistControls = playerMinimalistControls,
+                        onPlayerMinimalistControlsChange = onPlayerMinimalistControlsChange,
+                        playerCompactControls = playerCompactControls,
+                        onPlayerCompactControlsChange = onPlayerCompactControlsChange,
+                        playerWaveformSlider = playerWaveformSlider,
+                        onPlayerWaveformSliderChange = onPlayerWaveformSliderChange
+                    )
                 }
 
                 "customize" -> {
@@ -806,8 +897,8 @@ fun SettingsPage(
             Spacer(modifier = Modifier.height(navBarDp + 80.dp))
         } // 内层滚动 Column
 
-        // 当处于「自定义个性化」页面时，在屏幕右下角永远固定常驻大号悬浮加号按钮（不随滑动变化）
-        if (settingsSubPage == "customize" && onAddWallpaperAction != null) {
+        // 当处于「自定义个性化」或「外观」页面时，在屏幕右下角永远固定常驻大号悬浮加号按钮（不随滑动变化）
+        if ((settingsSubPage == "customize" || settingsSubPage == "appearance") && onAddWallpaperAction != null) {
             FloatingActionButton(
                 onClick = { onAddWallpaperAction?.invoke() },
                 shape = CircleShape,
@@ -860,305 +951,14 @@ internal fun SettingsDisplayContent(
     onDynamicColorChange: (Boolean) -> Unit = {},
     settingsPrefs: android.content.SharedPreferences
 ) {
-    // 主题模式（主题模式选择已移至"自定义个性化"页面，此处只读）
+    // 主题模式（此处只读判断是否为现代化主题）
     val themeMode = settingsPrefs.getString("theme_mode", "dynamic") ?: "dynamic"
-
-    // 自定义色板（存 prefs，逗号分隔）
-    var customPalette by remember {
-        mutableStateOf(
-            settingsPrefs.getString("theme_custom_palette", "")?.split(",")
-                ?.filter { it.isNotBlank() } ?: emptyList()
-        )
-    }
-    val saveCustomPalette: (List<String>) -> Unit = { palette ->
-        customPalette = palette
-        settingsPrefs.edit().putString("theme_custom_palette", palette.joinToString(",")).apply()
-    }
-    var showSeedDialog by remember { mutableStateOf(false) }
-    var showStyleDialog by remember { mutableStateOf(false) }
-    val currentSeedHex = themeSeedColor.removePrefix("#").uppercase()
-
-    // 动态取色本地状态
-    var dynamicColorLocal by remember {
-        mutableStateOf(settingsPrefs.getBoolean("dynamic_color", true))
-    }
-
-    val paletteStyleDescriptions = remember {
-        mapOf(
-            "TonalSpot" to "经典色调 · 平衡和谐（推荐）",
-            "Neutral" to "中性内敛 · 低饱和，纯净素雅",
-            "Vibrant" to "鲜艳活力 · 高饱和，色彩浓郁明快",
-            "Expressive" to "表现力 · 跳跃丰富，个性鲜明",
-            "Rainbow" to "彩虹光谱 · 多元色阶渐变",
-            "FruitSalad" to "水果沙拉 · 活泼多色调组合",
-            "Monochrome" to "单色极简 · 现代灰黑白单色",
-            "Fidelity" to "色彩保真 · 高保真还原种子色",
-            "Content" to "内容自适应 · 深度贴合专辑原色"
-        )
-    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // ==================== 1. 外观模式卡片 ====================
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = "外观模式",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 4.dp)
-            )
-
-            SettingsGroupCard {
-                val darkModeOptions = listOf(
-                    Triple("light", "浅色", Icons.Default.LightMode),
-                    Triple("dark", "深色", Icons.Default.DarkMode),
-                    Triple("auto", "跟随系统", Icons.Default.SettingsBrightness)
-                )
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    darkModeOptions.forEach { (value, label, icon) ->
-                        val selected = themeDarkMode == value
-                        Surface(
-                            onClick = {
-                                settingsPrefs.edit().putString("theme_dark_mode", value).apply()
-                                onThemeDarkModeChange(value)
-                            },
-                            shape = RoundedCornerShape(14.dp),
-                            color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(vertical = 12.dp, horizontal = 6.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = icon,
-                                    contentDescription = label,
-                                    tint = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                Text(
-                                    text = label,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        }
-                    }
-                }
-
-                val isSystemDark = isSystemInDarkTheme()
-                val modeDescription = when (themeDarkMode) {
-                    "auto" -> "已开启跟随系统：当前系统为${if (isSystemDark) "深色" else "浅色"}模式，将随系统自动自适应"
-                    "light" -> "已固定为浅色模式（不随系统深浅色变化）"
-                    "dark" -> "已固定为深色模式（不随系统深浅色变化）"
-                    else -> "跟随系统外观设置"
-                }
-
-                Text(
-                    text = modeDescription,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
-                )
-            }
-        }
-
-        // ==================== 2. 色彩与风格卡片 ====================
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = "色彩与风格",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = 4.dp)
-            )
-
-            SettingsGroupCard {
-                // (1) 动态取色开关
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 18.dp, vertical = 15.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AutoAwesome,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "动态取色",
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "专辑封面",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                        Text(
-                            text = "自动按当前歌曲专辑封面提取主色；关闭后可自定义种子色",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Switch(
-                        checked = dynamicColorLocal,
-                        onCheckedChange = { enabled ->
-                            dynamicColorLocal = enabled
-                            settingsPrefs.edit().putBoolean("dynamic_color", enabled).apply()
-                            onDynamicColorChange(enabled)
-                        }
-                    )
-                }
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
-
-                // (2) 主题颜色（种子色）入口：动态取色开启时保持展示但置灰禁用，关闭后正常高亮可点
-                val isSeedColorEnabled = !dynamicColorLocal
-                val seedColor = remember(currentSeedHex) {
-                    runCatching { Color(("#$currentSeedHex").toColorInt()) }.getOrDefault(Color(0xFF0061A4))
-                }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .alpha(if (isSeedColorEnabled) 1f else 0.45f)
-                        .clickable(enabled = isSeedColorEnabled) {
-                            showSeedDialog = true
-                        }
-                        .padding(horizontal = 18.dp, vertical = 15.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Palette,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "主题颜色（种子色）",
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            if (!isSeedColorEnabled) {
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = "已锁定",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                            }
-                        }
-                        Text(
-                            text = if (isSeedColorEnabled) {
-                                "基于种子色生成整套 Material 3 配色，背景与组件自适应"
-                            } else {
-                                "动态取色已开启（跟随专辑封面）；关闭动态取色后可自定义"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    // 当前种子色预览圆球
-                    Box(
-                        modifier = Modifier
-                            .size(26.dp)
-                            .clip(CircleShape)
-                            .background(seedColor)
-                            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), CircleShape)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "#$currentSeedHex",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (isSeedColorEnabled) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                )
-
-                // (3) 取色风格选择
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { showStyleDialog = true }
-                        .padding(horizontal = 18.dp, vertical = 15.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Tune,
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "取色风格算法",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = paletteStyleDescriptions[themePaletteStyle] ?: themePaletteStyle,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-
-        // ==================== 3. 视觉与动效卡片 ====================
+        // ==================== 1. 动效与特效卡片 ====================
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
                 text = "动效与特效",
@@ -1356,8 +1156,590 @@ internal fun SettingsDisplayContent(
                     .apply()
             }
         )
+    }
+}
 
-        Spacer(modifier = Modifier.height(16.dp))
+@Composable
+internal fun SettingsCustomizeContent(
+    currentUri: String?,
+    bgOpacity: Float,
+    onOpacityChange: (Float) -> Unit,
+    onReset: () -> Unit,
+    onDynamicColorChange: (Boolean) -> Unit,
+    onThemeColorChange: (String) -> Unit,
+    onBackgroundImageChange: (String?) -> Unit,
+    floatingBottomBar: Boolean,
+    onFloatingBottomBarChange: (Boolean) -> Unit,
+    settingsPrefs: android.content.SharedPreferences,
+    onRegisterPickAction: (() -> Unit) -> Unit = {}
+) {
+    Column {
+        // --- 全新手机标准壁纸相册与裁剪系统 ---
+        ThemeCustomizationSection(
+            onAddPreset = { filePath, _ ->
+                onBackgroundImageChange(filePath.toString())
+            },
+            currentBgImageUri = currentUri,
+            hasBackgroundImage = currentUri != null,
+            bgOpacity = bgOpacity,
+            onOpacityChange = onOpacityChange,
+            onResetDefaults = {
+                onBackgroundImageChange(null)
+                onOpacityChange(0.5f)
+            },
+            onClearBackgroundImage = {
+                onBackgroundImageChange(null)
+            },
+            onRegisterPickAction = onRegisterPickAction
+        )
+    }
+}
+
+/**
+ * 新通用设置页面（包含播放音质等基础与偏好设置）
+ */
+@Composable
+internal fun SettingsCommonContent(
+    settingsPrefs: android.content.SharedPreferences
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // ==================== 1. 播放音质 ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "播放音质",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            var selectedQuality by remember {
+                mutableStateOf(settingsPrefs.getString("audio_quality", null) ?: "flac")
+            }
+            val qualityOptions = listOf(
+                "default" to "默认",
+                "128" to "标准 (128kbps)",
+                "320" to "高品质 (320kbps)",
+                "flac" to "无损 (FLAC)",
+                "high" to "Hi-Res 无损"
+            )
+            var showQualityDialog by remember { mutableStateOf(false) }
+            val currentQualityLabel = qualityOptions.find { it.first == selectedQuality }?.second ?: "无损 (FLAC)"
+
+            SettingsGroupCard {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showQualityDialog = true }
+                        .padding(horizontal = 18.dp, vertical = 15.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MusicNote,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(
+                        text = "当前音质",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = currentQualityLabel,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (showQualityDialog) {
+                AlertDialog(
+                    onDismissRequest = { showQualityDialog = false },
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    title = { Text("选择播放音质", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column {
+                            qualityOptions.forEach { (value, label) ->
+                                Surface(
+                                    onClick = {
+                                        selectedQuality = value
+                                        val qualityValue = if (value == "default") null else value
+                                        KuGouApi.audioQuality = qualityValue
+                                        settingsPrefs.edit().putString("audio_quality", qualityValue).apply()
+                                        showQualityDialog = false
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (selectedQuality == value)
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    else
+                                        Color.Transparent,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        RadioButton(
+                                            selected = selectedQuality == value,
+                                            onClick = {
+                                                selectedQuality = value
+                                                val qualityValue = if (value == "default") null else value
+                                                KuGouApi.audioQuality = qualityValue
+                                                settingsPrefs.edit().putString("audio_quality", qualityValue).apply()
+                                                showQualityDialog = false
+                                            }
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = if (selectedQuality == value) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (selectedQuality == value)
+                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                            else
+                                                MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showQualityDialog = false }) {
+                            Text("取消")
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 新外观设置页面（包含主题风格、外观模式、色彩与风格等功能项）
+ */
+@Composable
+internal fun SettingsAppearanceContent(
+    themeDarkMode: String,
+    onThemeDarkModeChange: (String) -> Unit,
+    themeSeedColor: String,
+    onThemeSeedColorChange: (String) -> Unit,
+    themePaletteStyle: String,
+    onThemePaletteStyleChange: (String) -> Unit,
+    onDynamicColorChange: (Boolean) -> Unit,
+    onFloatingBottomBarChange: (Boolean) -> Unit,
+    settingsPrefs: android.content.SharedPreferences,
+    currentUri: String? = null,
+    bgOpacity: Float = 0.5f,
+    onOpacityChange: (Float) -> Unit = {},
+    onBackgroundImageChange: (String?) -> Unit = {},
+    onRegisterPickAction: (((() -> Unit) -> Unit))? = null
+) {
+    var themeMode by remember { mutableStateOf(settingsPrefs.getString("theme_mode", "dynamic") ?: "dynamic") }
+
+    // 自定义色板（存 prefs，逗号分隔）
+    var customPalette by remember {
+        mutableStateOf(
+            settingsPrefs.getString("theme_custom_palette", "")?.split(",")
+                ?.filter { it.isNotBlank() } ?: emptyList()
+        )
+    }
+    val saveCustomPalette: (List<String>) -> Unit = { palette ->
+        customPalette = palette
+        settingsPrefs.edit().putString("theme_custom_palette", palette.joinToString(",")).apply()
+    }
+    var showSeedDialog by remember { mutableStateOf(false) }
+    var showStyleDialog by remember { mutableStateOf(false) }
+    val currentSeedHex = themeSeedColor.removePrefix("#").uppercase()
+
+    // 动态取色本地状态
+    var dynamicColorLocal by remember {
+        mutableStateOf(settingsPrefs.getBoolean("dynamic_color", true))
+    }
+
+    val paletteStyleDescriptions = remember {
+        mapOf(
+            "TonalSpot" to "经典色调 · 平衡和谐（推荐）",
+            "Neutral" to "中性内敛 · 低饱和，纯净素雅",
+            "Vibrant" to "鲜艳活力 · 高饱和，色彩浓郁明快",
+            "Expressive" to "表现力 · 跳跃丰富，个性鲜明",
+            "Rainbow" to "彩虹光谱 · 多元色阶渐变",
+            "FruitSalad" to "水果沙拉 · 活泼多色调组合",
+            "Monochrome" to "单色极简 · 现代灰黑白单色",
+            "Fidelity" to "色彩保真 · 高保真还原种子色",
+            "Content" to "内容自适应 · 深度贴合专辑原色"
+        )
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // ==================== 1. 主题风格（原生 / 现代化） ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "主题风格",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            SettingsGroupCard {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val isDynamic = themeMode == "dynamic"
+                    Surface(
+                        onClick = {
+                            themeMode = "dynamic"
+                            settingsPrefs.edit().putString("theme_mode", "dynamic").apply()
+                            onFloatingBottomBarChange(false)
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (isDynamic) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(modifier = Modifier.padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "原生主题",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = if (isDynamic) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isDynamic) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    val isModern = themeMode == "modern"
+                    Surface(
+                        onClick = {
+                            themeMode = "modern"
+                            settingsPrefs.edit().putString("theme_mode", "modern").apply()
+                            onFloatingBottomBarChange(true)
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        color = if (isModern) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(modifier = Modifier.padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "现代化主题",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = if (isModern) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isModern) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==================== 2. 外观模式（深色 / 浅色 / 跟随系统） ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "外观模式",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            SettingsGroupCard {
+                val darkModeOptions = listOf(
+                    Triple("light", "浅色", Icons.Default.LightMode),
+                    Triple("dark", "深色", Icons.Default.DarkMode),
+                    Triple("auto", "跟随系统", Icons.Default.SettingsBrightness)
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    darkModeOptions.forEach { (value, label, icon) ->
+                        val selected = themeDarkMode == value
+                        Surface(
+                            onClick = {
+                                settingsPrefs.edit().putString("theme_dark_mode", value).apply()
+                                onThemeDarkModeChange(value)
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(vertical = 12.dp, horizontal = 6.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = label,
+                                    tint = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
+
+                val isSystemDark = isSystemInDarkTheme()
+                val modeDescription = when (themeDarkMode) {
+                    "auto" -> "已开启跟随系统：当前系统为${if (isSystemDark) "深色" else "浅色"}模式，将随系统自动自适应"
+                    "light" -> "已固定为浅色模式（不随系统深浅色变化）"
+                    "dark" -> "已固定为深色模式（不随系统深浅色变化）"
+                    else -> "跟随系统外观设置"
+                }
+
+                Text(
+                    text = modeDescription,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
+                )
+            }
+        }
+
+        // ==================== 3. 色彩与风格 ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "色彩与风格",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            SettingsGroupCard {
+                // (1) 动态取色开关
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 15.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "动态取色",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "专辑封面",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                        Text(
+                            text = "自动按当前歌曲专辑封面提取主色；关闭后可自定义种子色",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Switch(
+                        checked = dynamicColorLocal,
+                        onCheckedChange = { enabled ->
+                            dynamicColorLocal = enabled
+                            settingsPrefs.edit().putBoolean("dynamic_color", enabled).apply()
+                            onDynamicColorChange(enabled)
+                        }
+                    )
+                }
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (2) 主题颜色（种子色）入口
+                val isSeedColorEnabled = !dynamicColorLocal
+                val seedColor = remember(currentSeedHex) {
+                    runCatching { Color(("#$currentSeedHex").toColorInt()) }.getOrDefault(Color(0xFF0061A4))
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .alpha(if (isSeedColorEnabled) 1f else 0.45f)
+                        .clickable(enabled = isSeedColorEnabled) {
+                            showSeedDialog = true
+                        }
+                        .padding(horizontal = 18.dp, vertical = 15.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Palette,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "主题颜色（种子色）",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (!isSeedColorEnabled) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = "已锁定",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = if (isSeedColorEnabled) {
+                                "基于种子色生成整套 Material 3 配色，背景与组件自适应"
+                            } else {
+                                "动态取色已开启（跟随专辑封面）；关闭动态取色后可自定义"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    // 当前种子色预览圆球
+                    Box(
+                        modifier = Modifier
+                            .size(26.dp)
+                            .clip(CircleShape)
+                            .background(seedColor)
+                            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f), CircleShape)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "#$currentSeedHex",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (isSeedColorEnabled) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (3) 取色风格选择
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showStyleDialog = true }
+                        .padding(horizontal = 18.dp, vertical = 15.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "取色风格算法",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = paletteStyleDescriptions[themePaletteStyle] ?: themePaletteStyle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        // ==================== 4. 背景壁纸与相册 ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "背景壁纸与相册",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            ThemeCustomizationSection(
+                onAddPreset = { filePath, _ ->
+                    onBackgroundImageChange(filePath.toString())
+                },
+                currentBgImageUri = currentUri,
+                hasBackgroundImage = currentUri != null,
+                bgOpacity = bgOpacity,
+                onOpacityChange = onOpacityChange,
+                onResetDefaults = {
+                    onBackgroundImageChange(null)
+                    onOpacityChange(0.5f)
+                },
+                onClearBackgroundImage = {
+                    onBackgroundImageChange(null)
+                },
+                onRegisterPickAction = { action ->
+                    onRegisterPickAction?.invoke(action)
+                }
+            )
+        }
 
         // 种子色选择与高级调色对话框 (BottomSheet)
         if (showSeedDialog) {
@@ -1469,107 +1851,6 @@ internal fun SettingsDisplayContent(
 }
 
 @Composable
-internal fun SettingsCustomizeContent(
-    currentUri: String?,
-    bgOpacity: Float,
-    onOpacityChange: (Float) -> Unit,
-    onReset: () -> Unit,
-    onDynamicColorChange: (Boolean) -> Unit,
-    onThemeColorChange: (String) -> Unit,
-    onBackgroundImageChange: (String?) -> Unit,
-    floatingBottomBar: Boolean,
-    onFloatingBottomBarChange: (Boolean) -> Unit,
-    settingsPrefs: android.content.SharedPreferences,
-    onRegisterPickAction: (() -> Unit) -> Unit = {}
-) {
-    Column {
-        // --- 主题模式选择条 ---
-        var themeMode by remember { mutableStateOf(settingsPrefs.getString("theme_mode", "dynamic") ?: "dynamic") }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            // 原生主题选项
-            val isDynamic = themeMode == "dynamic"
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (isDynamic) MaterialTheme.colorScheme.primary else Color.Transparent)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
-                        themeMode = "dynamic"
-                        settingsPrefs.edit().putString("theme_mode", "dynamic").apply()
-                        onFloatingBottomBarChange(false)
-                    }
-                    .padding(vertical = 12.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "原生主题",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = if (isDynamic) FontWeight.Bold else FontWeight.Normal,
-                    color = if (isDynamic) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-                )
-            }
-
-            // 现代化主题选项
-            val isModern = themeMode == "modern"
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (isModern) MaterialTheme.colorScheme.primary else Color.Transparent)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {
-                        themeMode = "modern"
-                        settingsPrefs.edit().putString("theme_mode", "modern").apply()
-                        onFloatingBottomBarChange(true)
-                    }
-                    .padding(vertical = 12.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "现代化主题",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = if (isModern) FontWeight.Bold else FontWeight.Normal,
-                    color = if (isModern) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // --- 全新手机标准壁纸相册与裁剪系统 ---
-        ThemeCustomizationSection(
-            onAddPreset = { filePath, _ ->
-                onBackgroundImageChange(filePath.toString())
-            },
-            currentBgImageUri = currentUri,
-            hasBackgroundImage = currentUri != null,
-            bgOpacity = bgOpacity,
-            onOpacityChange = onOpacityChange,
-            onResetDefaults = {
-                onBackgroundImageChange(null)
-                onOpacityChange(0.5f)
-            },
-            onClearBackgroundImage = {
-                onBackgroundImageChange(null)
-            },
-            onRegisterPickAction = onRegisterPickAction
-        )
-    }
-}
-
-@Composable
 internal fun SettingsGeneralContent(
     settingsPrefs: android.content.SharedPreferences,
     onClearBgImage: () -> Unit = {},
@@ -1589,125 +1870,6 @@ internal fun SettingsGeneralContent(
 ) {
     val settingsContext = LocalContext.current
     Column {
-    // --- 播放音质 ---
-    var selectedQuality by remember {
-        mutableStateOf(settingsPrefs.getString("audio_quality", null) ?: "flac")
-    }
-    val qualityOptions = listOf(
-        "default" to "默认",
-        "128" to "标准 (128kbps)",
-        "320" to "高品质 (320kbps)",
-        "flac" to "无损 (FLAC)",
-        "high" to "Hi-Res 无损"
-    )
-    var showQualityDialog by remember { mutableStateOf(false) }
-    val currentQualityLabel = qualityOptions.find { it.first == selectedQuality }?.second ?: "无损 (FLAC)"
-
-    Text(
-        text = "播放音质",
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold
-    )
-    Spacer(modifier = Modifier.height(8.dp))
-
-    Surface(
-        onClick = { showQualityDialog = true },
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(Icons.Default.MusicNote, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = "当前音质",
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                text = currentQualityLabel,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Medium
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                null,
-                Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-
-    if (showQualityDialog) {
-        AlertDialog(
-            onDismissRequest = { showQualityDialog = false },
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = { Text("选择播放音质", color = MaterialTheme.colorScheme.onSurface) },
-            text = {
-                Column {
-                    qualityOptions.forEach { (value, label) ->
-                        Surface(
-                            onClick = {
-                                selectedQuality = value
-                                val qualityValue = if (value == "default") null else value
-                                KuGouApi.audioQuality = qualityValue
-                                settingsPrefs.edit().putString("audio_quality", qualityValue).apply()
-                                showQualityDialog = false
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (selectedQuality == value)
-                                MaterialTheme.colorScheme.primaryContainer
-                            else
-                                Color.Transparent,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                RadioButton(
-                                    selected = selectedQuality == value,
-                                    onClick = {
-                                        selectedQuality = value
-                                        val qualityValue = if (value == "default") null else value
-                                        KuGouApi.audioQuality = qualityValue
-                                        settingsPrefs.edit().putString("audio_quality", qualityValue).apply()
-                                        showQualityDialog = false
-                                    }
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = label,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = if (selectedQuality == value)
-                                        MaterialTheme.colorScheme.onPrimaryContainer
-                                    else
-                                        MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showQualityDialog = false }) {
-                    Text("取消")
-                }
-            }
-        )
-    }
-
-    Spacer(modifier = Modifier.height(24.dp))
-
     // --- 首页排序 ---
     Text(
         text = "首页排序",
@@ -3642,10 +3804,620 @@ fun SettingsPlayerContent(
 }
 
 /**
+ * 新「播放界面」设置统一页面
+ * 包含：
+ * 1. 背景动效与氛围（灵动流体、MeiloX 网格、流体着色器、封面模糊、动态渐变、壁纸背景与音频律动）
+ * 2. 黑胶唱片与封面（圆形专辑、旋转动画、黑胶质感、机械唱针、复古底座、触屏切歌词）
+ * 3. 歌词特效与体验（逐字卡拉OK、MeiloX 液态歌词、歌词景深虚化、拖动预览）
+ * 4. 播放控制与进度条（简约风控件、波浪动态进度条、紧凑控制栏）
+ */
+@Composable
+internal fun SettingsPlayerStageContent(
+    // 背景动效与氛围
+    playerDynamicBg: Boolean,
+    onPlayerDynamicBgChange: (Boolean) -> Unit,
+    playerHyperBg: Boolean,
+    onPlayerHyperBgChange: (Boolean) -> Unit,
+    playerFluidAmbientBg: Boolean,
+    onPlayerFluidAmbientBgChange: (Boolean) -> Unit,
+    playerMeshBg: Boolean,
+    onPlayerMeshBgChange: (Boolean) -> Unit,
+    playerCoverBlurBg: Boolean,
+    onPlayerCoverBlurBgChange: (Boolean) -> Unit,
+    playerCoverBlurAmount: Float,
+    onPlayerCoverBlurAmountChange: (Float) -> Unit,
+    playerCoverBlurDarken: Float,
+    onPlayerCoverBlurDarkenChange: (Float) -> Unit,
+    playerAudioReactive: Boolean,
+    onPlayerAudioReactiveChange: (Boolean) -> Unit,
+    playerBgEnhance: Boolean,
+    onPlayerBgEnhanceChange: (Boolean) -> Unit,
+    playerBgOpacity: Float,
+    onPlayerBgOpacityChange: (Float) -> Unit,
+    playerBlur: Boolean,
+    onPlayerBlurChange: (Boolean) -> Unit,
+    // 黑胶唱片与封面
+    playerRoundAlbum: Boolean,
+    onPlayerRoundAlbumChange: (Boolean) -> Unit,
+    playerRotate: Boolean,
+    onPlayerRotateChange: (Boolean) -> Unit,
+    playerVinylStyle: Boolean = true,
+    onPlayerVinylStyleChange: (Boolean) -> Unit = {},
+    playerVinylPointer: Boolean = true,
+    onPlayerVinylPointerChange: (Boolean) -> Unit = {},
+    playerVinylBase: Boolean = false,
+    onPlayerVinylBaseChange: (Boolean) -> Unit = {},
+    playerTapCoverToLyrics: Boolean,
+    onPlayerTapCoverToLyricsChange: (Boolean) -> Unit,
+    // 歌词特效与体验
+    playerLyricsWordEffect: Boolean,
+    onPlayerLyricsWordEffectChange: (Boolean) -> Unit,
+    playerMeiloxLyrics: Boolean,
+    onPlayerMeiloxLyricsChange: (Boolean) -> Unit,
+    playerLyricBlur: Boolean,
+    onPlayerLyricBlurChange: (Boolean) -> Unit,
+    playerLyricBlurAmount: Float,
+    onPlayerLyricBlurAmountChange: (Float) -> Unit,
+    playerLyricsSeekPreview: Boolean,
+    onPlayerLyricsSeekPreviewChange: (Boolean) -> Unit,
+    // 播放控制与进度条
+    playerMinimalistControls: Boolean = true,
+    onPlayerMinimalistControlsChange: (Boolean) -> Unit = {},
+    playerCompactControls: Boolean,
+    onPlayerCompactControlsChange: (Boolean) -> Unit,
+    playerWaveformSlider: Boolean,
+    onPlayerWaveformSliderChange: (Boolean) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // ==================== 1. 背景动效与氛围 ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "背景动效与氛围",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            SettingsGroupCard {
+                // (1) 灵动流体背景
+                PlayerSettingSwitchRow(
+                    title = "灵动流体背景",
+                    subtitle = "仿 Apple Music 风格流体光场，多频有机流动与智能高饱和取色",
+                    checked = playerFluidAmbientBg,
+                    onCheckedChange = { enabled ->
+                        onPlayerFluidAmbientBgChange(enabled)
+                        if (enabled) {
+                            if (playerMeshBg) onPlayerMeshBgChange(false)
+                            if (playerHyperBg) onPlayerHyperBgChange(false)
+                            if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
+                            if (playerDynamicBg) onPlayerDynamicBgChange(false)
+                            if (playerBgEnhance) onPlayerBgEnhanceChange(false)
+                        }
+                    }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (2) MeiloX 网格渐变
+                PlayerSettingSwitchRow(
+                    title = "MeiloX 网格渐变",
+                    subtitle = "封面取色驱动 GL 网格流体形变，随音乐鼓点频谱律动",
+                    checked = playerMeshBg,
+                    onCheckedChange = { enabled ->
+                        onPlayerMeshBgChange(enabled)
+                        if (enabled) {
+                            if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
+                            if (playerHyperBg) onPlayerHyperBgChange(false)
+                            if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
+                            if (playerDynamicBg) onPlayerDynamicBgChange(false)
+                            if (playerBgEnhance) onPlayerBgEnhanceChange(false)
+                        }
+                    }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (3) 流体动态背景 (GLSL 着色器)
+                PlayerSettingSwitchRow(
+                    title = "流体动态背景",
+                    subtitle = if (Build.VERSION.SDK_INT >= 33) {
+                        "GLSL 流体着色器，随专辑封面颜色流动、随音乐律动（需 Android 13+）"
+                    } else {
+                        "需要 Android 13 及以上版本"
+                    },
+                    checked = playerHyperBg,
+                    enabled = Build.VERSION.SDK_INT >= 33,
+                    onCheckedChange = { enabled ->
+                        onPlayerHyperBgChange(enabled)
+                        if (enabled) {
+                            if (playerMeshBg) onPlayerMeshBgChange(false)
+                            if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
+                            if (playerDynamicBg) onPlayerDynamicBgChange(false)
+                            if (playerBgEnhance) onPlayerBgEnhanceChange(false)
+                            if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
+                        }
+                    }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (4) 音频律动（依赖流体动态背景）
+                PlayerSettingSwitchRow(
+                    title = "音频律动",
+                    subtitle = if (Build.VERSION.SDK_INT >= 33) {
+                        "流体动态背景随音乐音量实时起伏律动（需开启流体动态背景）"
+                    } else {
+                        "需要 Android 13 及以上版本"
+                    },
+                    checked = playerAudioReactive,
+                    enabled = Build.VERSION.SDK_INT >= 33 && playerHyperBg,
+                    onCheckedChange = onPlayerAudioReactiveChange
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (5) 封面模糊背景
+                PlayerSettingSwitchRow(
+                    title = "封面模糊背景",
+                    subtitle = if (Build.VERSION.SDK_INT >= 31) {
+                        "将当前专辑封面全屏虚化模糊铺满底图（需 Android 12+）"
+                    } else {
+                        "需要 Android 12 及以上版本"
+                    },
+                    checked = playerCoverBlurBg,
+                    enabled = Build.VERSION.SDK_INT >= 31,
+                    onCheckedChange = { enabled ->
+                        onPlayerCoverBlurBgChange(enabled)
+                        if (enabled) {
+                            if (playerMeshBg) onPlayerMeshBgChange(false)
+                            if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
+                            if (playerDynamicBg) onPlayerDynamicBgChange(false)
+                            if (playerBgEnhance) onPlayerBgEnhanceChange(false)
+                            if (playerHyperBg) onPlayerHyperBgChange(false)
+                        }
+                    }
+                )
+
+                if (playerCoverBlurBg) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                    )
+
+                    // 封面模糊强度滑块
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Text(
+                            text = "封面模糊强度",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("柔和", style = MaterialTheme.typography.bodySmall)
+                            Slider(
+                                value = playerCoverBlurAmount,
+                                onValueChange = onPlayerCoverBlurAmountChange,
+                                valueRange = 0f..100f,
+                                steps = 19,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text("强烈", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(
+                            text = String.format("当前: %.0f", playerCoverBlurAmount),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                    )
+
+                    // 背景调暗滑块
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Text(
+                            text = "背景调暗",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("明亮", style = MaterialTheme.typography.bodySmall)
+                            Slider(
+                                value = playerCoverBlurDarken,
+                                onValueChange = onPlayerCoverBlurDarkenChange,
+                                valueRange = 0f..0.8f,
+                                steps = 15,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text("暗", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(
+                            text = String.format("当前: %.0f%%", playerCoverBlurDarken * 100),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (6) 动态渐变背景
+                PlayerSettingSwitchRow(
+                    title = "动态渐变背景",
+                    subtitle = "根据专辑封面颜色生成全屏渐变，随播放旋转流动",
+                    checked = playerDynamicBg,
+                    onCheckedChange = { enabled ->
+                        onPlayerDynamicBgChange(enabled)
+                        if (enabled) {
+                            if (playerBgEnhance) onPlayerBgEnhanceChange(false)
+                            if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
+                            if (playerMeshBg) onPlayerMeshBgChange(false)
+                            if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
+                            if (playerHyperBg) onPlayerHyperBgChange(false)
+                        }
+                    }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (7) 应用壁纸背景
+                PlayerSettingSwitchRow(
+                    title = "应用壁纸背景",
+                    subtitle = "使用在外观设置中选择的背景图片作为播放器底图",
+                    checked = playerBgEnhance,
+                    onCheckedChange = { enabled ->
+                        onPlayerBgEnhanceChange(enabled)
+                        if (enabled) {
+                            if (playerDynamicBg) onPlayerDynamicBgChange(false)
+                            if (playerCoverBlurBg) onPlayerCoverBlurBgChange(false)
+                            if (playerMeshBg) onPlayerMeshBgChange(false)
+                            if (playerFluidAmbientBg) onPlayerFluidAmbientBgChange(false)
+                            if (playerHyperBg) onPlayerHyperBgChange(false)
+                        }
+                    }
+                )
+
+                if (playerBgEnhance) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                    )
+
+                    // 高斯模糊
+                    PlayerSettingSwitchRow(
+                        title = "壁纸高斯模糊",
+                        subtitle = "给背景壁纸添加模糊与高级质感",
+                        checked = playerBlur,
+                        onCheckedChange = onPlayerBlurChange
+                    )
+
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                    )
+
+                    // 背景透明度滑块
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Text(
+                            text = "背景壁纸透明度",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("透明", style = MaterialTheme.typography.bodySmall)
+                            Slider(
+                                value = playerBgOpacity,
+                                onValueChange = onPlayerBgOpacityChange,
+                                valueRange = 0.1f..1f,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text("清晰", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(
+                            text = String.format("当前: %.0f%%", playerBgOpacity * 100),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+        }
+
+        // ==================== 2. 黑胶唱片与封面 ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "黑胶唱片与封面",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            SettingsGroupCard {
+                // (1) 圆形专辑封面
+                PlayerSettingSwitchRow(
+                    title = "圆形专辑封面",
+                    subtitle = "将专辑封面显示为圆形；关闭后显示矩形封面卡",
+                    checked = playerRoundAlbum,
+                    onCheckedChange = { enabled ->
+                        onPlayerRoundAlbumChange(enabled)
+                        if (!enabled) {
+                            if (playerRotate) onPlayerRotateChange(false)
+                            if (playerVinylStyle) onPlayerVinylStyleChange(false)
+                            if (playerVinylPointer) onPlayerVinylPointerChange(false)
+                            if (playerVinylBase) onPlayerVinylBaseChange(false)
+                        }
+                    }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (2) 播放旋转动画
+                PlayerSettingSwitchRow(
+                    title = "播放旋转动画",
+                    subtitle = "播放时唱片缓缓匀速旋转，暂停时轻柔停转",
+                    checked = playerRotate,
+                    onCheckedChange = onPlayerRotateChange,
+                    enabled = playerRoundAlbum
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (3) 黑胶唱片质感
+                PlayerSettingSwitchRow(
+                    title = "黑胶唱片质感",
+                    subtitle = "在封面外圈展示拟真黑胶唱盘与精细同心音轨光泽",
+                    checked = playerVinylStyle,
+                    onCheckedChange = onPlayerVinylStyleChange,
+                    enabled = playerRoundAlbum
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (4) 金属机械唱针
+                PlayerSettingSwitchRow(
+                    title = "金属机械唱针",
+                    subtitle = "显示金属唱臂与配重块，播放时落针，暂停时抬起复位",
+                    checked = playerVinylPointer,
+                    onCheckedChange = onPlayerVinylPointerChange,
+                    enabled = playerRoundAlbum
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (5) 复古唱机底座
+                PlayerSettingSwitchRow(
+                    title = "复古唱机底座",
+                    subtitle = "显示白玉质感唱机底座卡片与精致徽标",
+                    checked = playerVinylBase,
+                    onCheckedChange = onPlayerVinylBaseChange,
+                    enabled = playerRoundAlbum
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (6) 轻触封面翻转歌词
+                PlayerSettingSwitchRow(
+                    title = "轻触封面翻转歌词",
+                    subtitle = "点击专辑封面区域直接翻转或滑到歌词页面",
+                    checked = playerTapCoverToLyrics,
+                    onCheckedChange = onPlayerTapCoverToLyricsChange
+                )
+            }
+        }
+
+        // ==================== 3. 歌词特效与体验 ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "歌词特效与体验",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            SettingsGroupCard {
+                // (1) 逐字卡拉OK动效
+                PlayerSettingSwitchRow(
+                    title = "逐字卡拉OK动效",
+                    subtitle = "当前演唱行根据字级时间戳逐字点亮推进；关闭后仅整行高亮",
+                    checked = playerLyricsWordEffect,
+                    onCheckedChange = {
+                        onPlayerLyricsWordEffectChange(it)
+                        if (it) onPlayerMeiloxLyricsChange(false)
+                    }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (2) MeiloX 液态流体歌词
+                PlayerSettingSwitchRow(
+                    title = "MeiloX 液态歌词",
+                    subtitle = "Apple Music 风格全屏液态发光歌词排版（与普通逐字互斥）",
+                    checked = playerMeiloxLyrics,
+                    onCheckedChange = {
+                        onPlayerMeiloxLyricsChange(it)
+                        if (it) onPlayerLyricsWordEffectChange(false)
+                    }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (3) 歌词景深虚化
+                PlayerSettingSwitchRow(
+                    title = "歌词景深虚化",
+                    subtitle = "非当前歌词行添加景深模糊效果，自然聚焦当前演唱行",
+                    checked = playerLyricBlur,
+                    onCheckedChange = onPlayerLyricBlurChange
+                )
+
+                if (playerLyricBlur) {
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                    )
+
+                    // 歌词模糊强度滑块
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Text(
+                            text = "歌词模糊强度",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("轻", style = MaterialTheme.typography.bodySmall)
+                            Slider(
+                                value = playerLyricBlurAmount,
+                                onValueChange = onPlayerLyricBlurAmountChange,
+                                valueRange = 0f..30f,
+                                steps = 29,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text("重", style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text(
+                            text = String.format("当前: %.0f", playerLyricBlurAmount),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (4) 拖动歌词预览
+                PlayerSettingSwitchRow(
+                    title = "拖动歌词进度预览",
+                    subtitle = "拖动进度条时实时预览对应时间歌词，划过每行产生轻微震动反馈",
+                    checked = playerLyricsSeekPreview,
+                    onCheckedChange = onPlayerLyricsSeekPreviewChange
+                )
+            }
+        }
+
+        // ==================== 4. 播放控制与进度条 ====================
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "播放控制与进度条",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            SettingsGroupCard {
+                // (1) 简约风控件
+                PlayerSettingSwitchRow(
+                    title = "简约风控件",
+                    subtitle = "采用胶囊形扁平进度条与极简实心播放控制按钮",
+                    checked = playerMinimalistControls,
+                    onCheckedChange = { enabled ->
+                        onPlayerMinimalistControlsChange(enabled)
+                        if (enabled && playerWaveformSlider) onPlayerWaveformSliderChange(false)
+                    }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (2) 波浪动态进度条
+                PlayerSettingSwitchRow(
+                    title = "波浪动态进度条",
+                    subtitle = "自绘正弦波声波进度条，播放时波浪流动，加载时脉冲动画",
+                    checked = playerWaveformSlider,
+                    onCheckedChange = { enabled ->
+                        onPlayerWaveformSliderChange(enabled)
+                        if (enabled && playerMinimalistControls) onPlayerMinimalistControlsChange(false)
+                    }
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (3) 紧凑控制栏
+                PlayerSettingSwitchRow(
+                    title = "紧凑控制栏",
+                    subtitle = "仅歌词页生效：隐藏播放模式与列表按钮，控制键与进度条紧凑下沉",
+                    checked = playerCompactControls,
+                    onCheckedChange = onPlayerCompactControlsChange
+                )
+            }
+        }
+    }
+}
+
+/**
  * 播放器设置页的开关行
  */
 @Composable
-private fun PlayerSettingSwitchRow(
+internal fun PlayerSettingSwitchRow(
     title: String,
     subtitle: String,
     checked: Boolean,

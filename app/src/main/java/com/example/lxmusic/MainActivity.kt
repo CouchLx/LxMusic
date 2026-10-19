@@ -85,6 +85,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -624,6 +625,9 @@ fun AppScaffold(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    // 横屏检测：页面内容限宽居中用（旋转时 LocalConfiguration 变化会自动重组）
+    val isLandscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
+        android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val playerViewModel: PlayerViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val uiState by playerViewModel.uiState.collectAsState()
     val audioFormat by playerViewModel.audioFormat.collectAsState()
@@ -655,6 +659,17 @@ fun AppScaffold(
     var isMiniBarDragging by remember { mutableStateOf(false) }
     // 页面展开/收起动画进行中（组合条件用布尔驱动，避免每帧读取动画值导致整树重组）
     var isRevealAnimating by remember { mutableStateOf(false) }
+
+    // 旋转（横竖屏切换）时校正收起态偏移：
+    // playerRevealY 是 remember 缓存的 Animatable，旋转后仍保留旧方向的屏幕高度
+    // （竖屏 2670 ↔ 横屏 900），使收起态偏移 ≠ 新屏高 → 底栏的 translationY 计算出
+    // 非 0 值被推出屏幕（表现为旋转后底栏消失）。这里在屏幕高度变化、且处于静止
+    // 收起态时立即 snap 到新屏高，从数据层面根治。
+    LaunchedEffect(screenHeightPx) {
+        if (!showPlayerPage && !isMiniBarDragging && !isRevealAnimating) {
+            playerRevealY.snapTo(screenHeightPx)
+        }
+    }
     var previousTab by rememberSaveable { mutableIntStateOf(0) }
 
     // 进程重建后，依赖非持久化数据的子页面（4-7 每日/历史/风格列表、8-10 歌单详情）
@@ -1469,6 +1484,9 @@ fun AppScaffold(
                                 } else {
                                     Text(
                                         text = when (settingsSubPage) {
+                                            "common" -> "通用"
+                                            "appearance" -> "外观"
+                                            "player_stage" -> "播放界面"
                                             "display" -> "主题设置"
                                             "customize" -> "壁纸风格"
                                             "motion" -> "动效设置"
@@ -1797,6 +1815,13 @@ fun AppScaffold(
                     },
                     label = "tabTransition"
                 ) { tab ->
+                    // 横屏：页面内容限宽居中（列表行不被拉宽变形）；顶栏/底栏/播放条仍在 Scaffold 层保持全宽
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .widthIn(max = if (isLandscape) 640.dp else Dp.Infinity)
+                            .align(Alignment.TopCenter)
+                    ) {
                     when (tab) {
                         0 -> {
                             // 保存滚动位置
@@ -2444,6 +2469,7 @@ fun AppScaffold(
                             onSettingsSubPageChange = { settingsSubPage = it }
                         )
                     }
+                    } // 关闭横屏限宽容器
                 }
 
                 // 覆盖层页面（登录页保留覆盖层方式）
@@ -2963,7 +2989,12 @@ fun AppScaffold(
             // progress 在 draw 阶段读取动画值（不触发组合重组）
             Box(
                 modifier = Modifier.graphicsLayer {
-                    val progress = if (miniBarTopY > 0f) {
+                    // 静止态（非跟手拖动、非展开/收起动画）progress 强制 0：
+                    // 仅手势/动画进行中底栏才跟随滚出；避免任何状态残留
+                    // （如旋转后 playerRevealY 旧值）把底栏推出屏幕导致"底栏消失"
+                    val progress = if (!isMiniBarDragging && !isRevealAnimating) {
+                        0f
+                    } else if (miniBarTopY > 0f) {
                         ((miniBarTopY - playerRevealY.value) / miniBarTopY).coerceIn(0f, 1f)
                     } else {
                         0f

@@ -57,6 +57,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -112,6 +113,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
@@ -370,6 +372,333 @@ fun PlayerStage(
     // 音频参数文本（仅专辑页显示）：采样率 + 位深 + 格式（如 "44.1kHz 16bit FLAC" 或 "44.1kHz 320k MP3"）；
     val audioInfoText = if (pagerState.currentPage == 0) currentAudioInfo else null
 
+    // ===== 横屏适配（参考 folia 宽屏双栏）：左栏=信息+封面 | 右栏=进度+歌词+控制 =====
+    val isLandscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
+        android.content.res.Configuration.ORIENTATION_LANDSCAPE
+
+    // 歌词渲染（竖屏 pager 页1 与横屏右栏共用）：含歌曲切换过渡与两种歌词视图分支
+    val lyricsStage: @Composable () -> Unit = {
+        val smoothGlideEasing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1.0f)
+        val glideDurationMs = 380
+
+        AnimatedContent(
+            targetState = song,
+            transitionSpec = {
+                if (isNextSong) {
+                    (slideInHorizontally(
+                        animationSpec = tween(durationMillis = glideDurationMs, easing = smoothGlideEasing)
+                    ) { fullWidth -> (fullWidth * 0.35f).toInt() } + fadeIn(animationSpec = tween(220)))
+                        .togetherWith(
+                            slideOutHorizontally(
+                                animationSpec = tween(durationMillis = glideDurationMs, easing = smoothGlideEasing)
+                            ) { fullWidth -> (-fullWidth * 0.35f).toInt() } + fadeOut(animationSpec = tween(180))
+                        )
+                } else {
+                    (slideInHorizontally(
+                        animationSpec = tween(durationMillis = glideDurationMs, easing = smoothGlideEasing)
+                    ) { fullWidth -> (-fullWidth * 0.35f).toInt() } + fadeIn(animationSpec = tween(220)))
+                        .togetherWith(
+                            slideOutHorizontally(
+                                animationSpec = tween(durationMillis = glideDurationMs, easing = smoothGlideEasing)
+                            ) { fullWidth -> (fullWidth * 0.35f).toInt() } + fadeOut(animationSpec = tween(180))
+                        )
+                }
+            },
+            contentKey = { it.filePath },
+            label = "lyricsTransition",
+            modifier = Modifier.fillMaxSize()
+        ) { targetSong ->
+            val currentOrTargetLyricText = remember(targetSong.filePath, lyricsText) {
+                if (targetSong.filePath == song.filePath) {
+                    lyricsText?.takeIf { it.isNotBlank() } ?: targetSong.lyrics?.takeIf { it.isNotBlank() }
+                } else {
+                    com.example.lxmusic.data.LyricRepository.getMemoryCachedLyric(targetSong)
+                        ?: targetSong.lyrics?.takeIf { it.isNotBlank() }
+                }
+            }
+            val currentOrTargetEntries = remember(currentOrTargetLyricText) {
+                currentOrTargetLyricText?.let { parseNeteaseLyricsAuto(it) }?.takeIf { it.isNotEmpty() }
+                    ?: emptyList()
+            }
+            // 翻译只对应当前已拉取的歌曲；过渡目标歌曲翻译未就绪时先不传
+            val currentOrTargetTranslations = remember(targetSong.filePath, translatedLyrics) {
+                if (targetSong.filePath == song.filePath) translatedLyrics else null
+            }
+
+            if (playerMeiloxLyrics) {
+                MeiloxLiquidLyricsView(
+                    lyrics = currentOrTargetEntries,
+                    currentTimeMs = lyricPreviewTimeMs,
+                    lyricOffsetMs = LYRIC_TIME_OFFSET_MS,
+                    isPlaying = isPlaying,
+                    playbackSpeed = 1f,
+                    onSeekTo = onSeek,
+                    onLyricLongClick = { entry ->
+                        onSeek(entry.startTimeMs)
+                    },
+                    rawLyrics = currentOrTargetLyricText,
+                    translatedLyrics = currentOrTargetTranslations,
+                    emptyStateText = if (isInstrumentalLyric) "纯音乐" else "暂无歌词",
+                    showLyricTranslation = true,
+                    textColor = uiTint,
+                    fontSize = lyricFontSize.sp,
+                    fontWeight = lyricFontWeightValue,
+                    textAlign = lyricTextAlign,
+                    translationFontSize = (lyricFontSize * 0.7f).sp,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 20.dp)
+                )
+            } else {
+                NeriAdvancedLyricsView(
+                    lyrics = currentOrTargetEntries,
+                    currentTimeMs = lyricPreviewTimeMs,
+                    lyricOffsetMs = LYRIC_TIME_OFFSET_MS,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 20.dp),
+                    textColor = uiTint,
+                    fontSize = lyricFontSize.sp,
+                    fontWeight = lyricFontWeightValue,
+                    textAlign = lyricTextAlign,
+                    translationFontSize = (lyricFontSize * 0.7f).sp,
+                    rawLyrics = currentOrTargetLyricText,
+                    translatedLyrics = currentOrTargetTranslations,
+                    emptyStateText = if (isInstrumentalLyric) "纯音乐" else "暂无歌词",
+                    karaokeEnabled = playerLyricsWordEffect,
+                    lyricBlurEnabled = playerLyricBlur,
+                    lyricBlurAmount = playerLyricBlurAmount,
+                    isPlaying = isPlaying,
+                    animateViewportScroll = !isSeeking,
+                    onSeekTo = onSeek
+                )
+            }
+        }
+    }
+
+    // 进度条区（歌词卡紧凑模式进度条）：竖屏嵌在控制栏顶部、横屏独立在右栏顶部，提到分支外共用
+    val compactProgressSection: @Composable () -> Unit = {
+        PlayerProgressSection(
+            isSeekingState = isSeekingState,
+            sliderPositionState = sliderPositionState,
+            pendingPreviewState = pendingPreviewState,
+            progressRatio = progressRatio,
+            totalDuration = totalDuration,
+            currentPosition = currentPosition,
+            durationState = durationState,
+            lyricHaptic = lyricHaptic,
+            playerLyricsSeekPreview = playerLyricsSeekPreview,
+            playerWaveformSlider = playerWaveformSlider,
+            playerMinimalistControls = playerMinimalistControls,
+            deepBackdrop = deepBackdrop,
+            primaryColor = primaryColor,
+            uiTint = uiTint,
+            uiTintVariant = uiTintVariant,
+            isPlaying = isPlaying,
+            isWaiting = progressState.isWaiting,
+            onSeek = onSeek,
+            audioInfo = null
+        )
+    }
+
+    // ===== 横屏双栏布局（左：信息+封面；右：进度+歌词+控制；参考 folia 宽屏沉浸歌词） =====
+    if (isLandscape) {
+        // 右栏翻页状态（页0=歌曲信息+进度+控制；页1=歌词）；点击左侧封面可切页
+        val landscapePagerState = rememberPagerState(pageCount = { 2 })
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+        ) {
+            // ===== 左栏：只有专辑封面本体（自动适配圆形/方形/黑胶等形态，无信息/无歌词预览）=====
+            Box(
+                modifier = Modifier
+                    .weight(0.5f)
+                    .fillMaxHeight()
+                    // 封面整体缩小：通过加大栏内留白控制（对圆盘/方形/黑胶各种形态统一生效）
+                    .padding(start = 34.dp, end = 30.dp, top = 24.dp, bottom = 24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                PlayerCoverCard(
+                    song = song,
+                    isRoundAlbum = isRoundAlbum,
+                    isRotating = isRotating,
+                    isVinylStyle = isVinylStyle,
+                    isVinylPointer = isVinylPointer,
+                    isVinylBase = isVinylBase,
+                    isNextSong = isNextSong,
+                    rotationAngle = rotationAngle,
+                    uiTint = uiTint,
+                    uiTintVariant = uiTintVariant,
+                    lyricEntries = lyricEntries,
+                    isInstrumentalLyric = isInstrumentalLyric,
+                    lyricPreviewTimeMs = lyricPreviewTimeMs,
+                    lyricFontSize = coverLyricFontSize,
+                    lyricFontWeight = coverLyricFontWeightValue,
+                    lyricTextAlign = coverLyricTextAlign,
+                    karaokeEnabled = playerLyricsWordEffect,
+                    lyricBlurEnabled = playerLyricBlur,
+                    lyricBlurAmount = playerLyricBlurAmount,
+                    isPlaying = isPlaying,
+                    isSeeking = isSeeking,
+                    // 点击封面 = 右栏翻页（信息页 ↔ 歌词页）
+                    tapCoverToLyrics = true,
+                    onSeekTo = onSeek,
+                    onOpenLyrics = {
+                        scope.launch {
+                            val target = if (landscapePagerState.currentPage == 0) 1 else 0
+                            landscapePagerState.animateScrollToPage(target)
+                        }
+                    },
+                    // 横屏左栏只要纯封面：隐藏封面下方歌词预览条
+                    showLyricPreview = false
+                )
+            }
+            // ===== 右栏：横向翻页（页0 默认=歌曲信息+进度+控制；页1=歌词，滑动切换）=====
+            HorizontalPager(
+                state = landscapePagerState,
+                modifier = Modifier
+                    .weight(0.5f)
+                    .fillMaxHeight()
+                    .padding(end = 12.dp)
+            ) { page ->
+                if (page == 0) {
+                    // 页0（默认）：歌曲信息 + 进度条 + 播放控制
+                    // 统一对齐策略：所有行共用同一水平边距容器（响应式：按栏宽比例、限幅）；
+                    // 进度条/控制栏传 Modifier.fillMaxWidth() 关闭各自内置 20dp 边距 →
+                    // 歌名/❤️/⋮、进度条两端、时间、模式/列表按钮全部落在同两条竖线上；
+                    // 左侧封面点击、右滑/左滑可切到歌词页（page 1）
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        // 响应式水平边距：随栏宽等比缩放（不同屏幕尺寸下观感一致）
+                        val hPad = (maxWidth * 0.055f).coerceIn(18.dp, 40.dp)
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                // 右侧再多留一段：距屏幕右边距更大
+                                .padding(start = hPad, end = hPad + 14.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            // 顶部弹性 0.9（原 0.35）：照参考图比例——顶部留白加大，整组元素上移
+                            Spacer(modifier = Modifier.weight(1.5f))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = song.title,
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.Start,
+                                        color = uiTint
+                                    )
+                                    Text(
+                                        text = song.artist.ifEmpty { "未知歌手" },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.Start,
+                                        color = uiTintVariant
+                                    )
+                                }
+                                // 精确 24dp 图标盒（非 48dp 触摸盒）：图标视觉边界与进度条右端严格对齐
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clickable(onClick = onFavoriteClick),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        contentDescription = if (isFavorite) "取消喜欢" else "喜欢",
+                                        modifier = Modifier.size(24.dp),
+                                        tint = if (isFavorite) Color(0xFFE57373) else uiTintVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clickable {
+                                            playerMenuSubPage = null
+                                            showPlayerMenu = true
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MoreVert,
+                                        contentDescription = stringResource(R.string.action_more),
+                                        modifier = Modifier.size(24.dp),
+                                        tint = uiTint
+                                    )
+                                }
+                            }
+                            // 信息行 ↔ 进度条间距 26dp（原 40dp，贴近参考图比例）
+                            Spacer(modifier = Modifier.height(8.dp))
+                            // 进度条：关闭内置边距（modifier 覆盖默认 20dp），与外层容器同边界
+                            PlayerProgressSection(
+                                isSeekingState = isSeekingState,
+                                sliderPositionState = sliderPositionState,
+                                pendingPreviewState = pendingPreviewState,
+                                progressRatio = progressRatio,
+                                totalDuration = totalDuration,
+                                currentPosition = currentPosition,
+                                durationState = durationState,
+                                lyricHaptic = lyricHaptic,
+                                playerLyricsSeekPreview = playerLyricsSeekPreview,
+                                playerWaveformSlider = playerWaveformSlider,
+                                playerMinimalistControls = playerMinimalistControls,
+                                deepBackdrop = deepBackdrop,
+                                primaryColor = primaryColor,
+                                uiTint = uiTint,
+                                uiTintVariant = uiTintVariant,
+                                isPlaying = isPlaying,
+                                isWaiting = progressState.isWaiting,
+                                onSeek = onSeek,
+                                audioInfo = null,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            // 进度条 ↔ 控制块间距缩小：中间弹性（原约 11dp）改为固定 6dp
+                            Spacer(modifier = Modifier.height(6.dp))
+                            PlayerFullControls(
+                                compactProgressSection = compactProgressSection,
+                                isLyricsCompact = false,
+                                isPlaying = isPlaying,
+                                playMode = playMode,
+                                onPlayModeChange = onPlayModeChange,
+                                onPrevious = onPrevious,
+                                onNext = onNext,
+                                onPlayPause = onPlayPause,
+                                onPlaylistClick = onPlaylistClick,
+                                deepBackdrop = deepBackdrop,
+                                primaryColor = primaryColor,
+                                uiTint = uiTint,
+                                uiTintVariant = uiTintVariant,
+                                playerMinimalistControls = playerMinimalistControls,
+                                modifier = Modifier.fillMaxWidth(),
+                                // 横屏：控制键行微上移（4dp，原 20dp 过紧，照参考图放松）
+                                playRowLift = 24.dp,
+                                // 横屏：模式/列表上移 32dp——缩小与播放键组的空白、加大底部留白
+                                bottomRowLift = 32.dp
+                            )
+                                // 底部弹性 1.6（原 0.75）：照参考图比例——底部留白大幅加大，整组上移
+                                Spacer(modifier = Modifier.weight(1.6f))
+                        }
+                    }
+                } else {
+                    // 页1：歌词（与竖屏歌词卡一致）；左侧封面点击可切回本页
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        lyricsStage()
+                    }
+                }
+            }
+        }
+    }
+
+    if (!isLandscape) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -580,134 +909,13 @@ fun PlayerStage(
                         onSeekTo = onSeek,
                         onOpenLyrics = { scope.launch { pagerState.animateScrollToPage(1) } }
                     )
-                    else -> {
-                        val smoothGlideEasing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1.0f)
-                        val glideDurationMs = 380
-
-                        AnimatedContent(
-                            targetState = song,
-                            transitionSpec = {
-                                if (isNextSong) {
-                                    (slideInHorizontally(
-                                        animationSpec = tween(durationMillis = glideDurationMs, easing = smoothGlideEasing)
-                                    ) { fullWidth -> (fullWidth * 0.35f).toInt() } + fadeIn(animationSpec = tween(220)))
-                                        .togetherWith(
-                                            slideOutHorizontally(
-                                                animationSpec = tween(durationMillis = glideDurationMs, easing = smoothGlideEasing)
-                                            ) { fullWidth -> (-fullWidth * 0.35f).toInt() } + fadeOut(animationSpec = tween(180))
-                                        )
-                                } else {
-                                    (slideInHorizontally(
-                                        animationSpec = tween(durationMillis = glideDurationMs, easing = smoothGlideEasing)
-                                    ) { fullWidth -> (-fullWidth * 0.35f).toInt() } + fadeIn(animationSpec = tween(220)))
-                                        .togetherWith(
-                                            slideOutHorizontally(
-                                                animationSpec = tween(durationMillis = glideDurationMs, easing = smoothGlideEasing)
-                                            ) { fullWidth -> (fullWidth * 0.35f).toInt() } + fadeOut(animationSpec = tween(180))
-                                        )
-                                }
-                            },
-                            contentKey = { it.filePath },
-                            label = "lyricsTransition",
-                            modifier = Modifier.fillMaxSize()
-                        ) { targetSong ->
-                            val currentOrTargetLyricText = remember(targetSong.filePath, lyricsText) {
-                                if (targetSong.filePath == song.filePath) {
-                                    lyricsText?.takeIf { it.isNotBlank() } ?: targetSong.lyrics?.takeIf { it.isNotBlank() }
-                                } else {
-                                    com.example.lxmusic.data.LyricRepository.getMemoryCachedLyric(targetSong)
-                                        ?: targetSong.lyrics?.takeIf { it.isNotBlank() }
-                                }
-                            }
-                            val currentOrTargetEntries = remember(currentOrTargetLyricText) {
-                                currentOrTargetLyricText?.let { parseNeteaseLyricsAuto(it) }?.takeIf { it.isNotEmpty() }
-                                    ?: emptyList()
-                            }
-                            // 翻译只对应当前已拉取的歌曲；过渡目标歌曲翻译未就绪时先不传
-                            val currentOrTargetTranslations = remember(targetSong.filePath, translatedLyrics) {
-                                if (targetSong.filePath == song.filePath) translatedLyrics else null
-                            }
-
-                            if (playerMeiloxLyrics) {
-                                MeiloxLiquidLyricsView(
-                                    lyrics = currentOrTargetEntries,
-                                    currentTimeMs = lyricPreviewTimeMs,
-                                    lyricOffsetMs = LYRIC_TIME_OFFSET_MS,
-                                    isPlaying = isPlaying,
-                                    playbackSpeed = 1f,
-                                    onSeekTo = onSeek,
-                                    onLyricLongClick = { entry ->
-                                        onSeek(entry.startTimeMs)
-                                    },
-                                    rawLyrics = currentOrTargetLyricText,
-                                    translatedLyrics = currentOrTargetTranslations,
-                                    emptyStateText = if (isInstrumentalLyric) "纯音乐" else "暂无歌词",
-                                    showLyricTranslation = true,
-                                    textColor = uiTint,
-                                    fontSize = lyricFontSize.sp,
-                                    fontWeight = lyricFontWeightValue,
-                                    textAlign = lyricTextAlign,
-                                    translationFontSize = (lyricFontSize * 0.7f).sp,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(horizontal = 20.dp)
-                                )
-                            } else {
-                                NeriAdvancedLyricsView(
-                                    lyrics = currentOrTargetEntries,
-                                    currentTimeMs = lyricPreviewTimeMs,
-                                    lyricOffsetMs = LYRIC_TIME_OFFSET_MS,
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(horizontal = 20.dp),
-                                    textColor = uiTint,
-                                    fontSize = lyricFontSize.sp,
-                                    fontWeight = lyricFontWeightValue,
-                                    textAlign = lyricTextAlign,
-                                    translationFontSize = (lyricFontSize * 0.7f).sp,
-                                    rawLyrics = currentOrTargetLyricText,
-                                    translatedLyrics = currentOrTargetTranslations,
-                                    emptyStateText = if (isInstrumentalLyric) "纯音乐" else "暂无歌词",
-                                    karaokeEnabled = playerLyricsWordEffect,
-                                    lyricBlurEnabled = playerLyricBlur,
-                                    lyricBlurAmount = playerLyricBlurAmount,
-                                    isPlaying = isPlaying,
-                                    animateViewportScroll = !isSeeking,
-                                    onSeekTo = onSeek
-                                )
-                            }
-                        }
-                    }
+                    else -> lyricsStage()
                 }
             }
         }
 
         // ===== 底部区域：主页进度条独立在控制栏上方；歌词卡时进度条滑入控制栏顶部紧贴播放键 =====
         val isLyricsCompact = pagerState.currentPage == 1 && playerCompactControls
-        // 歌词卡控制栏顶部的进度条（捕获共享状态，仅在歌词卡组合）
-        val compactProgressSection: @Composable () -> Unit = {
-            PlayerProgressSection(
-                isSeekingState = isSeekingState,
-                sliderPositionState = sliderPositionState,
-                pendingPreviewState = pendingPreviewState,
-                progressRatio = progressRatio,
-                totalDuration = totalDuration,
-                currentPosition = currentPosition,
-                durationState = durationState,
-                lyricHaptic = lyricHaptic,
-                playerLyricsSeekPreview = playerLyricsSeekPreview,
-                playerWaveformSlider = playerWaveformSlider,
-                playerMinimalistControls = playerMinimalistControls,
-                deepBackdrop = deepBackdrop,
-                primaryColor = primaryColor,
-                uiTint = uiTint,
-                uiTintVariant = uiTintVariant,
-                isPlaying = isPlaying,
-                isWaiting = progressState.isWaiting,
-                onSeek = onSeek,
-                audioInfo = null
-            )
-        }
         // 主页：进度条独立在控制栏上方（歌词卡时淡出让位）
         androidx.compose.animation.AnimatedVisibility(
             visible = !isLyricsCompact,
@@ -761,6 +969,7 @@ fun PlayerStage(
         )
         Spacer(modifier = Modifier.height(8.dp))
     }
+    }
 
     // ===== 播放器菜单（主页菜单 → 封面卡歌词设置；歌词页菜单 → 歌词页歌词设置，两套独立） =====
     if (showPlayerMenu) {
@@ -807,7 +1016,10 @@ private fun PlayerProgressSection(
     isWaiting: Boolean,
     onSeek: (Long) -> Unit,
     // 时间行中间显示的音频参数（如 "44.1kHz 16bit FLAC"）；null = 不显示
-    audioInfo: String? = null
+    audioInfo: String? = null,
+    // 水平边距：默认 20dp（竖屏现状零变化）；横屏传 Modifier.fillMaxWidth()，
+    // 由外层统一容器控制边距，保证与歌曲信息行/控制栏左右边界严格对齐
+    modifier: Modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp)
 ) {
     if (playerMinimalistControls) {
         MinimalistProgressSection(
@@ -826,15 +1038,14 @@ private fun PlayerProgressSection(
             uiTintVariant = uiTintVariant,
             onSeek = onSeek,
             formatDuration = { formatDuration(it) },
-            audioInfo = audioInfo
+            audioInfo = audioInfo,
+            modifier = modifier
         )
     } else {
         val isSeeking = isSeekingState.value
         val sliderPosition = sliderPositionState.value
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
+            modifier = modifier
         ) {
             if (playerWaveformSlider) {
                 // 波浪进度条（NeriPlayer 移植）
@@ -1001,7 +1212,14 @@ private fun PlayerFullControls(
     primaryColor: Color,
     uiTint: Color,
     uiTintVariant: Color,
-    playerMinimalistControls: Boolean = false
+    playerMinimalistControls: Boolean = false,
+    // 水平边距：默认 20dp（竖屏现状零变化）；横屏传 Modifier.fillMaxWidth()，
+    // 由外层统一容器控制边距，保证与歌曲信息行/进度条左右边界严格对齐
+    modifier: Modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+    // 控制键行整体上移量（仅横屏传值收紧"时间行↔控制键"间距；竖屏默认 0 不变）
+    playRowLift: Dp = 0.dp,
+    // 底部行（模式/列表）上移量（仅横屏传值收紧"控制键↔模式/列表"间距并加大底部留白）
+    bottomRowLift: Dp = 0.dp
 ) {
     if (playerMinimalistControls) {
         MinimalistFullControls(
@@ -1017,7 +1235,10 @@ private fun PlayerFullControls(
             deepBackdrop = deepBackdrop,
             primaryColor = primaryColor,
             uiTint = uiTint,
-            uiTintVariant = uiTintVariant
+            uiTintVariant = uiTintVariant,
+            modifier = modifier,
+            playRowLift = playRowLift,
+            bottomRowLift = bottomRowLift
         )
     } else {
         // 控制栏高度：主页 128dp；歌词卡 140dp（容纳顶部进度条 64dp + 4dp 间隙 + 贴底播放键 72dp）
@@ -1039,10 +1260,7 @@ private fun PlayerFullControls(
         )
 
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .height(ctrlHeight),
+            modifier = modifier.height(ctrlHeight),
             contentAlignment = Alignment.Center
         ) {
             // 歌词卡：进度条从上方滑入容器顶部，紧贴播放键（高 40dp，与贴底的播放键间留 16dp）
@@ -1185,7 +1403,9 @@ private fun PlayerCoverCard(
     isSeeking: Boolean,
     tapCoverToLyrics: Boolean,
     onSeekTo: (Long) -> Unit,
-    onOpenLyrics: () -> Unit
+    onOpenLyrics: () -> Unit,
+    // 是否显示封面下方歌词预览条（横屏左栏只要纯封面：传 false，占位/间距一起隐藏）
+    showLyricPreview: Boolean = true
 ) {
     Column(
         modifier = Modifier
@@ -1327,6 +1547,7 @@ private fun PlayerCoverCard(
             }
         }
 
+        if (showLyricPreview) {
         Spacer(modifier = Modifier.height(12.dp))
 
         // 歌词预览条（铺满屏幕宽度：突破卡片 24dp 与外层 20dp 的左右 padding，
@@ -1405,6 +1626,7 @@ private fun PlayerCoverCard(
             )
             }
         }
+        } // if (showLyricPreview)
     }
 }
 
