@@ -93,8 +93,10 @@ import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.example.lxmusic.KuGouApi
+import com.example.lxmusic.BffApi
 import com.example.lxmusic.fetchIpZoneBatch
 import com.example.lxmusic.RankItem
+import com.example.lxmusic.RankSongBrief
 import com.example.lxmusic.SearchPlaylistItem
 import com.example.lxmusic.model.SongInfo
 import com.example.lxmusic.ui.components.SongContextMenuActions
@@ -136,11 +138,9 @@ fun DiscoverPage(
     val scope = rememberCoroutineScope()
     val tabs = remember {
         listOf(
-            DiscoverSubTab("推荐", Icons.Default.AutoAwesome),
             DiscoverSubTab("排行榜", Icons.Default.Leaderboard),
             DiscoverSubTab("专区", Icons.Default.GridView),
-            DiscoverSubTab("频道", Icons.Default.Radio),
-            DiscoverSubTab("探针", Icons.Default.Science)
+            DiscoverSubTab("推荐", Icons.Default.AutoAwesome)
         )
     }
     val pagerState = rememberPagerState(
@@ -171,6 +171,21 @@ fun DiscoverPage(
         ) { page ->
             when (page) {
                 0 -> {
+                    // 排行榜子页面（原封不动保留原逻辑）
+                    RankTabContent(
+                        onRankClick = onRankClick,
+                        listState = listState
+                    )
+                }
+                1 -> {
+                    // 专区子页面（48 专区列表，点播随机 50 首）
+                    JingxuanTabContent(
+                        onPlaySong = onPlaySong,
+                        currentPlayingPath = currentPlayingPath,
+                        onAddToQueueNext = onAddToQueueNext
+                    )
+                }
+                else -> {
                     // 推荐子页面
                     RecommendTabContent(
                         onPlaySong = onPlaySong,
@@ -180,37 +195,6 @@ fun DiscoverPage(
                         onAddToQueueNext = onAddToQueueNext,
                         listState = recommendListState
                     )
-                }
-                1 -> {
-                    // 排行榜子页面（原封不动保留原逻辑）
-                    RankTabContent(
-                        onRankClick = onRankClick,
-                        listState = listState
-                    )
-                }
-                2 -> {
-                    // 专区子页面（48 专区列表，点播随机 50 首）
-                    JingxuanTabContent(
-                        onPlaySong = onPlaySong,
-                        currentPlayingPath = currentPlayingPath,
-                        onAddToQueueNext = onAddToQueueNext
-                    )
-                }
-                3 -> {
-                    // 频道子页面（zone/home 系专区完整页，v1 先做 Hi-Res）
-                    PindaoTabContent(
-                        zoneId = 21L,
-                        channelName = "Hi-Res专区",
-                        channelDesc = "无损音质 · 歌曲 + 相关歌单",
-                        onPlaySong = onPlaySong,
-                        onPlaylistClick = onPlaylistClick,
-                        currentPlayingPath = currentPlayingPath,
-                        onAddToQueueNext = onAddToQueueNext
-                    )
-                }
-                else -> {
-                    // 接口探针子页面（查看乐库/编辑精选系接口真实返回，结构确定后再做正式 UI）
-                    ProbeTabContent()
                 }
             }
         }
@@ -969,12 +953,9 @@ private val ZONE_ENTRIES = listOf(
     ZoneEntry("戏曲", 87964L, "https://imgessl.kugou.com/quickentry/20230704/20230704190205555372.jpg"),
     ZoneEntry("民谣", 87744L, "https://imgessl.kugou.com/quickentry/20230704/20230704175555940771.jpg"),
     ZoneEntry("流行", 87473L, "https://imgessl.kugou.com/quickentry/20230704/20230704185939164073.jpg"),
-    ZoneEntry("青春专区", null, "https://imgessl.kugou.com/quickentry/20220507/20220507122307361033.jpg"),
     ZoneEntry("综艺专区", 89714L, "https://imgessl.kugou.com/quickentry/20220310/20220310175729970544.jpg"),
     ZoneEntry("首发专区", 94940L, "https://imgessl.kugou.com/quickentry/20220310/20220310175942769122.jpg"),
-    ZoneEntry("音乐人专区", null, "https://imgessl.kugou.com/quickentry/20220310/20220310175926259503.jpg"),
     ZoneEntry("厂牌音乐", 91473L, "https://imgessl.kugou.com/quickentry/20221013/20221013152725767975.png"),
-    ZoneEntry("热门自制节目专区", null, "https://imgessl.kugou.com/quickentry/20220424/20220424181308236196.jpg"),
     ZoneEntry("情歌", 88208L, "https://imgessl.kugou.com/quickentry/20230704/20230704224425990324.jpg")
 )
 
@@ -1025,7 +1006,7 @@ private fun JingxuanTabContent(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "42个专区 · 点播随机50首",
+                    text = "${ZONE_ENTRIES.size}个专区 · 点播随机50首",
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1070,37 +1051,61 @@ private fun ZoneRow(
             .padding(horizontal = 6.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val url = zone.iconUrl
-        if (url.isNotBlank()) {
-            val painter = rememberAsyncImagePainter(
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(url)
-                    .memoryCacheKey(url)
-                    .crossfade(150)
-                    .size(160)
-                    .build()
-            )
-            Image(
-                painter = painter,
+        // 封面失效自动兜底：优先用缓存的兜底图，否则用原图；加载失败后搜索"专区名"取第一首封面并缓存
+        val zoneContext = LocalContext.current
+        val coverPrefs = zoneContext.getSharedPreferences("yueku_cache", Context.MODE_PRIVATE)
+        var coverUrl by remember(zone.name) {
+            mutableStateOf(coverPrefs.getString("zone_cover_${zone.name}", null) ?: zone.iconUrl)
+        }
+        var fallbackTried by remember(zone.name) { mutableStateOf(false) }
+        val coverScope = rememberCoroutineScope()
+
+        // 底层先铺占位图标（加载中/失败时不再出现白块），封面图成功加载后覆盖其上
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.MusicNote,
                 contentDescription = null,
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(10.dp)),
-                contentScale = ContentScale.Crop
+                modifier = Modifier.size(24.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
             )
-        } else {
-            Box(
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.MusicNote,
+            val url = coverUrl
+            if (url.isNotBlank()) {
+                val painter = rememberAsyncImagePainter(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(url)
+                        .memoryCacheKey(url)
+                        .crossfade(150)
+                        .size(160)
+                        .listener(
+                            onError = { _, _ ->
+                                if (!fallbackTried) {
+                                    fallbackTried = true
+                                    coverScope.launch {
+                                        val cover = runCatching {
+                                            KuGouApi.service.search(zone.name, page = 1, pageSize = 1, type = "song")
+                                                .data?.lists?.firstOrNull()?.coverUrl
+                                        }.getOrNull()
+                                        if (!cover.isNullOrBlank()) {
+                                            coverPrefs.edit().putString("zone_cover_${zone.name}", cover).apply()
+                                            coverUrl = cover
+                                        }
+                                    }
+                                }
+                            }
+                        )
+                        .build()
+                )
+                Image(
+                    painter = painter,
                     contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
                 )
             }
         }
@@ -1840,9 +1845,21 @@ fun RankTabContent(
 
         scope.launch(Dispatchers.IO) {
             try {
-                val resp = KuGouApi.service.getRankList()
-                if (resp.data?.info != null) {
-                    val filtered = resp.data.info.filter { it.rankid in allowedRankIds }
+                val items: List<RankItem> = if (BffApi.isEnabled) {
+                    BffApi.ranks()?.items?.map {
+                        RankItem(
+                            rankid = it.id ?: 0L,
+                            rankname = it.name ?: "",
+                            album_img_9 = it.coverUrl ?: "",
+                            play_times = it.playTimes ?: 0L,
+                            songinfo = it.songs?.map { s -> RankSongBrief(name = s.name, author = s.author) }
+                        )
+                    } ?: emptyList()
+                } else {
+                    KuGouApi.service.getRankList().data?.info ?: emptyList()
+                }
+                if (items.isNotEmpty()) {
+                    val filtered = items.filter { it.rankid in allowedRankIds }
                     rankList = filtered
                     prefs.edit().putString("rank_list_json", gson.toJson(filtered)).apply()
                 }
@@ -1873,9 +1890,21 @@ fun RankTabContent(
                     loadError = false
                     scope.launch(Dispatchers.IO) {
                         try {
-                            val resp = KuGouApi.service.getRankList()
-                            if (resp.data?.info != null) {
-                                rankList = resp.data.info.filter { it.rankid in allowedRankIds }
+                            val items: List<RankItem> = if (BffApi.isEnabled) {
+                                BffApi.ranks()?.items?.map {
+                                    RankItem(
+                                        rankid = it.id ?: 0L,
+                                        rankname = it.name ?: "",
+                                        album_img_9 = it.coverUrl ?: "",
+                                        play_times = it.playTimes ?: 0L,
+                                        songinfo = it.songs?.map { s -> RankSongBrief(name = s.name, author = s.author) }
+                                    )
+                                } ?: emptyList()
+                            } else {
+                                KuGouApi.service.getRankList().data?.info ?: emptyList()
+                            }
+                            if (items.isNotEmpty()) {
+                                rankList = items.filter { it.rankid in allowedRankIds }
                                 prefs.edit().putString("rank_list_json", gson.toJson(rankList)).apply()
                             }
                         } catch (_: Exception) {

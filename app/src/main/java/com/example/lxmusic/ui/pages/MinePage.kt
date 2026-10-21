@@ -666,6 +666,24 @@ fun MinePage(
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f)
                     )
+                    // 刷新状态显示在标题行内（不额外占行高，列表不会上下跳动）
+                    when {
+                        playlistLoading -> Text(
+                            text = "刷新中…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(end = 4.dp)
+                        )
+                        playlistError != null -> Text(
+                            text = "刷新失败 · 重试",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { loadPlaylists() }
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                    }
                     IconButton(onClick = onManageKugouPlaylists) {
                         Icon(
                             Icons.Default.Checklist,
@@ -724,25 +742,6 @@ fun MinePage(
                         Column(
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            // 有缓存数据时后台刷新失败不再隐藏列表，只在顶部提醒并可点击重试
-                            if (playlistLoading) {
-                                Text(
-                                    text = "刷新中…",
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            } else if (playlistError != null) {
-                                Text(
-                                    text = "刷新失败，点击重试",
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { loadPlaylists() }
-                                        .padding(horizontal = 4.dp, vertical = 6.dp),
-                                    color = MaterialTheme.colorScheme.error,
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
                             playlists.forEach { playlist ->
                                 PlaylistCard(
                                     playlist = playlist,

@@ -312,6 +312,20 @@ class MainActivity : ComponentActivity() {
         })
         // 缓存上限（MB→字节，0=不缓存）
         val configuredCacheBytes = activitySettings.maxCacheSizeBytes
+        // 在线服务地址必须在 setContent 之前就绪：启动门禁弹窗需要立即判断是否有内置后端
+        KuGouApi.bffUrl = getSharedPreferences("settings", MODE_PRIVATE)
+            .getString("bff_url", null)
+            ?: BuildConfig.LX_BFF_URL.trim()
+        // 身份与激活态同样要在首帧之前恢复到静态变量：
+        // 首页首帧就会消费「刷新标记」发起请求，晚一步就会用空身份拉到空数据
+        KuGouApi.audioQuality = activitySettings.audioQuality
+        val bootAuthPrefs = getSharedPreferences("auth", MODE_PRIVATE)
+        val bootToken = bootAuthPrefs.getString("token", "") ?: ""
+        if (bootToken.isNotBlank()) {
+            KuGouApi.token = bootToken
+            KuGouApi.userid = bootAuthPrefs.getLong("userid", 0L).toString()
+        }
+        VipConfigManager.applySavedVipToApi(this)
         setContent {
             // 配置 Coil ImageLoader，注册音频封面解码器 + 缓存
             val imageLoader = ImageLoader.Builder(this)
@@ -332,6 +346,8 @@ class MainActivity : ComponentActivity() {
 
             CompositionLocalProvider(LocalImageLoader provides imageLoader) {
                 val ctx = LocalContext.current
+                // 未激活门禁：每个版本首次启动时二选一（激活码 / 本地音乐）
+                com.example.lxmusic.ui.components.ActivationGate(ctx)
                 val settingsRepository = remember { SettingsRepository(ctx) }
 
                 // 首次启动初始化：确保默认主题为原生主题，导航栏完全等于背景色
@@ -800,6 +816,13 @@ fun AppScaffold(
     var showRankDetail by remember { mutableStateOf<RankItem?>(null) }
     var showLoginPage by rememberSaveable { mutableStateOf(false) }
     var loginVersion by rememberSaveable { mutableIntStateOf(0) }
+    // 激活成功但未登录时，弹窗里点「去登录」→ 打开登录页
+    LaunchedEffect(com.example.lxmusic.ui.components.AppUiEvents.requestLogin) {
+        if (com.example.lxmusic.ui.components.AppUiEvents.requestLogin) {
+            com.example.lxmusic.ui.components.AppUiEvents.requestLogin = false
+            showLoginPage = true
+        }
+    }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var searchSelectedType by rememberSaveable { mutableStateOf("song") }
     // 搜索音源：kugou / netease（持久化 prefs "music_source"，启动时通过 settingsPrefs 恢复）
@@ -1015,6 +1038,15 @@ fun AppScaffold(
         val savedServerUrl = settingsRepository.serverUrl
         if (!savedServerUrl.isNullOrBlank()) {
             KuGouApi.baseUrl = savedServerUrl
+        }
+        // 在线服务：优先用户自定义后端，其次使用编译内置后端；都为空 = 无在线服务
+        KuGouApi.bffUrl = settingsPrefs.getString("bff_url", null)
+            ?: BuildConfig.LX_BFF_URL.trim()
+        if (KuGouApi.bffUrl.isNotBlank()) {
+            android.util.Log.d(
+                "LxMusic",
+                "在线服务已启用（${if (settingsPrefs.getString("bff_url", null).isNullOrBlank()) "内置" else "自定义"}）"
+            )
         }
         // 网易云 API：自定义地址优先，否则自动跟随酷狗（同一主机 + 3001 端口）
         val savedNeteaseUrl = settingsPrefs.getString("netease_server_url", null) ?: ""
@@ -1490,7 +1522,7 @@ fun AppScaffold(
                                             "usb" -> "USB 独占模式"
                                             "general" -> "通用与交互"
                                             "storage" -> "存储与缓存"
-                                            "proxy" -> "代理设置"
+                                            "proxy" -> "激活与在线服务"
                                             "about" -> "关于应用"
                                             "home_order" -> "首页推荐排序"
                                             else -> stringResource(R.string.title_settings)

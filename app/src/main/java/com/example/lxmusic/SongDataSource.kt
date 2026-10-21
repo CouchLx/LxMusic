@@ -102,6 +102,18 @@ class SongDataSource : DataSource {
                 var resultUrl: String? = null
                 lastTimeLength = 0
                 try {
+                    // BFF 优先：设置里配置了 bff_url 时走 Java 聚合后端（失败自动回退原链路）
+                    if (BffApi.isEnabled) {
+                        val bff = BffApi.play("kg:$hash:$albumAudioId", KuGouApi.audioQuality ?: "flac")
+                        if (bff?.ok == true && !bff.url.isNullOrBlank()) {
+                            KuGouApi.lastBitRate = if ((bff.bitRate ?: 0) > 0) bff.bitRate!! else 320000
+                            KuGouApi.lastExtName = bff.extName
+                            lastTimeLength = bff.durationMs ?: 0L
+                            android.util.Log.d("LxMusic", "SongDataSource: BFF 直链 hash=$hash, ext=${bff.extName}")
+                            return@runBlocking bff.url!!
+                        }
+                        android.util.Log.w("LxMusic", "SongDataSource: BFF 取流不可用(${bff?.message})，回退原链路")
+                    }
                     // 借号取流：走独立的 ownerService（Cookie 上下文与普通请求隔离，
                     // 已激活时固定用 owner 账号身份，未激活回退当前用户），不再用全局开关
                     val authMethod = when {

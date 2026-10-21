@@ -197,6 +197,50 @@ object NeteaseApi {
         else -> 0
     }
 
+    /** BFF 全量代理拦截器：配置了 bffUrl 时把网易云请求改写到 BFF（api/ne 前缀下的所有路径）并带激活凭证头，
+     *  3001 端口即可只监听回环地址。 */
+    private fun bffInterceptor(): okhttp3.Interceptor = okhttp3.Interceptor { chain ->
+        val original = chain.request()
+        val bff = KuGouApi.bffUrl.trim()
+        if (bff.isEmpty()) return@Interceptor chain.proceed(original)
+        // 未激活：网易云在线接口同样快速失败（本地音乐模式不产生网络请求）
+        if (!BffApi.onlineAllowed) {
+            throw java.io.IOException("未激活，在线功能不可用")
+        }
+
+        var request = original
+        var rewritten = false
+        val target = runCatching { java.net.URI(bff) }.getOrNull()
+        val host = target?.host
+        if (target != null && !host.isNullOrBlank()) {
+            val targetPort = if (target.port == -1) {
+                if (target.scheme == "https") 443 else 80
+            } else target.port
+            if (original.url.host != host || original.url.port != targetPort) {
+                val builder = HttpUrl.Builder()
+                    .scheme(target.scheme ?: "http")
+                    .host(host)
+                    .encodedPath("/api/ne" + original.url.encodedPath)
+                    .encodedQuery(original.url.encodedQuery)
+                if (target.port != -1) builder.port(target.port)
+                request = original.newBuilder().url(builder.build()).build()
+                rewritten = true
+            }
+        }
+        if (BffApi.vipCode.isNotBlank()) {
+            request = request.newBuilder().header("X-Vip-Code", BffApi.vipCode).build()
+        }
+        if (BffApi.vipDevice.isNotBlank()) {
+            request = request.newBuilder().header("X-Vip-Device", BffApi.vipDevice).build()
+        }
+        val response = chain.proceed(request)
+        if (rewritten && response.code == 404) {
+            response.close()
+            return@Interceptor chain.proceed(original)
+        }
+        response
+    }
+
     private fun createService(): NeteaseService {
         val loggingInterceptor = okhttp3.logging.HttpLoggingInterceptor { message ->
             android.util.Log.d("LxMusic_Netease", message)
@@ -231,6 +275,7 @@ object NeteaseApi {
 
         val client = okhttp3.OkHttpClient.Builder()
             .cookieJar(cookieJar)
+            .addInterceptor(bffInterceptor())
             .addInterceptor(loggingInterceptor)
             .build()
 

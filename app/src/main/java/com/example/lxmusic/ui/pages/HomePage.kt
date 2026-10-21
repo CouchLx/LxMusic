@@ -94,6 +94,8 @@ import coil.compose.LocalImageLoader
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.example.lxmusic.DailyRecommendSong
+import com.example.lxmusic.BffApi
+import com.example.lxmusic.BffSong
 import com.example.lxmusic.KuGouApi
 import com.example.lxmusic.RankItem
 import com.example.lxmusic.RankSong
@@ -874,6 +876,101 @@ fun HomePage(
         return pending
     }
 
+    // BFF 聚合刷新：设置里配置了 bff_url 时启用，1 个请求拿全部区块。
+    // 失败（BFF 不可达）保留旧内容，不递归回退；用户可在设置里关闭 BFF 回到原链路。
+    fun performBffRefresh(isAuto: Boolean) {
+        if (!isRefreshEnabled) return
+        isRefreshEnabled = false
+        clearHomePagerStates()
+        refreshGeneration++
+        val myGeneration = refreshGeneration
+        isRefreshing = true
+        scope.launch(Dispatchers.IO) {
+            // 手动刷新（isAuto=false）强制绕过 BFF 缓存，保证点了就能看到新内容；
+            // 自动刷新（启动/标记触发）用缓存，省下游压力
+            val dto = BffApi.homeFeed(force = !isAuto)
+            withContext(Dispatchers.Main) {
+                if (dto != null && refreshGeneration == myGeneration) {
+                    fun bffSongs(list: List<BffSong>?) = list?.map {
+                        SongInfo(
+                            title = it.title ?: "未知歌曲",
+                            artist = it.artist ?: "未知艺术家",
+                            filePath = "${it.hash}|${it.albumAudioId}",
+                            albumArtUri = it.coverUrl ?: "",
+                            duration = it.durationMs ?: 0L
+                        )
+                    } ?: emptyList()
+
+                    fun bffDaily(list: List<BffSong>?) = list?.map {
+                        DailyRecommendSong(
+                            songname = it.title ?: "未知歌曲",
+                            author_name = it.artist ?: "未知艺术家",
+                            hash = it.hash,
+                            album_audio_id = it.albumAudioId,
+                            duration = (it.durationMs ?: 0L).toInt(),
+                            sizable_cover = it.coverUrl ?: "",
+                            union_cover = it.coverUrl ?: "",
+                            album_img = it.coverUrl ?: ""
+                        )
+                    } ?: emptyList()
+
+                    val old = feed
+                    val next = HomeFeedState(
+                        dailySongs = bffDaily(dto.daily).ifEmpty { old.dailySongs },
+                        historySongs = bffDaily(dto.history).ifEmpty { old.historySongs },
+                        styleSongs = bffDaily(dto.style).ifEmpty { old.styleSongs },
+                        vipSongs = bffSongs(dto.vip).ifEmpty { old.vipSongs },
+                        millionSongs = bffSongs(dto.million).ifEmpty { old.millionSongs },
+                        networkSongs = bffSongs(dto.network).ifEmpty { old.networkSongs },
+                        surgeSongs = bffSongs(dto.surge).ifEmpty { old.surgeSongs },
+                        hotPickSongs = bffSongs(dto.hot).ifEmpty { old.hotPickSongs },
+                        newSongs = bffSongs(dto.newSongs).ifEmpty { old.newSongs },
+                        collectSongs = bffSongs(dto.collect).ifEmpty { old.collectSongs },
+                        nicheSongs = bffSongs(dto.niche).ifEmpty { old.nicheSongs },
+                        personalSongs = bffSongs(dto.personal).ifEmpty { old.personalSongs },
+                        conceptSongs = bffSongs(dto.concept).ifEmpty { old.conceptSongs },
+                        trendSongs = bffSongs(dto.trend).ifEmpty { old.trendSongs }
+                    )
+                    feed = next
+                    // 与原有链路相同的缓存 payload，保证切页/冷启动恢复一致
+                    runCatching {
+                        val payload = buildMap<String, String> {
+                            put("daily_songs_json", gson.toJson(next.dailySongs))
+                            put("history_songs_json", gson.toJson(next.historySongs))
+                            put("vip_songs_json", gson.toJson(next.vipSongs))
+                            put("million_songs_json", gson.toJson(next.millionSongs))
+                            put("network_songs_json", gson.toJson(next.networkSongs))
+                            put("style_songs_json", gson.toJson(next.styleSongs))
+                            put("home_surge", gson.toJson(next.surgeSongs))
+                            put("home_hot", gson.toJson(next.hotPickSongs))
+                            put("home_new", gson.toJson(next.newSongs))
+                            put("home_collect", gson.toJson(next.collectSongs))
+                            put("home_niche", gson.toJson(next.nicheSongs))
+                            put("home_personal", gson.toJson(next.personalSongs))
+                            put("home_concept", gson.toJson(next.conceptSongs))
+                            put("home_trend", gson.toJson(next.trendSongs))
+                        }
+                        homePrefs.edit().apply {
+                            payload.forEach { (key, value) -> putString(key, value) }
+                            putLong("last_refresh_time", System.currentTimeMillis())
+                            apply()
+                        }
+                    }
+                } else if (!isAuto) {
+                    val activated = com.example.lxmusic.VipConfigManager.getStatus(context).canUseVip
+                    Toast.makeText(
+                        context,
+                        if (activated) "在线服务暂不可用，已保留原有内容"
+                        else "需要激活后才能使用在线音乐功能",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                isRefreshing = false
+                isRefreshEnabled = true
+            }
+        }
+    }
+
     // 统一的刷新逻辑
     // ===== 一键全量刷新 =====
     // 所有区块请求一次性并行发出；每个请求成功后只产出「局部更新函数」，
@@ -890,6 +987,11 @@ fun HomePage(
 
         // 防止连点
         if (!isRefreshEnabled) return
+        // BFF 聚合模式：1 个请求拿全部区块（失败保留旧内容；设置里可关闭）
+        if (BffApi.isEnabled) {
+            performBffRefresh(isAuto)
+            return
+        }
         isRefreshEnabled = false
 
         // 刷新不清空数据：全屏转圈期间内容被隐藏（contentAlpha=0），
@@ -1129,9 +1231,11 @@ fun HomePage(
             trendSongs = cachedTrend?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList()
         )
 
-        // 进首页消费一次性刷新请求：仅在用户切过背景/歌词开关（或登录成功）后才刷，
-        // 无标记时保持原样不刷新
-        if (consumePendingHomeRefresh()) {
+        // 进首页消费一次性刷新请求：仅在用户切过背景/歌词开关（或登录/激活成功）后才刷，
+        // 无标记时保持原样不刷新。
+        // 在线访问未就绪（未激活/身份尚未恢复）时不消费标记，留给真正可用的时机。
+        val onlineReady = !BffApi.isEnabled || BffApi.onlineAllowed
+        if (onlineReady && consumePendingHomeRefresh()) {
             performRefresh(isAuto = true)
         }
     }

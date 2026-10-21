@@ -64,6 +64,28 @@ object VipConfigManager {
     }
 
     /**
+     * 激活接口地址：配置了 BFF 时走 BFF 代理（api/vip 前缀），
+     * 这样 3000 端口可以彻底收回内网，客户端只暴露 BFF 一个入口。
+     */
+    private fun vipEndpoint(path: String): String {
+        val bff = KuGouApi.bffUrl.trim()
+        return if (bff.isNotEmpty()) {
+            bff.trimEnd('/') + "/api/" + path
+        } else {
+            KuGouApi.baseUrl.trimEnd('/') + "/" + path
+        }
+    }
+
+    private fun enc(value: String): String = java.net.URLEncoder.encode(value, "UTF-8")
+
+    /** 同步激活凭证到 BFF 客户端（api 请求头校验用），并更新在线访问开关 */
+    private fun syncBffCredential(code: String?, deviceId: String?) {
+        BffApi.vipCode = code ?: ""
+        BffApi.vipDevice = deviceId ?: ""
+        BffApi.onlineAllowed = !code.isNullOrBlank()
+    }
+
+    /**
      * 获取当前 VIP 状态
      */
     fun getStatus(context: Context): VipStatus {
@@ -98,7 +120,7 @@ object VipConfigManager {
                 .build()
 
             val request = Request.Builder()
-                .url("${KuGouApi.baseUrl}vip/activate?code=$code&device_id=$deviceId")
+                .url(vipEndpoint("vip/activate") + "?code=${enc(code)}&device_id=$deviceId")
                 .get()
                 .build()
 
@@ -134,6 +156,7 @@ object VipConfigManager {
 
                 // 立即应用到 KuGouApi
                 applyVipToApi(token, userid)
+                syncBffCredential(code, deviceId)
 
                 Result.success(message)
             } else {
@@ -162,7 +185,7 @@ object VipConfigManager {
                 .build()
 
             val request = Request.Builder()
-                .url("${KuGouApi.baseUrl}vip/config?code=$code&device_id=$deviceId")
+                .url(vipEndpoint("vip/config") + "?code=${enc(code)}&device_id=$deviceId")
                 .get()
                 .build()
 
@@ -189,6 +212,7 @@ object VipConfigManager {
                         apply()
                     }
                     applyVipToApi(token, userid)
+                    syncBffCredential(code, deviceId)
                     Result.success("Token 已更新")
                 } else {
                     Result.failure(Exception("服务器返回数据无效"))
@@ -227,11 +251,16 @@ object VipConfigManager {
     fun applySavedVipToApi(context: Context) {
         val prefs = getPrefs(context)
         val status = getStatus(context)
-        if (!status.canUseVip) return
+        if (!status.canUseVip) {
+            // 未激活/设备不匹配：不携带任何激活凭证（BFF 会按 401 处理）
+            syncBffCredential(null, null)
+            return
+        }
 
         val token = prefs.getString(KEY_VIP_TOKEN, "") ?: ""
         val userid = prefs.getString(KEY_VIP_USERID, "") ?: ""
         applyVipToApi(token, userid)
+        syncBffCredential(prefs.getString(KEY_ACTIVATE_CODE, ""), prefs.getString(KEY_DEVICE_ID, ""))
     }
 
     private fun applyVipToApi(token: String, userid: String) {
@@ -249,6 +278,10 @@ object VipConfigManager {
         getPrefs(context).edit().clear().apply()
         KuGouApi.ownerToken = ""
         KuGouApi.ownerUserid = ""
+        syncBffCredential(null, null)
+        // 解绑后重新弹出「使用方式」选择（本地音乐 / 激活）
+        context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            .edit().remove("activation_prompt_version").apply()
         Log.d("LxMusic", "VIP 激活状态已清除")
     }
 

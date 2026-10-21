@@ -77,6 +77,8 @@ import coil.request.ImageRequest
 import com.example.lxmusic.ui.components.IOLoadingIndicator
 import com.example.lxmusic.ui.components.SongContextMenuActions
 import com.example.lxmusic.KuGouApi
+import com.example.lxmusic.BffApi
+import com.example.lxmusic.toSongInfo
 import com.example.lxmusic.RankItem
 import com.example.lxmusic.RankSong
 import com.example.lxmusic.model.SongInfo
@@ -120,23 +122,33 @@ fun RankDetailPage(
         duration = song.durationMs
     )
 
+    // 排行榜歌曲数据源：BFF 优先，失败/未配置走原有链路
+    suspend fun fetchRankPage(page: Int): Pair<List<SongInfo>, Int> {
+        return if (BffApi.isEnabled) {
+            val r = BffApi.rankSongs(rank.rankid, page, pageSize)
+            Pair(r?.items?.map { it.toSongInfo() } ?: emptyList(), r?.total ?: 0)
+        } else {
+            val resp = KuGouApi.service.getRankAudio(rank.rankid, page, pageSize)
+            Pair(resp.data?.songlist?.map { mapSong(it) } ?: emptyList(), resp.data?.total ?: 0)
+        }
+    }
+
     fun loadPage(page: Int, append: Boolean = false) {
         if (append) isLoadingMore = true else if (songs.isEmpty()) isLoading = true
         scope.launch(Dispatchers.IO) {
             try {
-                val resp = KuGouApi.service.getRankAudio(rank.rankid, page, pageSize)
-                val list = resp.data?.songlist
-                if (list != null) {
-                    val mapped = list.map { mapSong(it) }
+                val (mapped, total) = fetchRankPage(page)
+                val success = mapped.isNotEmpty() || (page == 1 && total > 0)
+                if (success) {
                     if (append) songs.addAll(mapped) else {
                         songs.clear()
                         songs.addAll(mapped)
                     }
-                    totalSongs = resp.data.total
-                    if (list.size < pageSize) noMoreData = true
+                    totalSongs = total
+                    if (mapped.size < pageSize) noMoreData = true
                     prefs.edit()
                         .putString(cacheKey, gson.toJson(songs.toList()))
-                        .putInt("${cacheKey}_total", resp.data.total)
+                        .putInt("${cacheKey}_total", total)
                         .apply()
                 } else noMoreData = true
                 loadError = false
@@ -164,8 +176,7 @@ fun RankDetailPage(
             val jobs = batch.map { page ->
                 async {
                     try {
-                        val resp = KuGouApi.service.getRankAudio(rank.rankid, page, pageSize)
-                        resp.data?.songlist?.map { mapSong(it) } ?: emptyList()
+                        fetchRankPage(page).first
                     } catch (_: Exception) { emptyList() }
                 }
             }

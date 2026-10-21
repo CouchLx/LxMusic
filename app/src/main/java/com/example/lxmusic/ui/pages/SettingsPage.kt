@@ -23,6 +23,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -686,7 +688,7 @@ fun SettingsPage(
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // —— 第 3 组：数据与关于（存储与缓存 / 代理设置 / 关于应用） ——
+                        // —— 第 3 组：数据与关于（存储与缓存 / 激活与在线服务 / 关于应用） ——
                         SettingsGroupCard {
                             SettingsGroupItemRow(
                                 icon = Icons.Default.Storage,
@@ -697,8 +699,8 @@ fun SettingsPage(
                             )
                             SettingsGroupItemRow(
                                 icon = Icons.Default.Cloud,
-                                title = "代理设置",
-                                subtitle = "自定义代理服务器、VIP 账号与网络连接",
+                                title = "激活与在线服务",
+                                subtitle = "激活码、在线服务连接与自建后端",
                                 onClick = { onSettingsSubPageChange("proxy") },
                                 showDivider = true
                             )
@@ -2338,19 +2340,21 @@ internal fun SettingsProxyContent() {
     val settingsPrefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
 
     Column {
-    // --- 服务器地址设置 ---
-    var serverUrl by remember { mutableStateOf(settingsPrefs.getString("server_url", null) ?: KuGouApi.DEFAULT_BASE_URL) }
-    var showServerDialog by remember { mutableStateOf(false) }
-    var newServerInput by remember { mutableStateOf("") }
-    var serverHidden by remember { mutableStateOf(settingsPrefs.getBoolean("server_hidden", false)) }
-    var showDefaultAddr by remember { mutableStateOf(false) }
-    var showPasswordDialog by remember { mutableStateOf(false) }
-    var passwordInput by remember { mutableStateOf("") }
+    // --- 在线服务（不展示任何服务器地址；内置后端对普通用户不可见） ---
+    val builtInBff = BuildConfig.LX_BFF_URL.trim()
+    var bffOverride by remember { mutableStateOf(settingsPrefs.getString("bff_url", "") ?: "") }
+    // 内置后端时高级配置默认隐藏：长按「在线服务」标题展开（自建后端/调试用）
+    var showBackendAdvanced by remember { mutableStateOf(builtInBff.isBlank()) }
+    var showBackendDialog by remember { mutableStateOf(false) }
+    var backendInput by remember { mutableStateOf("") }
 
     Text(
-        text = "服务器地址",
+        text = "在线服务",
         style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.pointerInput(builtInBff) {
+            detectTapGestures(onLongPress = { showBackendAdvanced = !showBackendAdvanced })
+        }
     )
     Spacer(modifier = Modifier.height(8.dp))
 
@@ -2361,278 +2365,96 @@ internal fun SettingsProxyContent() {
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "当前服务器",
+                text = "当前模式",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = if (serverHidden) "http://***"
-                       else if (serverUrl == KuGouApi.DEFAULT_BASE_URL) "默认服务器"
-                       else serverUrl,
+                text = when {
+                    bffOverride.isNotBlank() -> "自定义后端"
+                    builtInBff.isNotBlank() -> "内置在线服务"
+                    else -> "未配置在线服务（仅本地播放）"
+                },
                 style = MaterialTheme.typography.bodyMedium
             )
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "默认地址：",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = if (showDefaultAddr) KuGouApi.DEFAULT_BASE_URL else "http://***",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (showDefaultAddr) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = if (showDefaultAddr) "隐藏" else "查看",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .clickable {
-                            if (showDefaultAddr) showDefaultAddr = false
-                            else showPasswordDialog = true
-                        }
-                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { newServerInput = ""; showServerDialog = true },
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.weight(1f)
-                ) { Text("修改服务器") }
-                OutlinedButton(
-                    onClick = {
-                        serverUrl = KuGouApi.DEFAULT_BASE_URL
-                        settingsPrefs.edit().remove("server_url").apply()
-                        KuGouApi.baseUrl = KuGouApi.DEFAULT_BASE_URL
-                        KuGouApi.rebuildService()
-                        // 酷狗地址变化后，网易云若为自动跟随状态则同步重建
-                        if (settingsPrefs.getString("netease_server_url", null).isNullOrBlank()) {
-                            NeteaseApi.baseUrl = NeteaseApi.effectiveBaseUrl()
-                            NeteaseApi.rebuildService()
-                        }
-                        Toast.makeText(context, "已恢复默认服务器", Toast.LENGTH_SHORT).show()
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.weight(1f)
-                ) { Text("恢复默认") }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            // 隐藏地址开关
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "隐藏服务器地址",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f)
-                )
-                Switch(
-                    checked = serverHidden,
-                    onCheckedChange = {
-                        serverHidden = it
-                        settingsPrefs.edit().putBoolean("server_hidden", it).apply()
-                    },
-                    modifier = Modifier.height(24.dp)
-                )
-            }
-        }
-    }
-
-    Spacer(modifier = Modifier.height(16.dp))
-
-    // --- 网易云服务器地址设置 ---
-    var neteaseUrl by remember { mutableStateOf(NeteaseApi.baseUrl) }
-    var showNeteaseDialog by remember { mutableStateOf(false) }
-    var newNeteaseInput by remember { mutableStateOf("") }
-
-    Text(
-        text = "网易云服务器地址",
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.Bold
-    )
-    Spacer(modifier = Modifier.height(8.dp))
-
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+            Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "当前服务器",
+                text = "激活成功后可自动连接在线音乐服务。未激活时在线功能不可用，只能播放本地音乐。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = if (settingsPrefs.getString("netease_server_url", null).isNullOrBlank())
-                    "自动跟随酷狗服务器（${NeteaseApi.deriveDefaultBaseUrl()}）"
-                else neteaseUrl,
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { newNeteaseInput = ""; showNeteaseDialog = true },
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.weight(1f)
-                ) { Text("修改服务器", fontSize = 13.sp) }
-                OutlinedButton(
-                    onClick = {
-                        settingsPrefs.edit().remove("netease_server_url").apply()
-                        NeteaseApi.setCustomServerUrl(null)
-                        NeteaseApi.baseUrl = NeteaseApi.effectiveBaseUrl()
-                        NeteaseApi.rebuildService()
-                        neteaseUrl = NeteaseApi.baseUrl
-                        Toast.makeText(context, "已恢复自动跟随酷狗服务器", Toast.LENGTH_SHORT).show()
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.weight(1f)
-                ) { Text("恢复默认", fontSize = 13.sp) }
+            if (showBackendAdvanced) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = {
+                        backendInput = ""
+                        showBackendDialog = true
+                    }) { Text(if (builtInBff.isNotBlank()) "自定义后端地址" else "设置后端地址") }
+                    if (bffOverride.isNotBlank()) {
+                        TextButton(onClick = {
+                            bffOverride = ""
+                            settingsPrefs.edit().remove("bff_url").apply()
+                            KuGouApi.bffUrl = builtInBff
+                            Toast.makeText(context, "已恢复内置后端", Toast.LENGTH_SHORT).show()
+                        }) { Text("恢复内置", color = MaterialTheme.colorScheme.error) }
+                    }
+                }
             }
         }
     }
 
-    if (showNeteaseDialog) {
+    if (showBackendDialog) {
         AlertDialog(
-            onDismissRequest = { showNeteaseDialog = false },
+            onDismissRequest = { showBackendDialog = false },
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = { Text("修改网易云服务器地址") },
+            title = { Text("自定义后端地址") },
             text = {
                 Column {
-                    Text("输入新的网易云 API 地址（包含 http:// 和端口号）", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("留空则恢复自动跟随酷狗服务器", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
-                        value = newNeteaseInput,
-                        onValueChange = { newNeteaseInput = it },
-                        label = { Text("网易云服务器地址") },
+                        value = backendInput,
+                        onValueChange = { backendInput = it },
                         singleLine = true,
-                        placeholder = { Text("http://example.com:3001/") }
+                        placeholder = { Text("http://127.0.0.1:8080/") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "仅自建服务时填写；普通用户留空即可，激活后自动使用内置服务。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val url = newNeteaseInput.trim()
-                    if (url.isBlank()) {
-                        settingsPrefs.edit().remove("netease_server_url").apply()
-                        NeteaseApi.setCustomServerUrl(null)
-                    } else if (url.startsWith("http://") || url.startsWith("https://")) {
-                        val finalUrl = if (url.endsWith("/")) url else "$url/"
-                        settingsPrefs.edit().putString("netease_server_url", finalUrl).apply()
-                        NeteaseApi.setCustomServerUrl(finalUrl)
-                    } else {
+                    val value = backendInput.trim()
+                    if (value.isNotBlank() && !value.startsWith("http://") && !value.startsWith("https://")) {
                         Toast.makeText(context, "请输入有效的 http/https 地址", Toast.LENGTH_SHORT).show()
                         return@TextButton
                     }
-                    NeteaseApi.baseUrl = NeteaseApi.effectiveBaseUrl()
-                    NeteaseApi.rebuildService()
-                    neteaseUrl = NeteaseApi.baseUrl
-                    showNeteaseDialog = false
-                    Toast.makeText(context, "网易云服务器已更新", Toast.LENGTH_SHORT).show()
-                }) { Text("确认") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showNeteaseDialog = false }) { Text("取消") }
-            }
-        )
-    }
-
-    if (showServerDialog) {
-        AlertDialog(
-            onDismissRequest = { showServerDialog = false },
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = { Text("修改服务器地址") },
-            text = {
-                Column {
-                    Text("输入新的服务器地址（包含 http:// 和端口号）", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("留空则恢复默认服务器", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = newServerInput,
-                        onValueChange = { newServerInput = it },
-                        label = { Text("服务器地址") },
-                        singleLine = true,
-                        placeholder = { Text("http://example.com:3000/") }
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val url = newServerInput.trim()
-                    if (url.isBlank()) {
-                        // 留空恢复默认
-                        serverUrl = KuGouApi.DEFAULT_BASE_URL
-                        settingsPrefs.edit().remove("server_url").apply()
-                        KuGouApi.baseUrl = KuGouApi.DEFAULT_BASE_URL
-                        KuGouApi.rebuildService()
-                        // 酷狗地址变化后，网易云若为自动跟随状态则同步重建
-                        if (settingsPrefs.getString("netease_server_url", null).isNullOrBlank()) {
-                            NeteaseApi.baseUrl = NeteaseApi.effectiveBaseUrl()
-                            NeteaseApi.rebuildService()
-                        }
-                        showServerDialog = false
-                        Toast.makeText(context, "已恢复默认服务器", Toast.LENGTH_SHORT).show()
-                    } else if (url.startsWith("http://") || url.startsWith("https://")) {
-                        val finalUrl = if (url.endsWith("/")) url else "$url/"
-                        serverUrl = finalUrl
-                        settingsPrefs.edit().putString("server_url", finalUrl).apply()
-                        KuGouApi.baseUrl = finalUrl
-                        KuGouApi.rebuildService()
-                        // 酷狗地址变化后，网易云若为自动跟随状态则同步重建
-                        if (settingsPrefs.getString("netease_server_url", null).isNullOrBlank()) {
-                            NeteaseApi.baseUrl = NeteaseApi.effectiveBaseUrl()
-                            NeteaseApi.rebuildService()
-                        }
-                        showServerDialog = false
-                        Toast.makeText(context, "服务器已切换", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(context, "请输入有效的 http/https 地址", Toast.LENGTH_SHORT).show()
+                    val finalValue = when {
+                        value.isBlank() -> ""
+                        value.endsWith("/") -> value
+                        else -> "$value/"
                     }
-                }) { Text("确认") }
+                    bffOverride = finalValue
+                    if (finalValue.isBlank()) {
+                        settingsPrefs.edit().remove("bff_url").apply()
+                    } else {
+                        settingsPrefs.edit().putString("bff_url", finalValue).apply()
+                    }
+                    KuGouApi.bffUrl = finalValue.ifBlank { builtInBff }
+                    showBackendDialog = false
+                    Toast.makeText(
+                        context,
+                        if (finalValue.isBlank()) "已恢复内置后端" else "后端地址已保存",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }) { Text("保存") }
             },
             dismissButton = {
-                TextButton(onClick = { showServerDialog = false }) { Text("取消") }
-            }
-        )
-    }
-
-    // 密码验证对话框（查看默认服务器地址）
-    if (showPasswordDialog) {
-        AlertDialog(
-            onDismissRequest = { showPasswordDialog = false; passwordInput = "" },
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            title = { Text("管理员验证") },
-            text = {
-                OutlinedTextField(
-                    value = passwordInput,
-                    onValueChange = { passwordInput = it },
-                    label = { Text("请输入管理员密码") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    if (passwordInput == BuildConfig.LX_ADMIN_PASSWORD) showDefaultAddr = true
-                    else Toast.makeText(context, "密码错误", Toast.LENGTH_SHORT).show()
-                    showPasswordDialog = false; passwordInput = ""
-                }) { Text("确认") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showPasswordDialog = false; passwordInput = "" }) { Text("取消") }
+                TextButton(onClick = { showBackendDialog = false }) { Text("取消") }
             }
         )
     }
@@ -2648,6 +2470,7 @@ internal fun SettingsProxyContent() {
     var isRefreshing by remember { mutableStateOf(false) }
     var activateError by remember { mutableStateOf<String?>(null) }
     var refreshResult by remember { mutableStateOf<String?>(null) }
+    var showLoginHint by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     Text(
@@ -2786,6 +2609,13 @@ internal fun SettingsProxyContent() {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            } else {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "未激活：在线音乐、搜索与歌单不可用，仅能播放本地音乐。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -2838,7 +2668,23 @@ internal fun SettingsProxyContent() {
                                 showActivateDialog = false
                                 activateCodeInput = ""
                                 vipStatus = VipConfigManager.getStatus(context)
-                                Toast.makeText(context, result.getOrDefault("激活成功"), Toast.LENGTH_SHORT).show()
+                                // 激活后 BFF 才开始放行数据接口：让首页下次进入时强制刷新一次
+                                context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+                                    .edit()
+                                    .putBoolean(
+                                        com.example.lxmusic.data.SettingsRepository.Keys.PENDING_HOME_REFRESH,
+                                        true
+                                    )
+                                    .apply()
+                                val authPrefs = context.getSharedPreferences("auth", Context.MODE_PRIVATE)
+                                val loggedIn = !authPrefs.getString("token", "").isNullOrBlank() &&
+                                    authPrefs.getLong("userid", 0L) != 0L
+                                if (loggedIn) {
+                                    Toast.makeText(context, "激活成功，正在刷新首页", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    // 未登录时首页拿不到账号相关数据，提示用户去登录
+                                    showLoginHint = true
+                                }
                             } else {
                                 activateError = result.exceptionOrNull()?.message ?: "激活失败"
                             }
@@ -2861,6 +2707,30 @@ internal fun SettingsProxyContent() {
                 TextButton(onClick = { showActivateDialog = false; activateError = null }) {
                     Text("取消")
                 }
+            }
+        )
+    }
+
+    // 激活成功后未登录：引导去登录
+    if (showLoginHint) {
+        AlertDialog(
+            onDismissRequest = { showLoginHint = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            title = { Text("激活成功") },
+            text = {
+                Text(
+                    "在线音乐需要登录酷狗账号后才能使用。现在去登录吗？",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showLoginHint = false
+                    com.example.lxmusic.ui.components.AppUiEvents.requestLogin = true
+                }) { Text("去登录") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLoginHint = false }) { Text("稍后") }
             }
         )
     }

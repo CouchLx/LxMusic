@@ -99,6 +99,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.example.lxmusic.HotSearchItem
+import com.example.lxmusic.BffApi
+import com.example.lxmusic.toSongInfo
 import com.example.lxmusic.KuGouApi
 import com.example.lxmusic.NeteaseApi
 import com.example.lxmusic.SearchAlbumItem
@@ -586,6 +588,14 @@ fun SearchPage(
                             totalResults = resp.result?.songCount ?: 0
                             if (songs.size < 30) noMoreData = true
                             if (songs.isNotEmpty()) saveHistory(keywords)
+                        } else if (BffApi.isEnabled) {
+                            // BFF 统一搜索（酷狗）
+                            val bff = BffApi.search(keywords, page = 1, pageSize = 30)
+                            val songs = bff?.items?.map { it.toSongInfo() } ?: emptyList()
+                            searchResults = songs
+                            totalResults = bff?.total ?: 0
+                            if (songs.size < 30) noMoreData = true
+                            if (songs.isNotEmpty()) saveHistory(keywords)
                         } else {
                             // 单曲搜索 (song, author, album, mv 等通用 fallback)
                             val resp = KuGouApi.service.search(keywords, page = 1, pageSize = 30, type = type)
@@ -661,6 +671,11 @@ fun SearchPage(
                             // 网易云分页：offset = (页数-1) * limit
                             val resp = NeteaseApi.service.search(currentQuery, limit = 30, offset = (nextPage - 1) * 30, type = 1)
                             val songs = resp.result?.songs?.map { it.toSongInfo() } ?: emptyList()
+                            if (songs.isNotEmpty()) { searchResults = searchResults + songs; currentPage = nextPage }
+                            if (songs.size < 30) noMoreData = true
+                        } else if (BffApi.isEnabled) {
+                            val bff = BffApi.search(currentQuery, page = nextPage, pageSize = 30)
+                            val songs = bff?.items?.map { it.toSongInfo() } ?: emptyList()
                             if (songs.isNotEmpty()) { searchResults = searchResults + songs; currentPage = nextPage }
                             if (songs.size < 30) noMoreData = true
                         } else {

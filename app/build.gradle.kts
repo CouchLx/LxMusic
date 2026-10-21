@@ -27,13 +27,16 @@ android {
         applicationId = "com.example.lxmusic"
         minSdk = 24
         targetSdk = 37
-        versionCode = 9
-        versionName = "3.7.62"
+        versionCode = 10
+        versionName = "3.7.63"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // 服务器地址与管理员密码由本地 keystore.properties 注入，开源仓库中为占位值
         buildConfigField("String", "LX_SERVER_URL", "\"${secretProp("LX_SERVER_URL", "http://your-server:3000/")}\"")
+        // 内置 BFF 后端地址：编译进 APK 供激活后的客户端自动使用，界面上不展示；
+        // 开源构建留空（用户可自行填写自建后端）
+        buildConfigField("String", "LX_BFF_URL", "\"${secretProp("LX_BFF_URL", "")}\"")
         buildConfigField("String", "LX_ADMIN_PASSWORD", "\"${secretProp("LX_ADMIN_PASSWORD", "")}\"")
         buildConfigField("String", "LX_UPDATE_VERSION_URL", "\"${secretProp("LX_UPDATE_VERSION_URL", "")}\"")
 

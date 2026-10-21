@@ -1662,6 +1662,11 @@ object KuGouApi {
     @Volatile
     var baseUrl: String = DEFAULT_BASE_URL
 
+    /** BFF 后端地址（Java music-hub-backend）：空 = 未启用，使用原有直连链路。
+     *  设置页保存时同步、MainActivity 启动时从 prefs 恢复。 */
+    @Volatile
+    var bffUrl: String = ""
+
     // dfid 和 token 由应用层设置
     @Volatile
     var dfid: String = ""
@@ -1708,6 +1713,15 @@ object KuGouApi {
         android.util.Log.d("LxMusic", "已恢复服务端 Cookie: ${cookies.keys.joinToString(",")}")
     }
 
+    /** 合并服务端下发的 Cookie（BFF 登录代理透传 Set-Cookie 时调用）并立即持久化 */
+    fun mergeServerCookies(cookies: Map<String, String>) {
+        if (cookies.isEmpty()) return
+        pendingServerCookies.putAll(cookies)
+        _cookieStore?.putAll(cookies)
+        onServerCookiesChanged?.invoke((_cookieStore ?: pendingServerCookies).toMap())
+        android.util.Log.d("LxMusic", "已合并服务端 Cookie: ${cookies.keys.joinToString(",")}")
+    }
+
     /** 清除服务器 Cookie（每次启动时调用，确保获取新设备标识） */
     fun clearServerCookies() {
         _cookieStore?.clear()
@@ -1734,6 +1748,59 @@ object KuGouApi {
         _cookieStore = null
         pendingServerCookies.clear()
         android.util.Log.d("LxMusic", "API 服务已重建，baseUrl=$baseUrl")
+    }
+
+    /** 激活前仍允许的接口：登录/验证码/设备注册/用户详情/激活（激活本身用于解锁） */
+    private fun isPreActivationPath(path: String): Boolean =
+        path.startsWith("/captcha/") ||
+            path.startsWith("/login/") ||
+            path.startsWith("/register/") ||
+            path.startsWith("/user/detail") ||
+            path.startsWith("/vip/")
+
+    /** BFF 全量代理拦截器：配置了 bffUrl 时把所有酷狗请求改写到 BFF（api/kg 前缀下的所有路径）并带激活凭证头。
+     *  这样 3000 端口可以只监听回环地址，公网只保留受激活码保护的 BFF 入口。 */
+    private fun bffInterceptor(): okhttp3.Interceptor = okhttp3.Interceptor { chain ->
+        val original = chain.request()
+        val bff = bffUrl.trim()
+        if (bff.isEmpty()) return@Interceptor chain.proceed(original)
+        // 未激活：在线数据接口快速失败（不产生任何网络请求）；登录/注册/激活仍放行
+        if (!BffApi.onlineAllowed && !isPreActivationPath(original.url.encodedPath)) {
+            throw java.io.IOException("未激活，在线功能不可用")
+        }
+
+        var request = original
+        var rewritten = false
+        val target = runCatching { java.net.URI(bff) }.getOrNull()
+        val host = target?.host
+        if (target != null && !host.isNullOrBlank()) {
+            val targetPort = if (target.port == -1) {
+                if (target.scheme == "https") 443 else 80
+            } else target.port
+            if (original.url.host != host || original.url.port != targetPort) {
+                val builder = okhttp3.HttpUrl.Builder()
+                    .scheme(target.scheme ?: "http")
+                    .host(host)
+                    .encodedPath("/api/kg" + original.url.encodedPath)
+                    .encodedQuery(original.url.encodedQuery)
+                if (target.port != -1) builder.port(target.port)
+                request = original.newBuilder().url(builder.build()).build()
+                rewritten = true
+            }
+        }
+        if (BffApi.vipCode.isNotBlank()) {
+            request = request.newBuilder().header("X-Vip-Code", BffApi.vipCode).build()
+        }
+        if (BffApi.vipDevice.isNotBlank()) {
+            request = request.newBuilder().header("X-Vip-Device", BffApi.vipDevice).build()
+        }
+        val response = chain.proceed(request)
+        // BFF 尚未升级（没有 /api/kg 前缀）时回退原直连，避免服务端与 App 版本不同步直接全挂
+        if (rewritten && response.code == 404) {
+            response.close()
+            return@Interceptor chain.proceed(original)
+        }
+        response
     }
 
     private var _service: KuGouService? = null
@@ -2305,6 +2372,8 @@ object KuGouApi {
             .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .followRedirects(true)
             .followSslRedirects(true)
+            // 配置了 BFF 时把候选地址里的后端请求改写走 /api/kg（3000 已收回内网后仍可用）
+            .addInterceptor(bffInterceptor())
             .build()
 
         val candidateUrls = mutableListOf<String>()
@@ -2530,6 +2599,7 @@ object KuGouApi {
 
         val client = okhttp3.OkHttpClient.Builder()
             .cookieJar(cookieJar)
+            .addInterceptor(bffInterceptor())
             .addInterceptor(bodyLogInterceptor)
             .addInterceptor(loggingInterceptor)
             // OkHttp 默认 maxRequestsPerHost=5：首页 12 个并行请求会被挤成 3 波串行等待，
@@ -2578,6 +2648,7 @@ object KuGouApi {
             response
         }
         val client = okhttp3.OkHttpClient.Builder()
+            .addInterceptor(bffInterceptor())
             .addInterceptor(ownerCookieInterceptor)
             .addInterceptor(bodyLogInterceptor)
             .dispatcher(okhttp3.Dispatcher().apply { maxRequestsPerHost = 16 })

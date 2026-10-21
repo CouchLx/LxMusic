@@ -19,6 +19,8 @@ local.properties
 *.bak_split
 *.orig
 *.summary.txt
+# 本地 UI 测试截图
+/ui-test-*.png
 
 # 本地工具配置
 /.claude/

@@ -140,6 +140,8 @@ fun LoginPage(onBack: () -> Unit, onLoginSuccess: (String) -> Unit) {
                         isLoading = true
                         errorMessage = null
                         try {
+                            // 配置 BFF 后这条 Retrofit 请求会被拦截器改写为 BFF 的 /api/kg/captcha/sent，
+                            // 且自动带设备 Cookie（验证码与设备会话绑定，不能走裸 OkHttp）
                             val response = KuGouApi.service.sendCaptcha(phone)
                             if (response.status == 1) {
                                 codeSent = true
@@ -147,6 +149,10 @@ fun LoginPage(onBack: () -> Unit, onLoginSuccess: (String) -> Unit) {
                             } else {
                                 errorMessage = response.data?.msg ?: "发送失败"
                             }
+                        } catch (e: retrofit2.HttpException) {
+                            val msg = parseKugouError(e)
+                            Log.e("LxMusic", "发送验证码失败(HTTP ${e.code()}): $msg")
+                            errorMessage = msg ?: "发送失败（HTTP ${e.code()}）"
                         } catch (e: Exception) {
                             errorMessage = "网络错误: ${e.message}"
                         } finally {
@@ -247,6 +253,11 @@ fun LoginPage(onBack: () -> Unit, onLoginSuccess: (String) -> Unit) {
                             Log.e("LxMusic", "登录失败: status=${response.status}, errcode=${response.errcode}")
                             errorMessage = "登录失败，请检查验证码"
                         }
+                    } catch (e: retrofit2.HttpException) {
+                        // 酷狗业务错误统一是 502 + JSON（如 {"status":0,"data":"验证码错误"}），把真实原因显示出来
+                        val msg = parseKugouError(e)
+                        Log.e("LxMusic", "登录失败(HTTP ${e.code()}): $msg")
+                        errorMessage = msg ?: "登录失败（HTTP ${e.code()}）"
                     } catch (e: Exception) {
                         Log.e("LxMusic", "登录异常", e)
                         errorMessage = "网络错误: ${e.message}"
@@ -285,3 +296,16 @@ fun LoginPage(onBack: () -> Unit, onLoginSuccess: (String) -> Unit) {
         Spacer(modifier = Modifier.height(with(LocalDensity.current) { navBarHeight.toDp() }))
     }
 }
+
+/** 解析酷狗业务错误体（502 + {"status":0,"data":"验证码错误","error_code":20021}），返回可展示的原因 */
+private fun parseKugouError(e: retrofit2.HttpException): String? = runCatching {
+    val body = e.response()?.errorBody()?.string() ?: return@runCatching null
+    val json = org.json.JSONObject(body)
+    when (val data = json.opt("data")) {
+        is String -> data.takeIf { it.isNotBlank() }
+        is org.json.JSONObject -> data.optString("msg").takeIf { it.isNotBlank() }
+            ?: data.optString("error").takeIf { it.isNotBlank() }
+        else -> null
+    } ?: json.optString("message").takeIf { it.isNotBlank() }
+        ?: json.optString("errmsg").takeIf { it.isNotBlank() }
+}.getOrNull()

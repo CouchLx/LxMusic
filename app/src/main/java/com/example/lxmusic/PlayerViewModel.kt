@@ -482,7 +482,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val restoredList = Gson().fromJson(savedListJson, Array<SongInfo>::class.java).toList()
                 // 去重：避免历史数据重复 filePath 导致播放列表 key 冲突崩溃
-                val uniqueList = restoredList.distinctBy { it.filePath }
+                val uniqueListAll = restoredList.distinctBy { it.filePath }
+                // 未激活（本地音乐模式）：不恢复在线歌曲，避免启动时反复请求被拒、报 Source error
+                val uniqueList = if (BffApi.onlineAllowed) uniqueListAll
+                    else uniqueListAll.filter { it.filePath.startsWith("/") }
+                if (uniqueList.isEmpty()) {
+                    restored = true
+                    return
+                }
                 val currentPath = restoredList.getOrNull(savedIndex)?.filePath
                 val newIndex = uniqueList.indexOfFirst { it.filePath == currentPath }.coerceAtLeast(0)
                 if (newIndex in uniqueList.indices) {
