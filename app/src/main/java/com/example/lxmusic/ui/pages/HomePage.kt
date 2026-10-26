@@ -86,8 +86,11 @@ import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.LocalImageLoader
@@ -260,8 +263,11 @@ fun HomePage(
     onClickRefresh: (((() -> Unit)) -> Unit)? = null,
     onRefreshStateChange: ((Boolean) -> Unit)? = null,
     onAddToQueueNext: (SongInfo) -> Unit = {},
+    // 现代主题 + 壁纸时由 MainActivity 传入：列表内容作为顶栏磨砂的采样源（zIndex 1）
+    hazeState: HazeState? = null,
     // 登录成功世代号（MainActivity 登录成功时 +1）：>0 时消费"待首页刷新"标记自动刷一次
     loginVersion: Int = 0,
+    topContentPadding: Dp = 0.dp,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -961,7 +967,7 @@ fun HomePage(
                     Toast.makeText(
                         context,
                         if (activated) "在线服务暂不可用，已保留原有内容"
-                        else "需要激活后才能使用在线音乐功能",
+                        else "在线内容需要激活或导入音源后才能播放",
                         Toast.LENGTH_SHORT
                     ).show()
                 }
@@ -1443,8 +1449,12 @@ fun HomePage(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
-                .alpha(contentAlpha),
-            contentPadding = PaddingValues(bottom = 180.dp)
+                .alpha(contentAlpha)
+                .then(
+                    if (hazeState != null) Modifier.hazeSource(hazeState, zIndex = 1f)
+                    else Modifier
+                ),
+            contentPadding = PaddingValues(top = topContentPadding, bottom = 180.dp)
         ) {
             // ===== 顶部横向推荐栏（吸附对齐固定显示完整卡片，滑动进度切页不丢） =====
             item {

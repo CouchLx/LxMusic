@@ -100,8 +100,8 @@ fun ActivationGate(context: Context = LocalContext.current) {
         text = {
             Column {
                 Text(
-                    text = "在线音乐服务已改为激活制：输入激活码可解锁全部在线功能；" +
-                        "没有激活码也可以继续使用本地音乐（导入本地歌曲、播放、歌词等）。",
+                    text = "未激活：搜索、排行榜等公开内容仍可使用，播放需要自行导入音源插件；" +
+                        "激活后可解锁个人化推荐、我的歌单与内置音源。",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(modifier = androidx.compose.ui.Modifier.height(12.dp))
@@ -154,7 +154,7 @@ fun ActivationGate(context: Context = LocalContext.current) {
                     Toast.makeText(context, "已进入本地音乐模式", Toast.LENGTH_SHORT).show()
                     visible = false
                 }
-            ) { Text("使用本地音乐") }
+            ) { Text("暂不激活") }
         }
     )
 }

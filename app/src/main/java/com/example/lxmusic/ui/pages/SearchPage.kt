@@ -46,12 +46,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularWavyProgressIndicator
@@ -100,7 +102,9 @@ import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.example.lxmusic.HotSearchItem
 import com.example.lxmusic.BffApi
+import com.example.lxmusic.MusicDatabase
 import com.example.lxmusic.toSongInfo
+import com.example.lxmusic.model.toSongInfo
 import com.example.lxmusic.KuGouApi
 import com.example.lxmusic.NeteaseApi
 import com.example.lxmusic.SearchAlbumItem
@@ -118,22 +122,39 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 音源切换按钮（酷狗 / 网易云）：pill 样式，点击弹出选择菜单
+ * 搜索音源选项：key 为内部标识（kugou/netease/tx/kw/local/plugin:<id>），label 为展示名。
+ * 未激活模式由 MainActivity 传入「本地 + 公开平台 + 已启用插件」。
+ */
+data class SearchSourceOption(val key: String, val label: String)
+
+/** 激活模式默认音源（与改造前完全一致） */
+private val DefaultSearchSources = listOf(
+    SearchSourceOption("kugou", "酷狗"),
+    SearchSourceOption("netease", "网易云"),
+    SearchSourceOption("tx", "QQ音乐"),
+    SearchSourceOption("kw", "酷我音乐")
+)
+
+/**
+ * 音源切换按钮：pill 样式，点击弹出选择菜单
  * 搜索栏旁与搜索结果 Tab 行共用
  */
 @Composable
 fun MusicSourceSwitcher(
     searchSource: String,
     onSourceChange: (String) -> Unit,
+    sources: List<SearchSourceOption> = DefaultSearchSources,
     modifier: Modifier = Modifier
 ) {
-    val isNetease = searchSource == "netease"
+    val currentLabel = sources.firstOrNull { it.key == searchSource }?.label
+        ?: sources.firstOrNull()?.label.orEmpty()
+    val highlighted = searchSource != sources.firstOrNull()?.key
     var showMenu by remember { mutableStateOf(false) }
     Box(modifier) {
         Surface(
             onClick = { showMenu = true },
             shape = RoundedCornerShape(14.dp),
-            color = if (isNetease) MaterialTheme.colorScheme.secondaryContainer
+            color = if (highlighted) MaterialTheme.colorScheme.secondaryContainer
             else MaterialTheme.colorScheme.surfaceContainerHigh
         ) {
             Row(
@@ -141,11 +162,11 @@ fun MusicSourceSwitcher(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = if (isNetease) "网易云" else "酷狗",
+                    text = currentLabel,
                     style = MaterialTheme.typography.bodySmall,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
-                    color = if (isNetease) MaterialTheme.colorScheme.onSecondaryContainer
+                    color = if (highlighted) MaterialTheme.colorScheme.onSecondaryContainer
                     else MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.width(2.dp))
@@ -153,7 +174,7 @@ fun MusicSourceSwitcher(
                     Icons.Default.ArrowDropDown,
                     contentDescription = "切换音源",
                     modifier = Modifier.size(16.dp),
-                    tint = if (isNetease) MaterialTheme.colorScheme.onSecondaryContainer
+                    tint = if (highlighted) MaterialTheme.colorScheme.onSecondaryContainer
                     else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
@@ -163,20 +184,17 @@ fun MusicSourceSwitcher(
             onDismissRequest = { showMenu = false },
             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         ) {
-            DropdownMenuItem(
-                text = { Text("酷狗", fontSize = 13.sp) },
-                trailingIcon = {
-                    if (!isNetease) Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                },
-                onClick = { showMenu = false; onSourceChange("kugou") }
-            )
-            DropdownMenuItem(
-                text = { Text("网易云", fontSize = 13.sp) },
-                trailingIcon = {
-                    if (isNetease) Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                },
-                onClick = { showMenu = false; onSourceChange("netease") }
-            )
+            sources.forEach { (key, label) ->
+                DropdownMenuItem(
+                    text = { Text(label, fontSize = 13.sp) },
+                    trailingIcon = {
+                        if (searchSource == key) {
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                        }
+                    },
+                    onClick = { showMenu = false; onSourceChange(key) }
+                )
+            }
         }
     }
 }
@@ -187,8 +205,15 @@ fun SearchTopBar(
     onSearch: (String) -> Unit,
     externalQuery: String = "",
     searchSource: String = "kugou",
-    onSourceChange: (String) -> Unit = {}
+    onSourceChange: (String) -> Unit = {},
+    // 音源列表；null = 激活默认四平台
+    sources: List<SearchSourceOption>? = null,
+    // 未激活时搜索是顶层 tab：不显示返回箭头、不自动聚焦弹键盘、不请求在线搜索建议
+    showBack: Boolean = true,
+    autoFocus: Boolean = true,
+    suggestionsEnabled: Boolean = true
 ) {
+    val resolvedSources = sources ?: DefaultSearchSources
     var textFieldValue by remember { mutableStateOf(TextFieldValue(externalQuery, selection = TextRange(externalQuery.length))) }
     var isFocused by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
@@ -228,9 +253,9 @@ fun SearchTopBar(
         }
     }
 
-    // 首次进入且无搜索词时自动弹起软键盘聚焦
+    // 首次进入且无搜索词时自动弹起软键盘聚焦（未激活顶层搜索不打扰用户）
     LaunchedEffect(Unit) {
-        if (externalQuery.isBlank()) {
+        if (autoFocus && externalQuery.isBlank()) {
             delay(150)
             try { focusRequester.requestFocus() } catch (_: Exception) {}
         }
@@ -238,7 +263,7 @@ fun SearchTopBar(
 
     // 搜索建议防抖请求：仅在获得焦点且用户正在主动打字时触发
     LaunchedEffect(textFieldValue.text, isFocused) {
-        if (!isFocused || !isUserInput) {
+        if (!suggestionsEnabled || !isFocused || !isUserInput) {
             showSuggestions = false
             suggestList = emptyList()
             return@LaunchedEffect
@@ -349,15 +374,18 @@ fun SearchTopBar(
                 }
             },
             navigationIcon = {
-                IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", modifier = Modifier.size(20.dp))
+                if (showBack) {
+                    IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", modifier = Modifier.size(20.dp))
+                    }
                 }
             },
             actions = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     MusicSourceSwitcher(
                         searchSource = searchSource,
-                        onSourceChange = onSourceChange
+                        onSourceChange = onSourceChange,
+                        sources = resolvedSources
                     )
                     TextButton(onClick = {
                         submitSearch(textFieldValue.text)
@@ -434,6 +462,8 @@ fun SearchPage(
     onBack: () -> Unit,
     onPlaySong: (List<SongInfo>, Int) -> Unit,
     onPlaylistClick: (SearchPlaylistItem) -> Unit = {},
+    onPublicPlaylistClick: (com.example.lxmusic.data.search.PublicPlaylistProviders.PublicPlaylist) -> Unit = {},
+    onAlbumClick: (SearchAlbumItem) -> Unit = {},
     onQueryChange: (String) -> Unit = {},
     onSelectedTypeChange: (String) -> Unit = {},
     currentPlayingPath: String? = null,
@@ -441,11 +471,16 @@ fun SearchPage(
     onAddToQueueNext: (SongInfo) -> Unit = {},
     initialSource: String = "kugou",
     onSourceChange: (String) -> Unit = {},
+    // 未激活模式由 MainActivity 传入「本地 + 公开平台 + 插件」音源
+    sourceOptions: List<SearchSourceOption>? = null,
+    // 未激活：只保留单曲、不请求热搜/默认词/搜索建议
+    guestMode: Boolean = false
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val sources = sourceOptions ?: DefaultSearchSources
     var searchResults by remember { mutableStateOf<List<SongInfo>>(emptyList()) }
     var isSearching by remember { mutableStateOf(false) }
     var hasSearched by remember { mutableStateOf(initialQuery.isNotBlank()) }
@@ -457,10 +492,20 @@ fun SearchPage(
     var selectedType by remember { mutableStateOf(initialSelectedType) }
     var inputText by remember { mutableStateOf(initialQuery) }
 
-    // 音源：kugou / netease（持久化到 settings 的 music_source，启动时由 MainActivity 传入）
+    // 音源：kugou / netease / local / plugin:<id>（持久化到 settings 的 music_source，启动时由 MainActivity 传入）
     var searchSource by remember { mutableStateOf(initialSource) }
     LaunchedEffect(initialSource) {
         searchSource = initialSource
+    }
+    // 音源合法性：切模式后旧保存值可能不在当前列表（如激活后用过的 plugin/local），回落到默认源
+    LaunchedEffect(sources) {
+        if (sources.none { it.key == searchSource }) {
+            val fallback = if (guestMode) "local" else "kugou"
+            if (sources.any { it.key == fallback }) {
+                searchSource = fallback
+                onSourceChange(fallback)
+            }
+        }
     }
 
     // 热搜
@@ -503,9 +548,10 @@ fun SearchPage(
         loadHistory()
     }
 
-    // 加载热搜和历史
+    // 加载热搜和历史（未激活不请求在线热搜/默认词）
     LaunchedEffect(Unit) {
         loadHistory()
+        if (guestMode) return@LaunchedEffect
         try {
             val hotResp = KuGouApi.service.getHotSearch()
             hotSearchList = hotResp.data?.list?.flatMap { it.keywords ?: emptyList() } ?: emptyList()
@@ -516,8 +562,10 @@ fun SearchPage(
         } catch (_: Exception) {}
     }
 
-    // 歌单搜索结果
-    var playlistResults by remember { mutableStateOf<List<SearchPlaylistItem>>(emptyList()) }
+    // 歌单搜索结果（统一用公共歌单模型，点进去复用公共歌单详情）
+    var playlistResults by remember {
+        mutableStateOf<List<com.example.lxmusic.data.search.PublicPlaylistProviders.PublicPlaylist>>(emptyList())
+    }
 
     // 歌手/专辑/MV 搜索结果
     var authorResults by remember { mutableStateOf<List<SearchAuthorItem>>(emptyList()) }
@@ -547,12 +595,15 @@ fun SearchPage(
 
                 when (type) {
                     "special" -> {
-                        val resp = KuGouApi.service.searchPlaylist(keywords, page = 1, pageSize = 30)
-                        playlistResults = resp.data?.lists ?: emptyList()
-                        totalResults = resp.data?.total ?: 0
-                        android.util.Log.d("LxMusic", "歌单搜索: total=${resp.data?.total}, listSize=${playlistResults.size}")
-                        if (playlistResults.size < 30) noMoreData = true
-                        if (playlistResults.isNotEmpty()) saveHistory(keywords)
+                        // 多平台歌单搜索：酷狗 / 网易云 / QQ
+                        val result = com.example.lxmusic.data.search.PublicSearchPlaylistProviders.search(
+                            searchSource, keywords, page = 1, pageSize = 30
+                        )
+                        playlistResults = result.playlists
+                        totalResults = result.total
+                        android.util.Log.d("LxMusic", "歌单搜索($searchSource): total=${result.total}, size=${result.playlists.size}")
+                        if (result.playlists.size < 30) noMoreData = true
+                        if (result.playlists.isNotEmpty()) saveHistory(keywords)
                     }
                     "author" -> {
                         val resp = KuGouApi.service.searchAuthor(keywords, page = 1, pageSize = 30)
@@ -579,42 +630,14 @@ fun SearchPage(
                         if (mvResults.isNotEmpty()) saveHistory(keywords)
                     }
                     else -> {
-                        if (searchSource == "netease") {
-                            // 网易云单曲搜索（type=1）
-                            val resp = NeteaseApi.service.search(keywords, limit = 30, offset = 0, type = 1)
-                            val songs = resp.result?.songs?.map { it.toSongInfo() } ?: emptyList()
-                            android.util.Log.d("LxMusic", "网易云搜索: keywords=$keywords, size=${songs.size}, total=${resp.result?.songCount}")
-                            searchResults = songs
-                            totalResults = resp.result?.songCount ?: 0
-                            if (songs.size < 30) noMoreData = true
-                            if (songs.isNotEmpty()) saveHistory(keywords)
-                        } else if (BffApi.isEnabled) {
-                            // BFF 统一搜索（酷狗）
-                            val bff = BffApi.search(keywords, page = 1, pageSize = 30)
-                            val songs = bff?.items?.map { it.toSongInfo() } ?: emptyList()
-                            searchResults = songs
-                            totalResults = bff?.total ?: 0
-                            if (songs.size < 30) noMoreData = true
-                            if (songs.isNotEmpty()) saveHistory(keywords)
-                        } else {
-                            // 单曲搜索 (song, author, album, mv 等通用 fallback)
-                            val resp = KuGouApi.service.search(keywords, page = 1, pageSize = 30, type = type)
-                            android.util.Log.d("LxMusic", "搜索: type=$type, status=${resp.status}, total=${resp.data?.total}, listSize=${resp.data?.lists?.size}")
-                            val songs = resp.data?.lists?.map { song ->
-                                SongInfo(
-                                    title = song.title,
-                                    artist = song.artist,
-                                    filePath = "${song.hash}|${song.album_audio_id}",
-                                    albumArtUri = song.coverUrl,
-                                    duration = song.Duration.toLong() * 1000,
-                                    albumId = song.AlbumID?.toLongOrNull() ?: 0
-                                )
-                            } ?: emptyList()
-                            searchResults = songs
-                            totalResults = resp.data?.total ?: 0
-                            if (songs.size < 30) noMoreData = true
-                            if (songs.isNotEmpty()) saveHistory(keywords)
-                        }
+                        // 多平台搜索：酷狗/网易云（已激活优先内置，否则公开接口）+ QQ/酷我（公开接口）+ 本地/插件
+                        val (songs, total) = searchSongsBySource(
+                            context, searchSource, keywords, page = 1, pageSize = 30
+                        )
+                        searchResults = songs
+                        totalResults = total
+                        if (songs.size < 30) noMoreData = true
+                        if (songs.isNotEmpty()) saveHistory(keywords)
                     }
                 }
             } catch (e: Exception) {
@@ -643,9 +666,14 @@ fun SearchPage(
             try {
                 when (selectedType) {
                     "special" -> {
-                        val resp = KuGouApi.service.searchPlaylist(currentQuery, page = nextPage, pageSize = 30)
-                        val more = resp.data?.lists ?: emptyList()
-                        if (more.isNotEmpty()) { playlistResults = playlistResults + more; currentPage = nextPage }
+                        val result = com.example.lxmusic.data.search.PublicSearchPlaylistProviders.search(
+                            searchSource, currentQuery, page = nextPage, pageSize = 30
+                        )
+                        val more = result.playlists
+                        if (more.isNotEmpty()) {
+                            playlistResults = (playlistResults + more).distinctBy { it.platform + it.id }
+                            currentPage = nextPage
+                        }
                         if (more.size < 30) noMoreData = true
                     }
                     "author" -> {
@@ -667,30 +695,14 @@ fun SearchPage(
                         if (more.size < 30) noMoreData = true
                     }
                     else -> {
-                        if (searchSource == "netease") {
-                            // 网易云分页：offset = (页数-1) * limit
-                            val resp = NeteaseApi.service.search(currentQuery, limit = 30, offset = (nextPage - 1) * 30, type = 1)
-                            val songs = resp.result?.songs?.map { it.toSongInfo() } ?: emptyList()
-                            if (songs.isNotEmpty()) { searchResults = searchResults + songs; currentPage = nextPage }
-                            if (songs.size < 30) noMoreData = true
-                        } else if (BffApi.isEnabled) {
-                            val bff = BffApi.search(currentQuery, page = nextPage, pageSize = 30)
-                            val songs = bff?.items?.map { it.toSongInfo() } ?: emptyList()
-                            if (songs.isNotEmpty()) { searchResults = searchResults + songs; currentPage = nextPage }
-                            if (songs.size < 30) noMoreData = true
-                        } else {
-                            val resp = KuGouApi.service.search(currentQuery, page = nextPage, pageSize = 30, type = selectedType)
-                            val songs = resp.data?.lists?.map { song ->
-                                SongInfo(
-                                    title = song.title, artist = song.artist,
-                                    filePath = "${song.hash}|${song.album_audio_id}",
-                                    albumArtUri = song.coverUrl, duration = song.Duration.toLong(),
-                                    albumId = song.AlbumID?.toLongOrNull() ?: 0
-                                )
-                            } ?: emptyList()
-                            if (songs.isNotEmpty()) { searchResults = searchResults + songs; currentPage = nextPage }
-                            if (songs.size < 30) noMoreData = true
+                        val (songs, _) = searchSongsBySource(
+                            context, searchSource, currentQuery, page = nextPage, pageSize = 30
+                        )
+                        if (songs.isNotEmpty()) {
+                            searchResults = searchResults + songs
+                            currentPage = nextPage
                         }
+                        if (songs.size < 30) noMoreData = true
                     }
                 }
             } catch (_: Exception) {}
@@ -700,6 +712,17 @@ fun SearchPage(
 
     LaunchedEffect(initialSelectedType) {
         selectedType = initialSelectedType
+    }
+
+    // 歌手/MV tab 已下线、非酷狗不支持专辑：历史选中类型回落到单曲
+    LaunchedEffect(selectedType, searchSource) {
+        val unsupported = selectedType == "author" || selectedType == "mv" ||
+            (selectedType == "album" && searchSource != "kugou") ||
+            (guestMode && selectedType != "song")
+        if (unsupported) {
+            selectedType = "song"
+            onSelectedTypeChange("song")
+        }
     }
 
     // 接收标题栏传来的搜索词
@@ -745,12 +768,12 @@ fun SearchPage(
         }
     }
 
-    // 切换音源：保存状态，网易云模式只支持单曲，已有搜索词则立即用新音源重搜
+    // 切换音源：保存状态，非酷狗模式只支持单曲，已有搜索词则立即用新音源重搜
     fun switchSource(source: String) {
         if (source == searchSource) return
         searchSource = source
         onSourceChange(source)
-        if (source == "netease" && selectedType != "song") {
+        if (source != "kugou" && selectedType != "song") {
             selectedType = "song"
             onSelectedTypeChange("song")
         }
@@ -774,9 +797,19 @@ fun SearchPage(
             enter = expandVertically(tween(250, easing = FastOutSlowInEasing)) + fadeIn(tween(250)),
             exit = shrinkVertically(tween(200, easing = FastOutSlowInEasing)) + fadeOut(tween(180))
         ) {
-            // 网易云模式本轮仅支持单曲搜索
-            val types = if (searchSource == "netease") listOf("song" to "单曲")
-            else listOf("song" to "单曲", "special" to "歌单", "author" to "歌手", "album" to "专辑", "mv" to "MV")
+            // 歌手/MV 暂时下线；歌单搜索支持 酷狗/网易云/QQ，专辑目前只做酷狗详情；
+            // 未激活（本地/插件）只有单曲
+            val types = when {
+                guestMode || searchSource == "local" || searchSource.startsWith("plugin:") ->
+                    listOf("song" to "单曲")
+                searchSource == "kugou" -> listOf(
+                    "song" to "单曲", "special" to "歌单", "album" to "专辑"
+                )
+                searchSource == "netease" || searchSource == "tx" -> listOf(
+                    "song" to "单曲", "special" to "歌单"
+                )
+                else -> listOf("song" to "单曲")
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -804,7 +837,8 @@ fun SearchPage(
                 Box(modifier = Modifier.padding(end = 12.dp)) {
                     MusicSourceSwitcher(
                         searchSource = searchSource,
-                        onSourceChange = { switchSource(it) }
+                        onSourceChange = { switchSource(it) },
+                        sources = sources
                     )
                 }
             }
@@ -862,57 +896,95 @@ fun SearchPage(
                     ) {
                         item {
                             Text(
-                                text = if (totalResults > 0) "共 $totalResults 个歌单，已加载 ${playlistResults.size} 个" else "已加载 ${playlistResults.size} 个歌单",
+                                text = if (totalResults > 0) "共 $totalResults 个歌单" else "歌单",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
+                                modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 2.dp)
                             )
                         }
-                        items(playlistResults) { playlist ->
-                            Surface(
-                                onClick = { onPlaylistClick(playlist) },
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh
+                        items(playlistResults, key = { "${it.platform}_${it.id}" }) { playlist ->
+                            // 透明紧凑行：不铺卡片底色，壁纸下也不糊
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onPublicPlaylistClick(playlist) }
+                                    .padding(horizontal = 16.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                val coverUrl = playlist.coverUrl
+                                Box(
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    val coverUrl = playlist.coverUrl
+                                    Icon(
+                                        Icons.Default.QueueMusic,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(22.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                     if (coverUrl.isNotBlank()) {
-                                        val painter = rememberAsyncImagePainter(model = ImageRequest.Builder(context).data(coverUrl).memoryCacheKey(coverUrl).crossfade(150).build())
-                                        Image(painter, null, Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
-                                    } else {
-                                        Box(Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
-                                            Icon(Icons.Default.QueueMusic, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(playlist.specialname ?: "未知歌单", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        val playCountText = playlist.play_count?.let { raw ->
-                                            val num = raw.replace("[^0-9]".toRegex(), "").toLongOrNull() ?: 0L
-                                            when {
-                                                num >= 100_000_000 -> String.format("%.1f亿", num / 100_000_000.0)
-                                                num >= 10_000 -> String.format("%.1f万", num / 10_000.0)
-                                                num > 0 -> "${num}次"
-                                                else -> null
-                                            }
-                                        }
-                                        val metaText = buildString {
-                                            append(playlist.nickname ?: "未知")
-                                            append(" · ")
-                                            append("${playlist.song_count}首")
-                                            if (!playCountText.isNullOrBlank()) {
-                                                append(" · ")
-                                                append(playCountText)
-                                            }
-                                        }
-                                        Text(metaText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        val painter = rememberAsyncImagePainter(
+                                            model = ImageRequest.Builder(context)
+                                                .data(coverUrl)
+                                                .memoryCacheKey(coverUrl)
+                                                .crossfade(150)
+                                                .build()
+                                        )
+                                        Image(
+                                            painter = painter,
+                                            contentDescription = null,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
                                     }
                                 }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = playlist.name,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    val metaText = buildString {
+                                        if (playlist.creator.isNotBlank()) append(playlist.creator)
+                                        if (playlist.trackCount > 0) {
+                                            if (isNotEmpty()) append(" · ")
+                                            append("${playlist.trackCount}首")
+                                        }
+                                        val pc = playlist.playCount
+                                        if (pc > 0) {
+                                            if (isNotEmpty()) append(" · ")
+                                            append(
+                                                when {
+                                                    pc >= 100_000_000 -> String.format("%.1f亿", pc / 100_000_000.0)
+                                                    pc >= 10_000 -> String.format("%.1f万", pc / 10_000.0)
+                                                    else -> "$pc"
+                                                }
+                                            )
+                                        }
+                                    }
+                                    if (metaText.isNotBlank()) {
+                                        Text(
+                                            text = metaText,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                )
                             }
                         }
                         if (isLoadingMore) {
@@ -1004,41 +1076,83 @@ fun SearchPage(
                     LazyColumn(state = albumListState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 100.dp)) {
                         item {
                             Text(
-                                text = if (totalResults > 0) "共 $totalResults 张专辑，已加载 ${albumResults.size} 张" else "已加载 ${albumResults.size} 张专辑",
+                                text = if (totalResults > 0) "共 $totalResults 张专辑" else "专辑",
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
+                                modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 2.dp)
                             )
                         }
-                        items(albumResults) { album ->
-                            Surface(
-                                onClick = { playByName(album.albumname ?: "") },
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh
+                        items(albumResults, key = { it.albumid }) { album ->
+                            // 透明紧凑行，点进专辑详情
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onAlbumClick(album) }
+                                    .padding(horizontal = 16.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    val coverUrl = album.coverUrl
+                                val coverUrl = album.coverUrl
+                                Box(
+                                    modifier = Modifier
+                                        .size(52.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.Album,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(22.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                     if (coverUrl.isNotBlank()) {
-                                        val painter = rememberAsyncImagePainter(model = ImageRequest.Builder(context).data(coverUrl).memoryCacheKey(coverUrl).crossfade(150).build())
-                                        Image(painter, null, Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
-                                    } else {
-                                        Box(Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
-                                            Icon(Icons.Default.MusicNote, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(album.albumname ?: "未知专辑", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        val meta = buildString {
-                                            if (!album.authorname.isNullOrBlank()) append(album.authorname)
-                                            if (album.songcount > 0) {
-                                                if (isNotEmpty()) append(" · ")
-                                                append("${album.songcount}首")
-                                            }
-                                        }
-                                        if (meta.isNotBlank()) Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        val painter = rememberAsyncImagePainter(
+                                            model = ImageRequest.Builder(context)
+                                                .data(coverUrl)
+                                                .memoryCacheKey(coverUrl)
+                                                .crossfade(150)
+                                                .build()
+                                        )
+                                        Image(
+                                            painter = painter,
+                                            contentDescription = null,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
                                     }
                                 }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = album.albumname ?: "未知专辑",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    val meta = buildString {
+                                        if (!album.authorname.isNullOrBlank()) append(album.authorname)
+                                        if (album.songcount > 0) {
+                                            if (isNotEmpty()) append(" · ")
+                                            append("${album.songcount}首")
+                                        }
+                                    }
+                                    if (meta.isNotBlank()) {
+                                        Text(
+                                            meta,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                )
                             }
                         }
                         if (isLoadingMore) {
@@ -1340,8 +1454,14 @@ fun SearchPage(
                         if (hotSearchList.isEmpty() && historyList.isEmpty()) {
                             item {
                                 Box(modifier = Modifier.fillMaxWidth().padding(top = 100.dp), contentAlignment = Alignment.Center) {
-                                    Text(if (defaultKeyword.isNotBlank()) "试试搜索: $defaultKeyword" else "输入关键词搜索",
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        text = when {
+                                            defaultKeyword.isNotBlank() -> "试试搜索: $defaultKeyword"
+                                            guestMode && searchSource == "local" -> "搜索本地歌曲（歌名或歌手）"
+                                            else -> "输入关键词搜索"
+                                        },
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
                         }
@@ -1350,4 +1470,112 @@ fun SearchPage(
             }
         }
     }
+}
+
+/**
+ * 按音源搜索单曲（新架构）：
+ * - 酷狗/网易云：已激活优先走内置（BFF/原有接口），否则走公开搜索接口（无需服务器）
+ * - QQ/酷我：公开搜索接口（无需服务器）
+ * 返回 (歌曲列表, 总数)
+ */
+private suspend fun searchSongsBySource(
+    context: Context,
+    source: String,
+    query: String,
+    page: Int,
+    pageSize: Int
+): Pair<List<SongInfo>, Int> = withContext(Dispatchers.IO) {
+    when {
+        // 未激活：本地曲库内存过滤分页
+        source == "local" -> searchLocalSongs(context, query, page, pageSize)
+        source == "tx" || source == "kw" -> {
+            val list = com.example.lxmusic.data.search.PublicSearchProviders.search(source, query, page, pageSize)
+            list.map { it.toSongInfo() } to list.size
+        }
+        source == "netease" -> {
+            if (BffApi.isEnabled && BffApi.onlineAllowed) {
+                val inner = runCatching {
+                    val resp = NeteaseApi.service.search(
+                        query, limit = pageSize, offset = (page - 1) * pageSize, type = 1
+                    )
+                    val songs = resp.result?.songs?.map { it.toSongInfo() } ?: emptyList()
+                    songs to (resp.result?.songCount ?: songs.size)
+                }.getOrNull()
+                if (inner != null && inner.first.isNotEmpty()) return@withContext inner
+            }
+            val list = com.example.lxmusic.data.search.PublicSearchProviders.search("wy", query, page, pageSize)
+            com.example.lxmusic.data.plugin.PluginContext.get()?.let { ctx ->
+                list.forEach { song ->
+                    com.example.lxmusic.data.plugin.PluginSongStore.put(
+                        ctx, "wymeta|${song.id}", song.musicInfoJson()
+                    )
+                }
+            }
+            list.map { it.toSongInfo() } to list.size
+        }
+        source.startsWith("plugin:") -> {
+            val ctx = com.example.lxmusic.data.plugin.PluginContext.get()
+                ?: return@withContext emptyList<SongInfo>() to 0
+            val pluginId = source.removePrefix("plugin:")
+            val list = com.example.lxmusic.data.plugin.PluginSourceProvider.search(
+                ctx, pluginId, query, page, pageSize
+            )
+            list to list.size
+        }
+        else -> {
+            if (BffApi.isEnabled && BffApi.onlineAllowed) {
+                val bff = BffApi.search(query, page, pageSize)
+                val songs = bff?.items?.map { it.toSongInfo() } ?: emptyList()
+                if (songs.isNotEmpty()) return@withContext songs to (bff?.total ?: songs.size)
+            }
+            val pub = com.example.lxmusic.data.search.PublicSearchProviders.search("kg", query, page, pageSize)
+            if (pub.isNotEmpty()) {
+                // 保存完整 musicInfo（含真实 albumId），供播放时插件解析使用
+                com.example.lxmusic.data.plugin.PluginContext.get()?.let { ctx ->
+                    pub.forEach { song ->
+                        com.example.lxmusic.data.plugin.PluginSongStore.put(
+                            ctx, "kgmeta|${song.id}|${song.albumAudioId}", song.musicInfoJson()
+                        )
+                    }
+                }
+                return@withContext pub.map { it.toSongInfo() } to pub.size
+            }
+            val legacy = runCatching {
+                val resp = KuGouApi.service.search(query, page = page, pageSize = pageSize, type = "song")
+                val songs = resp.data?.lists?.map { song ->
+                    SongInfo(
+                        title = song.title,
+                        artist = song.artist,
+                        filePath = "${song.hash}|${song.album_audio_id}",
+                        albumArtUri = song.coverUrl,
+                        duration = song.Duration.toLong() * 1000,
+                        albumId = song.AlbumID?.toLongOrNull() ?: 0
+                    )
+                } ?: emptyList()
+                songs to (resp.data?.total ?: songs.size)
+            }.getOrNull()
+            legacy ?: (emptyList<SongInfo>() to 0)
+        }
+    }
+}
+
+/**
+ * 未激活模式的本地搜索：读本地曲库内存过滤（歌名/歌手），按页切片。
+ * 曲库规模通常几千首，一次性过滤足够快；走 IO 线程避免卡顿。
+ */
+private suspend fun searchLocalSongs(
+    context: Context,
+    query: String,
+    page: Int,
+    pageSize: Int
+): Pair<List<SongInfo>, Int> = withContext(Dispatchers.IO) {
+    val all = MusicDatabase.getDatabase(context).songDao().getAllSongs()
+    val keyword = query.trim()
+    val matched = if (keyword.isBlank()) all else all.filter { song ->
+        song.title.contains(keyword, ignoreCase = true) ||
+            song.artist.contains(keyword, ignoreCase = true)
+    }
+    val start = ((page - 1) * pageSize).coerceAtLeast(0)
+    val slice = matched.drop(start).take(pageSize).map { it.toSongInfo() }
+    slice to matched.size
 }

@@ -119,6 +119,8 @@ fun MiniPlayerBar(
     playerBarOpacity: Float = 1f,
     playerBarWhiteBlend: Float = 0.8f,
     liquidGlass: Boolean = false,
+    // 有自定义壁纸才启用玻璃；纯色主题改用实色播放条，避免糊成灰块
+    hasCustomWallpaper: Boolean = false,
     backdrop: Backdrop? = null,
     modifier: Modifier = Modifier
 ) {
@@ -189,7 +191,7 @@ fun MiniPlayerBar(
 
     // 液态玻璃：开启且背景层可用时启用（与导航栏保持一致的苹果风格）
     val isDarkTheme = isSystemInDarkTheme()
-    val glassActive = liquidGlass && backdrop != null
+    val glassActive = liquidGlass && backdrop != null && hasCustomWallpaper
     // 玻璃容器色：半透明材质并注入当前主题/专辑微光 tint
     val glassContainerColor = MaterialTheme.colorScheme.surfaceContainer.copy(
         alpha = (0.24f * barOpacity).coerceIn(0.08f, 1f)

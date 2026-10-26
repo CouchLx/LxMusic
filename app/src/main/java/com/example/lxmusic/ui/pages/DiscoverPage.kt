@@ -12,6 +12,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -39,9 +41,13 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Leaderboard
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.GridView
@@ -56,6 +62,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CircularWavyProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
@@ -70,9 +78,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -98,11 +108,15 @@ import com.example.lxmusic.fetchIpZoneBatch
 import com.example.lxmusic.RankItem
 import com.example.lxmusic.RankSongBrief
 import com.example.lxmusic.SearchPlaylistItem
+import com.example.lxmusic.data.search.PublicPlaylistProviders
 import com.example.lxmusic.model.SongInfo
 import com.example.lxmusic.ui.components.SongContextMenuActions
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -119,6 +133,18 @@ private fun formatPlayTimes(times: Long): String {
 // 只有进程销毁/退出软件重进才重置为 0，与首页翻页进度同一套路）
 private var discoverSubTabIndex = 0
 
+// 发现页统一平台（排行榜/歌单/专区共用，固定在顶部选栏左侧）
+internal var discoverPlatform by mutableStateOf("kg")
+
+// 排行榜各平台滚动位置（离开页面/进榜单详情再返回时保持）
+private val discoverRankScrollIndex = mutableMapOf<String, Int>()
+private val discoverRankCache = mutableMapOf<String, List<RankItem>>()
+
+// 专区缓存/滚动位置
+private val discoverZoneCache = mutableMapOf<String, List<com.example.lxmusic.data.search.PublicZoneProviders.ZoneCategory>>()
+private val discoverZoneCoverCache = mutableStateMapOf<String, String>()
+private val discoverZoneScrollIndex = mutableMapOf<String, Int>()
+
 /**
  * 发现主页面：顶部支持子 Tab 切换（【推荐】与【排行榜】等）
  * 支持点击顶部 Tab 切换与左右滑动手势（HorizontalPager）平滑过渡
@@ -129,19 +155,31 @@ fun DiscoverPage(
     onRankClick: (RankItem) -> Unit,
     onPlaySong: ((List<SongInfo>, Int) -> Unit)? = null,
     onPlaylistClick: ((SearchPlaylistItem) -> Unit)? = null,
+    onPublicPlaylistClick: ((PublicPlaylistProviders.PublicPlaylist) -> Unit)? = null,
     currentPlayingPath: String? = null,
     isPlaying: Boolean = false,
     onAddToQueueNext: ((SongInfo) -> Unit)? = null,
     listState: LazyListState = rememberLazyListState(),
-    recommendListState: LazyListState = rememberLazyListState()
+    recommendListState: LazyListState = rememberLazyListState(),
+    // 未激活模式隐藏乐库（需要在线服务）；排行榜/歌单/专区走公开接口，保留
+    showYueku: Boolean = true
 ) {
     val scope = rememberCoroutineScope()
-    val tabs = remember {
-        listOf(
-            DiscoverSubTab("排行榜", Icons.Default.Leaderboard),
-            DiscoverSubTab("专区", Icons.Default.GridView),
-            DiscoverSubTab("推荐", Icons.Default.AutoAwesome)
-        )
+    val tabs = remember(showYueku) {
+        if (showYueku) {
+            listOf(
+                DiscoverSubTab("排行榜", Icons.Default.Leaderboard),
+                DiscoverSubTab("歌单", Icons.Default.List),
+                DiscoverSubTab("乐库", Icons.Default.LibraryMusic),
+                DiscoverSubTab("专区", Icons.Default.GridView)
+            )
+        } else {
+            listOf(
+                DiscoverSubTab("排行榜", Icons.Default.Leaderboard),
+                DiscoverSubTab("歌单", Icons.Default.List),
+                DiscoverSubTab("专区", Icons.Default.GridView)
+            )
+        }
     }
     val pagerState = rememberPagerState(
         initialPage = discoverSubTabIndex.coerceIn(0, tabs.size - 1)
@@ -178,22 +216,35 @@ fun DiscoverPage(
                     )
                 }
                 1 -> {
-                    // 专区子页面（48 专区列表，点播随机 50 首）
+                    // 歌单子页面（各平台推荐歌单广场）
+                    PlaylistTabContent(
+                        onOpenPlaylist = { playlist -> onPublicPlaylistClick?.invoke(playlist) }
+                    )
+                }
+                2 -> {
+                    if (showYueku) {
+                        // 乐库子页面（酷狗语种/风格：推荐歌单 + 单曲推荐 50 首）
+                        YuekuTabContent(
+                            onOpenPlaylist = { playlist -> onPublicPlaylistClick?.invoke(playlist) },
+                            onPlaySong = onPlaySong,
+                            currentPlayingPath = currentPlayingPath,
+                            isPlaying = isPlaying
+                        )
+                    } else {
+                        // 无乐库时第 3 个 tab 直接是专区
+                        JingxuanTabContent(
+                            onPlaySong = onPlaySong,
+                            currentPlayingPath = currentPlayingPath,
+                            onAddToQueueNext = onAddToQueueNext
+                        )
+                    }
+                }
+                else -> {
+                    // 专区子页面（多平台分类，点播随机 50 首）
                     JingxuanTabContent(
                         onPlaySong = onPlaySong,
                         currentPlayingPath = currentPlayingPath,
                         onAddToQueueNext = onAddToQueueNext
-                    )
-                }
-                else -> {
-                    // 推荐子页面
-                    RecommendTabContent(
-                        onPlaySong = onPlaySong,
-                        onPlaylistClick = onPlaylistClick,
-                        currentPlayingPath = currentPlayingPath,
-                        isPlaying = isPlaying,
-                        onAddToQueueNext = onAddToQueueNext,
-                        listState = recommendListState
                     )
                 }
             }
@@ -207,7 +258,7 @@ private data class DiscoverSubTab(
 )
 
 /**
- * 发现页顶部胶囊风格 Tab 切换器
+ * 发现页顶部：左侧固定平台切换 + 右侧文字选栏（选中下划线，无点击水波纹）
  */
 @Composable
 private fun DiscoverTopTabBar(
@@ -215,55 +266,112 @@ private fun DiscoverTopTabBar(
     selectedIndex: Int,
     onTabSelected: (Int) -> Unit
 ) {
-    // Tab 栏横滑（Tab 变多后小屏不溢出）
-    LazyRow(
+    val platforms = listOf(
+        "kg" to "酷狗",
+        "wy" to "网易云",
+        "tx" to "QQ音乐"
+    )
+    var showMenu by remember { mutableStateOf(false) }
+    // 乐库页是酷狗专属数据，平台切换没有意义：该页隐藏左侧平台胶囊
+    val showPlatform = tabs.getOrNull(selectedIndex)?.title != "乐库"
+
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .statusBarsPadding()
+            .padding(start = 12.dp, end = 16.dp, top = 6.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        items(tabs.size) { index ->
-            val tab = tabs[index]
-            val isSelected = selectedIndex == index
-            val bgColor by animateColorAsState(
-                targetValue = if (isSelected) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
-                animationSpec = tween(250),
-                label = "tab_bg"
-            )
-            val textColor by animateColorAsState(
-                targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-                animationSpec = tween(250),
-                label = "tab_text"
-            )
-
+        if (showPlatform) {
+            // 固定平台切换（不随选栏滚动）
+            Box {
             Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = bgColor,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .clickable { onTabSelected(index) }
+                onClick = { showMenu = true },
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = tab.icon,
-                        contentDescription = tab.title,
-                        tint = textColor,
-                        modifier = Modifier.size(16.dp)
+                    Text(
+                        text = platforms.firstOrNull { it.first == discoverPlatform }?.second ?: "酷狗",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
                     )
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Icon(
+                        Icons.Default.ArrowDropDown,
+                        contentDescription = "切换平台",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+            }
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false },
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+            ) {
+                platforms.forEach { (key, label) ->
+                    DropdownMenuItem(
+                        text = { Text(label, fontSize = 13.sp) },
+                        trailingIcon = {
+                            if (discoverPlatform == key) {
+                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            }
+                        },
+                        onClick = { showMenu = false; discoverPlatform = key }
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.width(14.dp))
+        }
+
+        LazyRow(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(22.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            items(tabs.size) { index ->
+                val tab = tabs[index]
+                val isSelected = selectedIndex == index
+                val textColor by animateColorAsState(
+                    targetValue = if (isSelected) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    animationSpec = tween(200),
+                    label = "tab_text"
+                )
+                val underlineColor by animateColorAsState(
+                    targetValue = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    animationSpec = tween(200),
+                    label = "tab_line"
+                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onTabSelected(index) }
+                        .padding(vertical = 6.dp)
+                ) {
                     Text(
                         text = tab.title,
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            fontSize = 14.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                        ),
+                        fontSize = 15.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                         color = textColor
+                    )
+                    Spacer(modifier = Modifier.height(5.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(18.dp)
+                            .height(3.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(underlineColor)
                     )
                 }
             }
@@ -968,30 +1076,96 @@ private fun JingxuanTabContent(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val prefs = remember { context.getSharedPreferences("yueku_cache", Context.MODE_PRIVATE) }
+    val platform = discoverPlatform
 
-    var loadingId by remember { mutableStateOf<Long?>(null) }
+    var categories by remember {
+        mutableStateOf(discoverZoneCache[platform] ?: emptyList())
+    }
+    var isLoading by remember { mutableStateOf(categories.isEmpty()) }
+    var loadError by remember { mutableStateOf(false) }
+    var loadingKey by remember { mutableStateOf<String?>(null) }
 
-    fun playZone(ipId: Long) {
-        if (loadingId != null) return
+    val perPlatformState = remember(platform) {
+        LazyListState(discoverZoneScrollIndex[platform] ?: 0)
+    }
+    LaunchedEffect(perPlatformState, platform) {
+        snapshotFlow { perPlatformState.firstVisibleItemIndex }.collect { idx ->
+            discoverZoneScrollIndex[platform] = idx
+        }
+    }
+
+    LaunchedEffect(platform) {
+        categories = discoverZoneCache[platform] ?: emptyList()
+        isLoading = categories.isEmpty()
+        loadError = false
+        scope.launch(Dispatchers.IO) {
+            val list = runCatching {
+                com.example.lxmusic.data.search.PublicZoneProviders.categories(platform)
+            }.getOrElse { emptyList() }
+            withContext(Dispatchers.Main) {
+                if (list.isNotEmpty()) {
+                    categories = list
+                    discoverZoneCache[platform] = list
+                    loadError = false
+                } else if (categories.isEmpty()) {
+                    loadError = true
+                }
+                isLoading = false
+            }
+        }
+    }
+
+    fun playZone(category: com.example.lxmusic.data.search.PublicZoneProviders.ZoneCategory) {
+        if (loadingKey != null) return
+        val key = "${category.platform}_${category.id}"
+        loadingKey = key
         scope.launch {
-            loadingId = ipId
-            val (list, _) = fetchIpZoneBatch(
-                ipId, 2, 30, 50,
-                getCursor = { prefs.getInt("zone_page_$ipId", 1) },
-                setCursor = { prefs.edit().putInt("zone_page_$ipId", it).apply() }
-            )
-            loadingId = null
+            // 激活后：优先用酷狗官方编辑精选专区（ip_id）批量备货，
+            // 2 页 × 30 首、游标轮转，每次点都是不同的 50 首；
+            // 未激活或失败时回退到原来的“按专区名搜索随机 50 首”
+            val ipId = if (category.platform == "kg" &&
+                com.example.lxmusic.data.search.PublicPlaylistProviders.officialKugouAvailable()
+            ) {
+                ZONE_ENTRIES.firstOrNull { it.name == category.name }?.ipId
+                    ?: category.id.toLongOrNull()
+            } else {
+                null
+            }
+            val officialSongs = if (ipId != null) {
+                val prefs = context.getSharedPreferences("yueku_cache", Context.MODE_PRIVATE)
+                runCatching {
+                    com.example.lxmusic.fetchIpZoneBatch(
+                        ipId = ipId,
+                        pageCount = 2,
+                        pageSize = 30,
+                        targetCount = 50,
+                        getCursor = { prefs.getInt("zone_page_$ipId", 1) },
+                        setCursor = { prefs.edit().putInt("zone_page_$ipId", it).apply() }
+                    )
+                }.getOrNull()?.first.orEmpty()
+            } else {
+                emptyList()
+            }
+            val list = officialSongs.ifEmpty {
+                runCatching {
+                    com.example.lxmusic.data.search.PublicZoneProviders.randomSongs(
+                        category.platform, category, 50
+                    )
+                }.getOrElse { emptyList() }
+            }
+            loadingKey = null
             if (list.isNotEmpty()) {
                 onPlaySong?.invoke(list, 0)
             } else {
-                android.widget.Toast.makeText(context, "没备到歌，换一个专区试试", android.widget.Toast.LENGTH_SHORT).show()
+                android.widget.Toast.makeText(
+                    context, "这个专区暂时没取到歌，换一个试试", android.widget.Toast.LENGTH_SHORT
+                ).show()
             }
         }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // 头部
+        // 头部：标题 + 平台切换
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1006,42 +1180,143 @@ private fun JingxuanTabContent(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "${ZONE_ENTRIES.size}个专区 · 点播随机50首",
+                    text = "${categories.size}个专区 · 点播随机50首",
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 4.dp, bottom = 180.dp)
-        ) {
-            items(ZONE_ENTRIES, key = { it.name }) { zone ->
-                ZoneRow(
-                    zone = zone,
-                    loading = loadingId == zone.ipId,
-                    onPlay = {
-                        val id = zone.ipId
-                        if (id != null) {
-                            playZone(id)
-                        } else {
-                            android.widget.Toast.makeText(context, "该专区暂只支持详情页，开发中", android.widget.Toast.LENGTH_SHORT).show()
-                        }
-                    }
+        Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+            when {
+                isLoading -> CircularWavyProgressIndicator(
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.align(Alignment.Center)
                 )
+                loadError && categories.isEmpty() -> Column(
+                    modifier = Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("加载失败，请检查网络", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(onClick = {
+                        isLoading = true
+                        loadError = false
+                        scope.launch(Dispatchers.IO) {
+                            val list = runCatching {
+                                com.example.lxmusic.data.search.PublicZoneProviders.categories(platform)
+                            }.getOrElse { emptyList() }
+                            withContext(Dispatchers.Main) {
+                                if (list.isNotEmpty()) {
+                                    categories = list
+                                    discoverZoneCache[platform] = list
+                                    loadError = false
+                                } else {
+                                    loadError = true
+                                }
+                                isLoading = false
+                            }
+                        }
+                    }) { Text("重试") }
+                }
+                else -> LazyColumn(
+                    state = perPlatformState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 4.dp, bottom = 180.dp)
+                ) {
+                    itemsIndexed(
+                        items = categories,
+                        key = { _, c -> "${c.platform}_${c.id}" }
+                    ) { index, category ->
+                        if (category.group.isNotBlank() &&
+                            (index == 0 || categories[index - 1].group != category.group)
+                        ) {
+                            Text(
+                                text = category.group,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 4.dp)
+                            )
+                        }
+                        val key = "${category.platform}_${category.id}"
+                        var cover by remember(key) {
+                            mutableStateOf(discoverZoneCoverCache[key] ?: category.coverUrl)
+                        }
+                        LaunchedEffect(key) {
+                            if (cover.isBlank() && category.platform != "kg") {
+                                val fetched = runCatching {
+                                    com.example.lxmusic.data.search.PublicZoneProviders.coverFor(
+                                        category.platform, category
+                                    )
+                                }.getOrNull().orEmpty()
+                                if (fetched.isNotBlank()) {
+                                    discoverZoneCoverCache[key] = fetched
+                                    cover = fetched
+                                }
+                            }
+                        }
+                        ZoneRow(
+                            platform = category.platform,
+                            name = category.name,
+                            coverUrl = cover,
+                            subtitle = "随机50首 · 分类专区",
+                            loading = loadingKey == key,
+                            onCoverChange = { discoverZoneCoverCache[key] = it; cover = it },
+                            onPlay = { playZone(category) }
+                        )
+                    }
+                }
             }
         }
     }
 }
 
-/** 专区行（歌单选项样式：封面 + 名 + 右侧播放键） */
+/** 专区行（封面 + 名称 + 右侧播放键；封面失败自动用公开搜索兜底并缓存） */
 @Composable
 private fun ZoneRow(
-    zone: ZoneEntry,
+    platform: String,
+    name: String,
+    coverUrl: String,
+    subtitle: String,
     loading: Boolean,
+    onCoverChange: (String) -> Unit,
     onPlay: () -> Unit
 ) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("yueku_cache", Context.MODE_PRIVATE) }
+    val scope = rememberCoroutineScope()
+    var cover by remember(name, coverUrl) { mutableStateOf(coverUrl) }
+    var fallbackTried by remember(name) { mutableStateOf(false) }
+    val cacheKey = "zone_cover2_${platform}_$name"
+
+    LaunchedEffect(name) {
+        if (cover.isBlank()) {
+            val cached = prefs.getString(cacheKey, null)
+            if (!cached.isNullOrBlank()) {
+                cover = cached
+                onCoverChange(cached)
+            }
+        }
+    }
+
+    fun fallbackCover() {
+        if (fallbackTried) return
+        fallbackTried = true
+        scope.launch {
+            val url = runCatching {
+                com.example.lxmusic.data.search.PublicSearchProviders
+                    .search(platform, name, 1, 1)
+                    .firstOrNull()?.coverUrl
+            }.getOrNull()
+            if (!url.isNullOrBlank()) {
+                prefs.edit().putString(cacheKey, url).apply()
+                cover = url
+                onCoverChange(url)
+            }
+        }
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1051,16 +1326,6 @@ private fun ZoneRow(
             .padding(horizontal = 6.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // 封面失效自动兜底：优先用缓存的兜底图，否则用原图；加载失败后搜索"专区名"取第一首封面并缓存
-        val zoneContext = LocalContext.current
-        val coverPrefs = zoneContext.getSharedPreferences("yueku_cache", Context.MODE_PRIVATE)
-        var coverUrl by remember(zone.name) {
-            mutableStateOf(coverPrefs.getString("zone_cover_${zone.name}", null) ?: zone.iconUrl)
-        }
-        var fallbackTried by remember(zone.name) { mutableStateOf(false) }
-        val coverScope = rememberCoroutineScope()
-
-        // 底层先铺占位图标（加载中/失败时不再出现白块），封面图成功加载后覆盖其上
         Box(
             modifier = Modifier
                 .size(52.dp)
@@ -1074,31 +1339,14 @@ private fun ZoneRow(
                 modifier = Modifier.size(24.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
             )
-            val url = coverUrl
-            if (url.isNotBlank()) {
+            if (cover.isNotBlank()) {
                 val painter = rememberAsyncImagePainter(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(url)
-                        .memoryCacheKey(url)
+                    model = ImageRequest.Builder(context)
+                        .data(cover)
+                        .memoryCacheKey(cover)
                         .crossfade(150)
                         .size(160)
-                        .listener(
-                            onError = { _, _ ->
-                                if (!fallbackTried) {
-                                    fallbackTried = true
-                                    coverScope.launch {
-                                        val cover = runCatching {
-                                            KuGouApi.service.search(zone.name, page = 1, pageSize = 1, type = "song")
-                                                .data?.lists?.firstOrNull()?.coverUrl
-                                        }.getOrNull()
-                                        if (!cover.isNullOrBlank()) {
-                                            coverPrefs.edit().putString("zone_cover_${zone.name}", cover).apply()
-                                            coverUrl = cover
-                                        }
-                                    }
-                                }
-                            }
-                        )
+                        .listener(onError = { _, _ -> fallbackCover() })
                         .build()
                 )
                 Image(
@@ -1114,7 +1362,7 @@ private fun ZoneRow(
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = zone.name,
+                text = name,
                 style = MaterialTheme.typography.bodyLarge.copy(
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium
@@ -1125,7 +1373,7 @@ private fun ZoneRow(
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = if (zone.ipId == null) "详情页开发中" else "随机50首 · 编辑精选",
+                text = subtitle,
                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                 maxLines = 1,
@@ -1138,11 +1386,8 @@ private fun ZoneRow(
                 modifier = Modifier.size(24.dp),
                 strokeWidth = 3.dp
             )
-        } else if (zone.ipId != null) {
-            IconButton(
-                onClick = onPlay,
-                modifier = Modifier.size(36.dp)
-            ) {
+        } else {
+            IconButton(onClick = onPlay, modifier = Modifier.size(36.dp)) {
                 Icon(
                     Icons.Default.PlayArrow,
                     contentDescription = "播放",
@@ -1794,142 +2039,197 @@ fun RankTabContent(
     listState: LazyListState = rememberLazyListState()
 ) {
     val context = LocalContext.current
-    var rankList by remember { mutableStateOf<List<RankItem>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    var loadError by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val gson = remember { Gson() }
     val prefs = remember { context.getSharedPreferences("rank_cache", Context.MODE_PRIVATE) }
-
-    val allowedRankIds = setOf(
-        8888L,   // TOP500
-        6666L,   // 飙升榜
-        74534L,  // 新歌榜
-        82831L,  // 网络热歌榜
-        52144L,  // 抖音热歌酷狗榜
-        24971L,  // DJ热歌榜
-        59895L,  // R&B榜
-        33160L,  // 电音榜
-        59900L,  // 纯音乐榜
-        85432L,  // 百万收藏榜
-        35811L,  // 会员热歌榜
-        33162L,  // ACG新歌榜
-        49223L,  // 90后热歌榜
-        49224L   // 00后热歌榜
-    )
-
     val imageLoader = coil.compose.LocalImageLoader.current
 
-    LaunchedEffect(Unit) {
-        val cached = prefs.getString("rank_list_json", null)
-        if (!cached.isNullOrBlank()) {
-            try {
-                val type = object : TypeToken<List<RankItem>>() {}.type
-                val list: List<RankItem> = gson.fromJson(cached, type)
-                if (list.isNotEmpty()) {
-                    rankList = list
-                    isLoading = false
-                    list.forEach { rank ->
-                        val url = rank.coverUrl
-                        if (url.isNotBlank()) {
-                            val request = ImageRequest.Builder(context)
-                                .data(url)
-                                .memoryCacheKey(url)
-                                .build()
-                            imageLoader.enqueue(request)
-                        }
-                    }
-                }
-            } catch (_: Exception) {}
-        }
+    val platform = discoverPlatform
 
+    // 每个平台独立的滚动位置（切平台/进详情再返回都保持）
+    val perPlatformState = remember(platform) {
+        LazyListState(discoverRankScrollIndex[platform] ?: 0)
+    }
+    LaunchedEffect(perPlatformState, platform) {
+        snapshotFlow { perPlatformState.firstVisibleItemIndex }.collect { idx ->
+            discoverRankScrollIndex[platform] = idx
+        }
+    }
+    var rankList by remember { mutableStateOf<List<RankItem>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf(false) }
+
+    fun cacheKey(p: String) = "rank_list_json_$p"
+
+    fun preloadCovers(list: List<RankItem>) {
+        list.forEach { rank ->
+            val url = rank.coverUrl
+            if (url.isNotBlank()) {
+                imageLoader.enqueue(
+                    ImageRequest.Builder(context)
+                        .data(url)
+                        .memoryCacheKey(url)
+                        .build()
+                )
+            }
+        }
+    }
+
+    suspend fun fetchList(p: String): List<RankItem> {
+        // 公开接口优先（不需要服务器）；失败再回退已激活 BFF / 原有链路
+        val pub = com.example.lxmusic.data.search.PublicRankingProviders.rankList(p)
+        if (pub.isNotEmpty()) return pub
+        if (p == "kg") {
+            if (BffApi.isEnabled && BffApi.onlineAllowed) {
+                return BffApi.ranks()?.items?.map {
+                    RankItem(
+                        rankid = it.id ?: 0L,
+                        rankname = it.name ?: "",
+                        album_img_9 = it.coverUrl ?: "",
+                        play_times = it.playTimes ?: 0L,
+                        songinfo = it.songs?.map { s -> RankSongBrief(name = s.name, author = s.author) }
+                    )
+                } ?: emptyList()
+            }
+            return runCatching { KuGouApi.service.getRankList().data?.info ?: emptyList() }
+                .getOrElse { emptyList() }
+        }
+        return emptyList()
+    }
+
+    // 网易云/QQ 的列表接口不带预览歌曲：先给首屏前 6 个榜单补齐，避免切换平台时逐个闪烁
+    suspend fun attachPreviews(p: String, list: List<RankItem>): List<RankItem> {
+        if (p == "kg" || list.isEmpty()) return list
+        val head = list.take(6)
+        val enriched = coroutineScope {
+            head.map { rank ->
+                async(Dispatchers.IO) {
+                    val (songs, _) = runCatching {
+                        com.example.lxmusic.data.search.PublicRankingProviders.rankSongs(p, rank.rankid, 1, 3)
+                    }.getOrElse { emptyList<com.example.lxmusic.model.SongInfo>() to 0 }
+                    if (songs.isEmpty()) rank else rank.copy(
+                        songinfo = songs.map { RankSongBrief(name = it.title, author = it.artist) }
+                    )
+                }
+            }.awaitAll()
+        }
+        return enriched + list.drop(6)
+    }
+
+    LaunchedEffect(platform) {
+        // 先展示内存缓存（切换平台不出现空白/闪烁），再后台刷新
+        val mem = discoverRankCache[platform]
+        rankList = mem ?: emptyList()
+        isLoading = mem == null
+        loadError = false
+        if (mem == null) {
+            val cached = prefs.getString(cacheKey(platform), null)
+            if (!cached.isNullOrBlank()) {
+                runCatching {
+                    gson.fromJson<List<RankItem>>(cached, object : TypeToken<List<RankItem>>() {}.type)
+                }.getOrNull()?.takeIf { it.isNotEmpty() }?.let {
+                    rankList = it
+                    discoverRankCache[platform] = it
+                    isLoading = false
+                    preloadCovers(it)
+                }
+            }
+        }
         scope.launch(Dispatchers.IO) {
-            try {
-                val items: List<RankItem> = if (BffApi.isEnabled) {
-                    BffApi.ranks()?.items?.map {
-                        RankItem(
-                            rankid = it.id ?: 0L,
-                            rankname = it.name ?: "",
-                            album_img_9 = it.coverUrl ?: "",
-                            play_times = it.playTimes ?: 0L,
-                            songinfo = it.songs?.map { s -> RankSongBrief(name = s.name, author = s.author) }
-                        )
-                    } ?: emptyList()
-                } else {
-                    KuGouApi.service.getRankList().data?.info ?: emptyList()
-                }
+            val items = runCatching { attachPreviews(platform, fetchList(platform)) }
+                .getOrElse { emptyList() }
+            withContext(Dispatchers.Main) {
                 if (items.isNotEmpty()) {
-                    val filtered = items.filter { it.rankid in allowedRankIds }
-                    rankList = filtered
-                    prefs.edit().putString("rank_list_json", gson.toJson(filtered)).apply()
+                    rankList = items
+                    discoverRankCache[platform] = items
+                    prefs.edit().putString(cacheKey(platform), gson.toJson(items)).apply()
+                    preloadCovers(items)
+                    loadError = false
+                } else if (rankList.isEmpty()) {
+                    loadError = true
                 }
-                loadError = false
-            } catch (_: Exception) {
-                if (rankList.isEmpty()) loadError = true
-            } finally {
                 isLoading = false
             }
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        if (isLoading) {
-            CircularWavyProgressIndicator(
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.align(Alignment.Center)
-            )
-        } else if (loadError && rankList.isEmpty()) {
-            Column(
-                modifier = Modifier.align(Alignment.Center),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text("加载失败，请检查网络", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(onClick = {
-                    isLoading = true
-                    loadError = false
-                    scope.launch(Dispatchers.IO) {
-                        try {
-                            val items: List<RankItem> = if (BffApi.isEnabled) {
-                                BffApi.ranks()?.items?.map {
-                                    RankItem(
-                                        rankid = it.id ?: 0L,
-                                        rankname = it.name ?: "",
-                                        album_img_9 = it.coverUrl ?: "",
-                                        play_times = it.playTimes ?: 0L,
-                                        songinfo = it.songs?.map { s -> RankSongBrief(name = s.name, author = s.author) }
-                                    )
-                                } ?: emptyList()
-                            } else {
-                                KuGouApi.service.getRankList().data?.info ?: emptyList()
+    Column(modifier = Modifier.fillMaxSize()) {
+
+        Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+            if (isLoading) {
+                CircularWavyProgressIndicator(
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            } else if (loadError && rankList.isEmpty()) {
+                Column(
+                    modifier = Modifier.align(Alignment.Center),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("加载失败，请检查网络", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(onClick = {
+                        isLoading = true
+                        loadError = false
+                        scope.launch(Dispatchers.IO) {
+                            val items = runCatching { fetchList(platform) }.getOrElse { emptyList() }
+                            withContext(Dispatchers.Main) {
+                                if (items.isNotEmpty()) {
+                                    rankList = items
+                                    prefs.edit().putString(cacheKey(platform), gson.toJson(items)).apply()
+                                    loadError = false
+                                } else {
+                                    loadError = true
+                                }
+                                isLoading = false
                             }
-                            if (items.isNotEmpty()) {
-                                rankList = items.filter { it.rankid in allowedRankIds }
-                                prefs.edit().putString("rank_list_json", gson.toJson(rankList)).apply()
-                            }
-                        } catch (_: Exception) {
-                            loadError = true
-                        } finally {
-                            isLoading = false
                         }
+                    }) { Text("重试") }
+                }
+            } else {
+                LazyColumn(
+                    state = perPlatformState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 180.dp, start = 16.dp, end = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(
+                        count = rankList.size,
+                        key = { "${rankList[it].platform}_${rankList[it].rankid}" }
+                    ) { index ->
+                        val rank = rankList[index]
+                        // 网易云/QQ 的榜单列表接口不带预览歌曲，进入可视区域后补前 3 首（带缓存）
+                        var previews by remember(rank.platform, rank.rankid) {
+                            mutableStateOf(rank.songinfo)
+                        }
+                        if (rank.platform != "kg" && previews.isNullOrEmpty()) {
+                            LaunchedEffect(rank.platform, rank.rankid) {
+                                val (songs, _) = runCatching {
+                                    com.example.lxmusic.data.search.PublicRankingProviders.rankSongs(
+                                        rank.platform, rank.rankid, 1, 3
+                                    )
+                                }.getOrElse { emptyList<com.example.lxmusic.model.SongInfo>() to 0 }
+                                if (songs.isNotEmpty()) {
+                                    val briefs = songs.map { RankSongBrief(name = it.title, author = it.artist) }
+                                    previews = briefs
+                                    // 写回列表与内存缓存，切换平台再回来不再重新加载
+                                    val current = rankList.toMutableList()
+                                    val idx = current.indexOfFirst {
+                                        it.platform == rank.platform && it.rankid == rank.rankid
+                                    }
+                                    if (idx >= 0) {
+                                        current[idx] = current[idx].copy(songinfo = briefs)
+                                        rankList = current
+                                        discoverRankCache[rank.platform] = current
+                                    }
+                                }
+                            }
+                        }
+                        RankCard(
+                            rank = if (previews.isNullOrEmpty()) rank else rank.copy(songinfo = previews),
+                            onClick = { onRankClick(rank) }
+                        )
                     }
-                }) { Text("重试") }
-            }
-        } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 8.dp, bottom = 180.dp, start = 16.dp, end = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(
-                    count = rankList.size,
-                    key = { rankList[it].rankid }
-                ) { index ->
-                    RankCard(
-                        rank = rankList[index],
-                        onClick = { onRankClick(rankList[index]) }
-                    )
                 }
             }
         }
@@ -2056,7 +2356,7 @@ fun RankCard(rank: RankItem, onClick: () -> Unit, modifier: Modifier = Modifier)
                     if (previewSongs.isEmpty()) {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(
-                                text = "暂无歌曲信息",
+                                text = "点击查看榜单",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

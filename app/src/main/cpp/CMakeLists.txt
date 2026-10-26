@@ -143,3 +143,8 @@ target_link_options(
     PRIVATE
     "$<$<NOT:$<CONFIG:Debug>>:-Wl,--gc-sections>"
 )
+
+# QuickJS 微任务泵：dlopen libquickjs.so 并 dlsym JS_ExecutePendingJob，
+# 让 Promise.then / async-await 能真正执行（taoweiji 库未暴露该 API）
+add_library(quickjspump SHARED quickjs_pump.cpp)
+target_link_libraries(quickjspump PRIVATE dl log)

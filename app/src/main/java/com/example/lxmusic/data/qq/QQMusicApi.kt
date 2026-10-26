@@ -59,7 +59,9 @@ object QQMusicApi {
         val title: String,
         val singer: String,
         val album: String,
-        val intervalSec: Long
+        val intervalSec: Long,
+        // QQ 的 songmid（字符串）：tx:// 路径里存的就是它，用于精确匹配
+        val mid: String = ""
     )
 
     /**
@@ -126,7 +128,16 @@ object QQMusicApi {
                         ?.joinToString(",")
                         .orEmpty()
 
-                    result.add(QQCandidate(id, title, singers, album, interval))
+                    result.add(
+                        QQCandidate(
+                            id = id,
+                            title = title,
+                            singer = singers,
+                            album = album,
+                            intervalSec = interval,
+                            mid = obj.get("mid")?.asString.orEmpty()
+                        )
+                    )
                 }
                 result
             }
@@ -222,6 +233,48 @@ object QQMusicApi {
             }
         } catch (e: Exception) {
             Log.w(TAG, "fetchLyric failed for ${candidate.id}: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * 按 songmid 精确拉取 QQ 自己的歌词：
+     * 1. 搜索同名候选，用 mid 精确命中拿到数字 id → 取 QRC 逐字（带翻译）
+     * 2. 未命中 / 取不到 → 按 songmid 直接取平台 LRC（精确匹配，不按歌名乱搜）
+     */
+    suspend fun fetchLyricBySongmid(
+        songmid: String,
+        title: String,
+        singer: String,
+        intervalSec: Long = 0L
+    ): Pair<String, String?>? = withContext(Dispatchers.IO) {
+        if (songmid.isBlank()) return@withContext null
+        val keyword = listOf(title, singer).filter { it.isNotBlank() }.joinToString(" ")
+        val exact = runCatching { searchSongs(keyword) }.getOrElse { emptyList() }
+            .firstOrNull { it.mid == songmid }
+        if (exact != null) {
+            fetchLyric(exact)?.let { return@withContext it }
+        }
+        fetchLrcByMid(songmid)
+    }
+
+    /** QQ 平台 LRC（按 songmid 精确取） */
+    private fun fetchLrcByMid(songmid: String): Pair<String, String?>? {
+        return try {
+            val url = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg" +
+                "?songmid=$songmid&format=json&nobase64=1&g_tk=5381" +
+                "&loginUin=0&hostUin=0&inCharset=utf8&outCharset=utf-8&notice=0&platform=yqq.json&needNewCode=0"
+            val request = Request.Builder().url(url).build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                val root = gson.fromJson(body, JsonObject::class.java) ?: return null
+                val lyric = root.get("lyric")?.asString?.takeIf { it.isNotBlank() } ?: return null
+                val trans = root.get("trans")?.asString?.takeIf { it.isNotBlank() }
+                Pair(lyric, trans)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "fetchLrcByMid failed for $songmid: ${e.message}")
             null
         }
     }

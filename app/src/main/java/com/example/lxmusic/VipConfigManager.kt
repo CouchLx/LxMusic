@@ -2,8 +2,13 @@ package com.example.lxmusic
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.util.Log
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -11,6 +16,26 @@ import okhttp3.Request
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+
+/**
+ * 激活状态的 UI 可观察版本：MainActivity 用它决定「未激活精简界面 / 激活完整界面」。
+ * 由 VipConfigManager 在启动恢复、激活成功、解绑时更新。
+ */
+object ActivationState {
+    var canUseVip by mutableStateOf(false)
+        private set
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    fun update(value: Boolean) {
+        // activate / refreshToken 在 IO 线程完成，Compose 状态必须在主线程写入
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            canUseVip = value
+        } else {
+            mainHandler.post { canUseVip = value }
+        }
+    }
+}
 
 /**
  * VIP 配置管理器
@@ -157,6 +182,7 @@ object VipConfigManager {
                 // 立即应用到 KuGouApi
                 applyVipToApi(token, userid)
                 syncBffCredential(code, deviceId)
+                ActivationState.update(true)
 
                 Result.success(message)
             } else {
@@ -251,6 +277,7 @@ object VipConfigManager {
     fun applySavedVipToApi(context: Context) {
         val prefs = getPrefs(context)
         val status = getStatus(context)
+        ActivationState.update(status.canUseVip)
         if (!status.canUseVip) {
             // 未激活/设备不匹配：不携带任何激活凭证（BFF 会按 401 处理）
             syncBffCredential(null, null)
@@ -279,9 +306,12 @@ object VipConfigManager {
         KuGouApi.ownerToken = ""
         KuGouApi.ownerUserid = ""
         syncBffCredential(null, null)
+        // 解绑后清理在线缓存，避免首页/排行榜继续显示旧数据并反复“刷新失败”
+        com.example.lxmusic.data.OnlineCacheCleaner.clearOnlineCaches(context)
         // 解绑后重新弹出「使用方式」选择（本地音乐 / 激活）
         context.getSharedPreferences("settings", Context.MODE_PRIVATE)
             .edit().remove("activation_prompt_version").apply()
+        ActivationState.update(false)
         Log.d("LxMusic", "VIP 激活状态已清除")
     }
 

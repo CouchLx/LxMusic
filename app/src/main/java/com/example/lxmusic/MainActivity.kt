@@ -109,7 +109,12 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LibraryMusic
@@ -140,6 +145,10 @@ import androidx.compose.material.icons.filled.Cloud
 import com.example.lxmusic.ui.components.ThemeModeToggleButton
 import com.example.lxmusic.ui.components.ThemeRevealOverlay
 import com.example.lxmusic.ui.components.AppUpdateDialog
+import com.example.lxmusic.ui.components.topbar.ModernHomeTopBar
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.graphics.asImageBitmap
 import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -177,6 +186,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
@@ -233,6 +243,7 @@ import com.example.lxmusic.coil.AudioArtFetcher
 import com.example.lxmusic.ui.theme.LxMusicTheme
 import com.example.lxmusic.model.SongInfo
 import com.example.lxmusic.ui.components.FloatingBottomBar
+import com.example.lxmusic.ui.components.BottomBarTab
 import com.example.lxmusic.data.LiquidGlassSettings
 import com.example.lxmusic.data.SettingsRepository
 import com.example.lxmusic.ui.components.LocalMusicSidePanel
@@ -241,6 +252,8 @@ import com.example.lxmusic.ui.components.HapticsProvider
 import com.example.lxmusic.ui.components.PlaylistSheet
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import com.example.lxmusic.ui.pages.HomePage
 import com.example.lxmusic.ui.pages.DiscoverPage
 import com.example.lxmusic.ui.pages.RankDetailPage
@@ -250,10 +263,16 @@ import com.example.lxmusic.ui.pages.PlayerStage
 import com.example.lxmusic.ui.pages.SongListPage
 import com.example.lxmusic.ui.pages.PlaylistManagePage
 import com.example.lxmusic.ui.pages.PlaylistPage
+import com.example.lxmusic.data.search.PublicPlaylistProviders
 import com.example.lxmusic.ui.pages.PlaylistDetailPage
+import com.example.lxmusic.ui.pages.PublicPlaylistDetailPage
+import com.example.lxmusic.ui.pages.PublicAlbumDetailPage
+import com.example.lxmusic.ui.pages.GuestMinePage
 import com.example.lxmusic.ui.pages.CollectionDetailPage
 import com.example.lxmusic.ui.pages.SearchPlaylistDetailPage
 import com.example.lxmusic.ui.pages.MinePage
+import com.example.lxmusic.ui.pages.GuestMinePage
+import com.example.lxmusic.ui.pages.SearchSourceOption
 import com.example.lxmusic.ui.pages.PlaylistManagerPage
 import com.example.lxmusic.ui.effect.PlayerBackdrop
 import com.example.lxmusic.ui.pages.LocalMusicPage
@@ -312,6 +331,8 @@ class MainActivity : ComponentActivity() {
         })
         // 缓存上限（MB→字节，0=不缓存）
         val configuredCacheBytes = activitySettings.maxCacheSizeBytes
+        // 插件运行时需要 Application Context（DataSource/歌词仓库无 Context）
+        com.example.lxmusic.data.plugin.PluginContext.init(this)
         // 在线服务地址必须在 setContent 之前就绪：启动门禁弹窗需要立即判断是否有内置后端
         KuGouApi.bffUrl = getSharedPreferences("settings", MODE_PRIVATE)
             .getString("bff_url", null)
@@ -346,8 +367,6 @@ class MainActivity : ComponentActivity() {
 
             CompositionLocalProvider(LocalImageLoader provides imageLoader) {
                 val ctx = LocalContext.current
-                // 未激活门禁：每个版本首次启动时二选一（激活码 / 本地音乐）
-                com.example.lxmusic.ui.components.ActivationGate(ctx)
                 val settingsRepository = remember { SettingsRepository(ctx) }
 
                 // 首次启动初始化：确保默认主题为原生主题，导航栏完全等于背景色
@@ -383,6 +402,10 @@ class MainActivity : ComponentActivity() {
                 val playerViewModel: PlayerViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
                 val playerUiState by playerViewModel.uiState.collectAsState()
                 val currentSong = playerUiState.currentSong
+                // 供插件解析播放地址时补全 musicInfo（歌名/歌手/时长）
+                LaunchedEffect(currentSong?.filePath) {
+                    com.example.lxmusic.data.plugin.PluginPlayback.currentSong = currentSong
+                }
                 var albumSeedColorHex by remember { mutableStateOf<String?>(null) }
                 LaunchedEffect(currentSong?.filePath, currentSong?.albumArtUri) {
                     albumSeedColorHex = null
@@ -648,6 +671,41 @@ fun AppScaffold(
     val uiState by playerViewModel.uiState.collectAsState()
     val audioFormat by playerViewModel.audioFormat.collectAsState()
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    // 未激活 = 「本地/插件模式」：有在线服务（BFF）但未激活时启用精简界面。
+    // 开源构建（无 BFF）不做激活门禁，isGuest 恒为 false，保持原有界面与逻辑。
+    val isGuest = KuGouApi.bffUrl.isNotBlank() && !ActivationState.canUseVip
+    // 两种模式的顶层 tab 集合（未激活没有首页，搜索成为顶层 tab）
+    val topLevelTabs = remember(isGuest) { if (isGuest) setOf(11, 1, 2) else setOf(0, 1, 2) }
+    // 未激活搜索音源：本地 + 公开元数据搜索 + 已启用插件。
+    // selectedTab 变化时重算：从设置页导入插件后回到搜索即可见。
+    val guestSearchSources: List<SearchSourceOption>? = if (isGuest) {
+        remember(selectedTab) {
+            buildList {
+                add(SearchSourceOption("local", "本地"))
+                add(SearchSourceOption("kugou", "酷狗"))
+                add(SearchSourceOption("netease", "网易云"))
+                add(SearchSourceOption("tx", "QQ音乐"))
+                add(SearchSourceOption("kw", "酷我音乐"))
+                com.example.lxmusic.data.plugin.PluginStore.enabled(context).forEach { plugin ->
+                    add(
+                        SearchSourceOption(
+                            "plugin:${plugin.id}",
+                            "插件·${plugin.name.ifBlank { plugin.fileName }}"
+                        )
+                    )
+                }
+            }
+        }
+    } else null
+    val bottomTabs = if (isGuest) listOf(
+        BottomBarTab(11, Icons.Filled.Search, Icons.Outlined.Search, stringResource(R.string.title_search)),
+        BottomBarTab(1, Icons.Filled.Explore, Icons.Outlined.Explore, stringResource(R.string.nav_discover)),
+        BottomBarTab(2, Icons.Filled.Person, Icons.Outlined.Person, stringResource(R.string.nav_mine))
+    ) else listOf(
+        BottomBarTab(0, Icons.Filled.Home, Icons.Outlined.Home, stringResource(R.string.nav_home)),
+        BottomBarTab(1, Icons.Filled.Search, Icons.Outlined.Search, stringResource(R.string.nav_discover)),
+        BottomBarTab(2, Icons.Filled.Person, Icons.Outlined.Person, stringResource(R.string.nav_mine))
+    )
     var settingsSubPage by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(selectedTab) { if (selectedTab != 12) settingsSubPage = null }
     var isThemeRevealing by remember { mutableStateOf(false) }
@@ -689,14 +747,29 @@ fun AppScaffold(
     var previousTab by rememberSaveable { mutableIntStateOf(0) }
 
     // 进程重建后，依赖非持久化数据的子页面（4-7 每日/历史/风格列表、8-10 歌单详情）
-    // 数据已丢失，回退到父级页面，避免显示空白列表
+    // 数据已丢失，回退到父级页面，避免显示空白列表。
+    // 未激活模式没有首页（0）及其子页，统一落到搜索（11）。
     LaunchedEffect(Unit) {
-        when (selectedTab) {
-            in 4..7 -> selectedTab = 0
-            13 -> selectedTab = 0
-            18 -> selectedTab = 0
-            in 8..10 -> selectedTab = 2
+        if (isGuest) {
+            when (selectedTab) {
+                0, 13, 18, in 4..7 -> selectedTab = 11
+                in 8..10 -> selectedTab = 2
+            }
+        } else {
+            when (selectedTab) {
+                in 4..7 -> selectedTab = 0
+                13 -> selectedTab = 0
+                18 -> selectedTab = 0
+                in 8..10 -> selectedTab = 2
+            }
         }
+    }
+
+    // 激活成功后立即切到完整版首页；解绑（Activity.recreate 重建）时由上面的恢复逻辑落到搜索
+    var wasGuest by remember { mutableStateOf(isGuest) }
+    LaunchedEffect(isGuest) {
+        if (wasGuest && !isGuest) selectedTab = 0
+        wasGuest = isGuest
     }
 
     val currentSong = uiState.currentSong
@@ -740,7 +813,8 @@ fun AppScaffold(
         val currentHasVerbatim = !onlineLyrics.isNullOrBlank() && (
             com.example.lxmusic.ui.lyrics.isTtmlLyrics(onlineLyrics!!) ||
             com.example.lxmusic.ui.lyrics.isNeteaseYrc(onlineLyrics!!) ||
-            com.example.lxmusic.ui.lyrics.isQrcLyrics(onlineLyrics!!)
+            com.example.lxmusic.ui.lyrics.isQrcLyrics(onlineLyrics!!) ||
+            com.example.lxmusic.ui.lyrics.isKrcLyrics(onlineLyrics!!)
         )
         if (currentHasVerbatim) {
             if (onlineTranslationText == null) {
@@ -767,7 +841,7 @@ fun AppScaffold(
                     if (!nativeContent.isNullOrBlank()) {
                         withContext(Dispatchers.Main) {
                             // 仅当当前还没有获取到更高规格的逐字时先展示原生歌词
-                            if (onlineLyrics == null || (!com.example.lxmusic.ui.lyrics.isTtmlLyrics(onlineLyrics!!) && !com.example.lxmusic.ui.lyrics.isNeteaseYrc(onlineLyrics!!) && !com.example.lxmusic.ui.lyrics.isQrcLyrics(onlineLyrics!!))) {
+                            if (onlineLyrics == null || (!com.example.lxmusic.ui.lyrics.isTtmlLyrics(onlineLyrics!!) && !com.example.lxmusic.ui.lyrics.isNeteaseYrc(onlineLyrics!!) && !com.example.lxmusic.ui.lyrics.isQrcLyrics(onlineLyrics!!) && !com.example.lxmusic.ui.lyrics.isKrcLyrics(onlineLyrics!!))) {
                                 onlineLyrics = nativeContent
                             }
                             // fetchNativeLyric 顺带缓存了 tlyric，回填翻译
@@ -802,8 +876,8 @@ fun AppScaffold(
     }
     val currentSongLyrics = currentSong?.lyrics
     val currentLyricsText = when {
-        !onlineLyrics.isNullOrBlank() && (com.example.lxmusic.ui.lyrics.isTtmlLyrics(onlineLyrics!!) || com.example.lxmusic.ui.lyrics.isNeteaseYrc(onlineLyrics!!) || com.example.lxmusic.ui.lyrics.isQrcLyrics(onlineLyrics!!)) -> onlineLyrics
-        !currentSongLyrics.isNullOrBlank() && (com.example.lxmusic.ui.lyrics.isTtmlLyrics(currentSongLyrics) || com.example.lxmusic.ui.lyrics.isNeteaseYrc(currentSongLyrics) || com.example.lxmusic.ui.lyrics.isQrcLyrics(currentSongLyrics)) -> currentSongLyrics
+        !onlineLyrics.isNullOrBlank() && (com.example.lxmusic.ui.lyrics.isTtmlLyrics(onlineLyrics!!) || com.example.lxmusic.ui.lyrics.isNeteaseYrc(onlineLyrics!!) || com.example.lxmusic.ui.lyrics.isQrcLyrics(onlineLyrics!!) || com.example.lxmusic.ui.lyrics.isKrcLyrics(onlineLyrics!!)) -> onlineLyrics
+        !currentSongLyrics.isNullOrBlank() && (com.example.lxmusic.ui.lyrics.isTtmlLyrics(currentSongLyrics) || com.example.lxmusic.ui.lyrics.isNeteaseYrc(currentSongLyrics) || com.example.lxmusic.ui.lyrics.isQrcLyrics(currentSongLyrics) || com.example.lxmusic.ui.lyrics.isKrcLyrics(currentSongLyrics)) -> currentSongLyrics
         !onlineLyrics.isNullOrBlank() -> onlineLyrics
         else -> currentSongLyrics
     }
@@ -814,6 +888,8 @@ fun AppScaffold(
         }
     }
     var showRankDetail by remember { mutableStateOf<RankItem?>(null) }
+    var showPublicPlaylist by remember { mutableStateOf<PublicPlaylistProviders.PublicPlaylist?>(null) }
+    var showPublicAlbum by remember { mutableStateOf<SearchAlbumItem?>(null) }
     var showLoginPage by rememberSaveable { mutableStateOf(false) }
     var loginVersion by rememberSaveable { mutableIntStateOf(0) }
     // 激活成功但未登录时，弹窗里点「去登录」→ 打开登录页
@@ -902,6 +978,9 @@ fun AppScaffold(
     var playerBarWhiteBlend by remember { mutableFloatStateOf(settingsRepository.playerBarWhiteBlend) }
     var floatingBarOpacity by remember { mutableFloatStateOf(settingsRepository.floatingBarOpacity) }
     val glassBackdrop = rememberLayerBackdrop()
+    // 首页顶栏磨砂采样源：壁纸（zIndex 0）+ 首页列表（zIndex 1），
+    // 顶栏用渐进模糊实时采样这两层，内容滑到顶栏下方时会一起被磨砂掉。
+    val homeTopHazeState = rememberHazeState()
     
     // 本地音乐左侧面板状态（提升到 MainActivity，顶栏汉堡按钮与页面共享）
     var localShowSidePanel by remember { mutableStateOf(false) }
@@ -1053,8 +1132,9 @@ fun AppScaffold(
         NeteaseApi.setCustomServerUrl(savedNeteaseUrl.ifBlank { null })
         NeteaseApi.baseUrl = NeteaseApi.effectiveBaseUrl()
         android.util.Log.d("LxMusic", "网易云 API 地址: ${NeteaseApi.baseUrl}")
-        // 恢复搜索音源（酷狗 / 网易云）
-        searchSource = settingsPrefs.getString("music_source", null) ?: "kugou"
+        // 恢复搜索音源（酷狗 / 网易云 / 本地 / 插件）；未激活默认「本地」
+        searchSource = settingsPrefs.getString("music_source", null)
+            ?: if (isGuest) "local" else "kugou"
         // VIP userid 由 ownerToken/ownerUserid 统一处理，不再单独加载
         KuGouApi.vipUserid = ""
 
@@ -1168,32 +1248,53 @@ fun AppScaffold(
     var playlistMenuAction by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     // 手机返回键：统一的返回处理，替代原先散落的多个 BackHandler
-    val backEnabled = showLoginPage || showRankDetail != null || showPlayerPage ||
+    // 未激活时搜索是顶层 tab：不拦截系统返回，直接退出应用
+    val backEnabled = showLoginPage || showRankDetail != null || showPublicPlaylist != null ||
+        showPublicAlbum != null || showPlayerPage ||
         selectedTab == 3 || selectedTab in 4..7 || selectedTab in 8..10 ||
-        selectedTab == 11 || selectedTab == 12 || selectedTab == 13 || selectedTab == 14 ||
+        (selectedTab == 11 && !isGuest) ||
+        selectedTab == 12 || selectedTab == 13 || selectedTab == 14 ||
         selectedTab == 15 || selectedTab == 16 || selectedTab == 17 || selectedTab == 18
+    // 展开/收起播放器：页面状态在清动画标记之前提交（同一帧），
+    // 避免动画结束到 showPlayerPage 生效之间闪出底栏/迷你播放条
+    suspend fun expandPlayer(fromY: Float? = null) {
+        isRevealAnimating = true
+        try {
+            if (fromY != null) playerRevealY.snapTo(fromY)
+            playerRevealY.animateTo(0f, tween(350, easing = FastOutSlowInEasing))
+            showPlayerPage = true
+        } finally {
+            isRevealAnimating = false
+        }
+    }
+
+    suspend fun collapsePlayer() {
+        isRevealAnimating = true
+        try {
+            playerRevealY.animateTo(screenHeightPx, tween(350, easing = FastOutSlowInEasing))
+            showPlayerPage = false
+        } finally {
+            isRevealAnimating = false
+        }
+    }
+
     androidx.activity.compose.BackHandler(enabled = backEnabled) {
         when {
             showLoginPage -> showLoginPage = false
-            showRankDetail != null -> {
-                rankLocateAction = null
-                showRankDetail = null
-            }
+            // 播放器在最上层：先处理播放器，避免一次返回先把下层榜单/歌单关掉
             showPlayerPage -> {
                 // 返回键两级：歌词页先回播放页，播放页再收起（带滑出动画）
                 if (playerPagerState.currentPage == 1) {
                     scope.launch { playerPagerState.animateScrollToPage(0) }
                 } else {
-                    scope.launch {
-                        isRevealAnimating = true
-                        try {
-                            playerRevealY.animateTo(screenHeightPx, tween(350, easing = FastOutSlowInEasing))
-                        } finally {
-                            isRevealAnimating = false
-                        }
-                        showPlayerPage = false
-                    }
+                    scope.launch { collapsePlayer() }
                 }
+            }
+            showPublicAlbum != null -> showPublicAlbum = null
+            showPublicPlaylist != null -> showPublicPlaylist = null
+            showRankDetail != null -> {
+                rankLocateAction = null
+                showRankDetail = null
             }
             selectedTab == 3 -> selectedTab = 2
             selectedTab in 4..7 -> selectedTab = 0
@@ -1226,7 +1327,8 @@ fun AppScaffold(
 
     // 迷你播放条底部间距：原生主题下用实测底栏高度（含导航栏 inset 的差值），
     // 保证与底栏严丝合缝；悬浮主题保持胶囊悬浮间距
-    val showNavBar = selectedTab !in 3..18 && showRankDetail == null && !showLoginPage
+    val showNavBar = selectedTab in topLevelTabs && showRankDetail == null &&
+        showPublicPlaylist == null && showPublicAlbum == null && !showLoginPage
     val miniPlayerBottomPadding by animateDpAsState(
         targetValue = when {
             !showNavBar -> 0.dp
@@ -1256,15 +1358,29 @@ fun AppScaffold(
             // 主框架底色跟随主题（种子色 / 莫奈取色），背景图存在时由上层图片覆盖
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // 背景图片（铺满整个屏幕，包括标题栏区域，始终显示）
-        if (backgroundImageUri != null) {
-            val painter = rememberAsyncImagePainter(model = Uri.parse(backgroundImageUri))
-            Image(
-                painter = painter,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize().alpha(bgOpacity),
-                contentScale = ContentScale.Crop
-            )
+        // 背景图片（铺满整个屏幕，包括标题栏区域，始终显示）。
+        // 现代主题 + 壁纸时，这一层同时作为顶栏磨砂的采样源：
+        // 必须自带不透明基座，否则顶栏渐隐段会透出下层同一张壁纸，出现"重影"。
+        val captureTopBarHaze = settingsRepository.themeMode == "modern" && backgroundImageUri != null
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                // hazeSource 必须在 background 外层：采样层要包含不透明基座
+                .then(
+                    if (captureTopBarHaze) Modifier.hazeSource(homeTopHazeState, zIndex = 0f)
+                    else Modifier
+                )
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            if (backgroundImageUri != null) {
+                val painter = rememberAsyncImagePainter(model = Uri.parse(backgroundImageUri))
+                Image(
+                    painter = painter,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize().alpha(bgOpacity),
+                    contentScale = ContentScale.Crop
+                )
+            }
         }
         Scaffold(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -1274,12 +1390,22 @@ fun AppScaffold(
                 AnimatedContent(
                     targetState = selectedTab,
                     transitionSpec = {
+                        // 未激活顶层顺序是 搜索(11)/发现(1)/我的(2)，数值大小无法代表左右方向，按位置判断
+                        val guestOrder = listOf(11, 1, 2)
+                        val fromPos = guestOrder.indexOf(initialState)
+                        val toPos = guestOrder.indexOf(targetState)
                         val isSearch = targetState == 11 || initialState == 11
-                        if (isSearch) {
-                            (fadeIn(tween(260)) + slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { if (targetState == 11) it / 6 else -it / 6 }) togetherWith
-                                (fadeOut(tween(180)) + slideOutHorizontally(tween(180, easing = FastOutSlowInEasing)) { if (targetState == 11) -it / 6 else it / 6 })
-                        } else {
-                            fadeIn(tween(200)) togetherWith fadeOut(tween(150))
+                        when {
+                            isGuest && fromPos >= 0 && toPos >= 0 && fromPos != toPos -> {
+                                val dir = if (toPos > fromPos) 1 else -1
+                                (fadeIn(tween(260)) + slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { dir * it / 6 }) togetherWith
+                                    (fadeOut(tween(180)) + slideOutHorizontally(tween(180, easing = FastOutSlowInEasing)) { -dir * it / 6 })
+                            }
+                            isSearch -> {
+                                (fadeIn(tween(260)) + slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { if (targetState == 11) it / 6 else -it / 6 }) togetherWith
+                                    (fadeOut(tween(180)) + slideOutHorizontally(tween(180, easing = FastOutSlowInEasing)) { if (targetState == 11) -it / 6 else it / 6 })
+                            }
+                            else -> fadeIn(tween(200)) togetherWith fadeOut(tween(150))
                         }
                     },
                     label = "topBarTransition"
@@ -1302,6 +1428,8 @@ fun AppScaffold(
                             },
                             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
                         )
+                    } else if (currentTab == 1 || showPublicPlaylist != null || showPublicAlbum != null) {
+                        // 发现页 / 公开歌单详情：页面自带顶栏，不再显示"Lx Music"+搜索
                     } else if (currentTab == 3) {
                         // 本地音乐页顶栏（汉堡菜单 + 搜索），与页面面板联动；面板展开时随内容右移
                         Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
@@ -1467,7 +1595,12 @@ fun AppScaffold(
                             onSourceChange = { source ->
                                 searchSource = source
                                 settingsPrefs.edit().putString("music_source", source).apply()
-                            }
+                            },
+                            sources = guestSearchSources,
+                            // 未激活时搜索是顶层 tab：无返回箭头、不自动弹键盘、不请求在线搜索建议
+                            showBack = !isGuest,
+                            autoFocus = !isGuest,
+                            suggestionsEnabled = !isGuest
                         )
                     } else if (currentTab == 12) {
                         TopAppBar(
@@ -1523,6 +1656,7 @@ fun AppScaffold(
                                             "general" -> "通用与交互"
                                             "storage" -> "存储与缓存"
                                             "proxy" -> "激活与在线服务"
+                                            "plugins" -> "音乐源插件"
                                             "about" -> "关于应用"
                                             "home_order" -> "首页推荐排序"
                                             else -> stringResource(R.string.title_settings)
@@ -1584,6 +1718,57 @@ fun AppScaffold(
                                 }
                             },
                             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                        )
+                    } else if (currentTab == 0 && settingsRepository.themeMode == "modern") {
+                        // 现代主题专属首页悬浮顶栏（灵动双胶囊 + 完全透明通透底栏 + 顶部灵动氛围羽化）
+                        var homePlayMode by remember { mutableIntStateOf(settingsRepository.homePlayMode) }
+                        val isThisPlaying = isPlaying && currentSong != null
+                        val hasSongs = homeAllSongs.isNotEmpty()
+                        val homeScrollProgress by remember {
+                            derivedStateOf<Float> {
+                                if (homeListState.firstVisibleItemIndex > 0) 1f
+                                else (homeListState.firstVisibleItemScrollOffset / 180f).coerceIn(0f, 1f)
+                            }
+                        }
+                        val animatedHomeScrollProgress by animateFloatAsState(
+                            targetValue = homeScrollProgress,
+                            animationSpec = tween(180),
+                            label = "home_scroll_progress"
+                        )
+                        ModernHomeTopBar(
+                            homePlayMode = homePlayMode,
+                            onModeChange = { mode ->
+                                homePlayMode = mode
+                                settingsRepository.homePlayMode = mode
+                                if (hasSongs) {
+                                    if (mode == 0) playOnlineSong(homeAllSongs, 0)
+                                    else playOnlineSong(homeAllSongs.shuffled(), 0)
+                                }
+                            },
+                            isThisPlaying = isThisPlaying,
+                            hasSongs = hasSongs,
+                            onPlayAll = {
+                                if (hasSongs) {
+                                    if (homePlayMode == 0) {
+                                        playOnlineSong(homeAllSongs, 0)
+                                    } else {
+                                        playOnlineSong(homeAllSongs.shuffled(), 0)
+                                    }
+                                }
+                            },
+                            onRefresh = { homeClickRefresh?.invoke() },
+                            isRefreshing = isHomeRefreshing,
+                            onSearch = {
+                                previousTab = selectedTab
+                                searchQuery = ""
+                                searchSelectedType = "song"
+                                selectedTab = 11
+                            },
+                            backdrop = glassBackdrop,
+                            liquidGlass = liquidGlass,
+                            hasCustomWallpaper = backgroundImageUri != null,
+                            hazeState = homeTopHazeState,
+                            scrollProgress = animatedHomeScrollProgress
                         )
                     } else {
                         TopAppBar(
@@ -1780,13 +1965,16 @@ fun AppScaffold(
                                         Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.action_refresh))
                                     }
                                 }
-                                IconButton(onClick = {
-                                    previousTab = selectedTab
-                                    searchQuery = ""
-                                    searchSelectedType = "song"
-                                    selectedTab = 11
-                                }) {
-                                    Icon(Icons.Default.Search, contentDescription = stringResource(R.string.title_search))
+                                // 未激活时搜索已是最左侧顶层 tab，不再在顶栏重复放搜索入口（设置齿轮保留）
+                                if (!isGuest) {
+                                    IconButton(onClick = {
+                                        previousTab = selectedTab
+                                        searchQuery = ""
+                                        searchSelectedType = "song"
+                                        selectedTab = 11
+                                    }) {
+                                        Icon(Icons.Default.Search, contentDescription = stringResource(R.string.title_search))
+                                    }
                                 }
                                 if (currentTab == 2) {
                                     IconButton(onClick = { selectedTab = 12 }) {
@@ -1821,11 +2009,16 @@ fun AppScaffold(
                 }
             }
 
+            val isModernTheme = settingsRepository.themeMode == "modern"
+            val layoutDirection = LocalLayoutDirection.current
             Box(
                 modifier = Modifier
-
                     .fillMaxSize()
-                    .padding(innerPadding),
+                    .padding(
+                        start = innerPadding.calculateStartPadding(layoutDirection),
+                        end = innerPadding.calculateEndPadding(layoutDirection),
+                        bottom = innerPadding.calculateBottomPadding()
+                    ),
                 contentAlignment = Alignment.Center
             ) {
 
@@ -1833,7 +2026,13 @@ fun AppScaffold(
                 AnimatedContent(
                     targetState = selectedTab,
                     transitionSpec = {
-                        if (targetState > initialState) {
+                        // 未激活顶层顺序 11/1/2 不能按数值判断前后，按在顶层 tab 中的位置判断
+                        val guestOrder = listOf(11, 1, 2)
+                        val fromPos = guestOrder.indexOf(initialState)
+                        val toPos = guestOrder.indexOf(targetState)
+                        val forward = if (isGuest && fromPos >= 0 && toPos >= 0) toPos > fromPos
+                            else targetState > initialState
+                        if (forward) {
                             slideInHorizontally(tween(300)) { it } + fadeIn(tween(300)) togetherWith
                                 slideOutHorizontally(tween(300)) { -it / 3 } + fadeOut(tween(200))
                         } else {
@@ -1844,11 +2043,14 @@ fun AppScaffold(
                     label = "tabTransition"
                 ) { tab ->
                     // 横屏：页面内容限宽居中（列表行不被拉宽变形）；顶栏/底栏/播放条仍在 Scaffold 层保持全宽
+                    val isThisModernHome = isModernTheme && tab == 0
+                    val tabTopPadding = if (isThisModernHome) 0.dp else innerPadding.calculateTopPadding()
                     Box(
                         modifier = Modifier
                             .fillMaxHeight()
                             .widthIn(max = if (isLandscape) 640.dp else Dp.Infinity)
                             .align(Alignment.TopCenter)
+                            .padding(top = tabTopPadding)
                     ) {
                     when (tab) {
                         0 -> {
@@ -1862,6 +2064,7 @@ fun AppScaffold(
                                 homeRecommendOffset = homeRecommendListState.firstVisibleItemScrollOffset
                             }
                             HomePage(
+                                topContentPadding = if (isModernTheme) innerPadding.calculateTopPadding() else 0.dp,
                                 onPlaySong = { songs, index -> playOnlineSong(songs, index) },
                                 onAddToQueueNext = { song -> addToQueueNext(song) },
                                 onRankClick = { showRankDetail = it },
@@ -1896,6 +2099,7 @@ fun AppScaffold(
                                 recommendListState = homeRecommendListState,
                                 onClickRefresh = { homeClickRefresh = it },
                                 onRefreshStateChange = { isHomeRefreshing = it },
+                                hazeState = if (isModernTheme && backgroundImageUri != null) homeTopHazeState else null,
                                 loginVersion = loginVersion
                             )
                         }
@@ -1942,16 +2146,28 @@ fun AppScaffold(
                                             previousTab = selectedTab
                                             selectedTab = 16
                                         },
+                                        onPublicPlaylistClick = { showPublicPlaylist = it },
                                         currentPlayingPath = currentSong?.filePath,
                                         isPlaying = isPlaying,
                                         onAddToQueueNext = { song -> addToQueueNext(song) },
                                         listState = discoverListState,
-                                        recommendListState = discoverRecommendListState
+                                        recommendListState = discoverRecommendListState,
+                                        // 乐库需要在线服务，未激活隐藏（排行榜/歌单/专区为公开接口）
+                                        showYueku = !isGuest
                                     )
                                 }
                             }
                         }
-                        2 -> MinePage(
+                        2 -> if (isGuest) {
+                            GuestMinePage(
+                                onFavoritesClick = {
+                                    selectedCollectionType = "favorites"
+                                    selectedCollectionPlaylistId = 0L
+                                    selectedTab = 14
+                                },
+                                onLocalClick = { selectedTab = 3 }
+                            )
+                        } else MinePage(
                             loginVersion = loginVersion,
                             onLocalClick = { selectedTab = 3 },
                             onAvatarClick = { showLoginPage = true },
@@ -2143,6 +2359,8 @@ fun AppScaffold(
                                 searchPlaylistGid = playlist.gid ?: ""
                                 selectedTab = 16
                             },
+                            onPublicPlaylistClick = { showPublicPlaylist = it },
+                            onAlbumClick = { showPublicAlbum = it },
                             onQueryChange = { query -> searchQuery = query },
                             onSelectedTypeChange = { type -> searchSelectedType = type },
                             currentPlayingPath = currentSong?.filePath,
@@ -2152,7 +2370,9 @@ fun AppScaffold(
                             onSourceChange = { source ->
                                 searchSource = source
                                 settingsPrefs.edit().putString("music_source", source).apply()
-                            }
+                            },
+                            sourceOptions = guestSearchSources,
+                            guestMode = isGuest
                         )
                         16 -> SearchPlaylistDetailPage(
                             playlistId = searchPlaylistId,
@@ -2500,6 +2720,66 @@ fun AppScaffold(
                     } // 关闭横屏限宽容器
                 }
 
+                // 公开歌单详情覆盖层：和首页一样铺 App 背景（壁纸/纯色），
+                // 只透背景、不透下层 tab 内容
+                if (showPublicPlaylist != null) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.background)
+                        )
+                        if (backgroundImageUri != null) {
+                            val painter = rememberAsyncImagePainter(model = Uri.parse(backgroundImageUri))
+                            Image(
+                                painter = painter,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize().alpha(bgOpacity),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                        PublicPlaylistDetailPage(
+                            playlist = showPublicPlaylist!!,
+                            onBack = { showPublicPlaylist = null },
+                            onPlaySong = { songs, index -> playOnlineSong(songs, index) },
+                            currentPlayingPath = currentSong?.filePath,
+                            isPlaying = isPlaying
+                        )
+                    }
+                }
+
+                // 专辑详情覆盖层（搜索「专辑」点进来）：铺 App 背景，底栏隐藏、胶囊播放条保留
+                if (showPublicAlbum != null) {
+                    val album = showPublicAlbum!!
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.background)
+                        )
+                        if (backgroundImageUri != null) {
+                            val painter = rememberAsyncImagePainter(model = Uri.parse(backgroundImageUri))
+                            Image(
+                                painter = painter,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize().alpha(bgOpacity),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+                        PublicAlbumDetailPage(
+                            albumId = album.albumid,
+                            albumName = album.albumname ?: "未知专辑",
+                            artist = album.authorname.orEmpty(),
+                            coverUrl = album.coverUrl,
+                            songCount = album.songcount,
+                            onBack = { showPublicAlbum = null },
+                            onPlaySong = { songs, index -> playOnlineSong(songs, index) },
+                            currentPlayingPath = currentSong?.filePath,
+                            isPlaying = isPlaying
+                        )
+                    }
+                }
+
                 // 覆盖层页面（登录页保留覆盖层方式）
                 if (showLoginPage) {
                     Box(modifier = Modifier.fillMaxSize()) {
@@ -2565,12 +2845,15 @@ fun AppScaffold(
         }
     }
 
+
     // 迷你播放条（带滑入动画 + 上滑手势跟随展开）
     val lastValidSong = remember { mutableStateOf<SongInfo?>(null) }
     if (currentSong != null) lastValidSong.value = currentSong
     val displaySong = lastValidSong.value
     AnimatedVisibility(
-        visible = currentSong != null && !showPlayerPage && selectedTab !in listOf(12, 15, 17) && !isSelectionModeActive && (!floatingBottomBar || !showNavBar),
+        visible = currentSong != null && !showPlayerPage &&
+            selectedTab !in listOf(12, 15, 17) && !isSelectionModeActive &&
+            (!floatingBottomBar || !showNavBar),
         modifier = Modifier.align(Alignment.BottomCenter),
         enter = slideInVertically(initialOffsetY = { it }, animationSpec = tween(280)) + fadeIn(tween(220)),
         exit = slideOutVertically(targetOffsetY = { it }, animationSpec = tween(200)) + fadeOut(tween(150))
@@ -2584,12 +2867,7 @@ fun AppScaffold(
             onPrevious = { playPrevious() },
             // 点击 = 从播放条位置生长展开（动画，BoomingMusic BOOMING_ANIM_TIME=350ms）
             onClick = {
-                scope.launch {
-                    isRevealAnimating = true
-                    playerRevealY.snapTo(miniBarTopY)
-                    animateRevealTo(0f, tween(350, easing = FastOutSlowInEasing))
-                    showPlayerPage = true
-                }
+                scope.launch { expandPlayer(miniBarTopY) }
             },
             onMenuClick = { showPlaylistSheet = true },
             // 上拉跟手展开：页面顶从播放条顶部位置实时跟随手指升起
@@ -2626,8 +2904,7 @@ fun AppScaffold(
                     // 先关拖动标记、紧接着置动画标记，保证页面组合条件不中断（不销毁重建）
                     isMiniBarDragging = false
                     if (shouldExpand) {
-                        animateRevealTo(0f, tween(350, easing = FastOutSlowInEasing))
-                        showPlayerPage = true
+                        expandPlayer()
                     } else {
                         animateRevealTo(screenHeightPx, tween(350, easing = FastOutSlowInEasing))
                     }
@@ -2645,6 +2922,7 @@ fun AppScaffold(
             playerBarOpacity = playerBarOpacity,
             playerBarWhiteBlend = playerBarWhiteBlend,
             liquidGlass = liquidGlass,
+            hasCustomWallpaper = backgroundImageUri != null,
             backdrop = glassBackdrop,
             // BoomingMusic 同款：迷你条固定原位（不随拖动上移），
             // 展开进度 0-20% 内快速淡出，之后完全由播放器页面接管。
@@ -2776,16 +3054,15 @@ fun AppScaffold(
                                 playerDragAccumulated > screenHeightPx * 0.15f || velocityY > 150f
                             scope.launch {
                                 if (shouldCollapse) {
-                                    animateRevealTo(screenHeightPx, tween(350, easing = FastOutSlowInEasing))
-                                    showPlayerPage = false
+                                    collapsePlayer()
                                 } else {
                                     // 回弹到完全展开
-                                    animateRevealTo(0f, tween(350, easing = FastOutSlowInEasing))
+                                    expandPlayer()
                                 }
                             }
                         },
                         onDragCancel = {
-                            scope.launch { animateRevealTo(0f, tween(350, easing = FastOutSlowInEasing)) }
+                            scope.launch { expandPlayer() }
                         }
                     )
                 }
@@ -3004,9 +3281,26 @@ fun AppScaffold(
             )
         }
 
+        // 纯色主题（无壁纸）：底栏下方铺一层背景色渐变，滚动内容从底栏下柔和淡出。
+        // 有壁纸时保持原来的玻璃观感，不加这层遮罩（两种状态互不影响）
+        if (backgroundImageUri == null && floatingBottomBar && showNavBar && !showPlayerPage) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(150.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, MaterialTheme.colorScheme.background)
+                        )
+                    )
+            )
+        }
+
         // 导航栏叠加在底部
         AnimatedVisibility(
-            visible = selectedTab !in 3..18 && !showPlayerPage && showRankDetail == null && !showLoginPage,
+            visible = selectedTab in topLevelTabs && !showPlayerPage && showRankDetail == null &&
+                showPublicPlaylist == null && showPublicAlbum == null && !showLoginPage,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .onSizeChanged { bottomBarHeightPx = it.height },
@@ -3020,12 +3314,13 @@ fun AppScaffold(
                     // 静止态（非跟手拖动、非展开/收起动画）progress 强制 0：
                     // 仅手势/动画进行中底栏才跟随滚出；避免任何状态残留
                     // （如旋转后 playerRevealY 旧值）把底栏推出屏幕导致"底栏消失"
-                    val progress = if (!isMiniBarDragging && !isRevealAnimating) {
-                        0f
-                    } else if (miniBarTopY > 0f) {
-                        ((miniBarTopY - playerRevealY.value) / miniBarTopY).coerceIn(0f, 1f)
-                    } else {
-                        0f
+                    val progress = when {
+                        // 播放器已打开：底栏保持"已滚出"状态，避免收起动画开始前
+                        // 进度被重置为 0 导致底栏跳回屏幕内再滑出（打开播放器时的闪烁）
+                        showPlayerPage -> 1f
+                        !isMiniBarDragging && !isRevealAnimating -> 0f
+                        miniBarTopY > 0f -> ((miniBarTopY - playerRevealY.value) / miniBarTopY).coerceIn(0f, 1f)
+                        else -> 0f
                     }
                     // BoomingMusic 原值：底栏滚出 500px（非 dp）
                     translationY = progress * 500f
@@ -3035,9 +3330,11 @@ fun AppScaffold(
                 FloatingBottomBar(
                     selectedTabIndex = selectedTab,
                     onTabSelected = { index -> selectedTab = index },
+                    tabs = bottomTabs,
                     blurEnabled = blurNavBar,
                     isFloating = floatingBottomBar,
                     liquidGlass = liquidGlass,
+                    hasCustomWallpaper = backgroundImageUri != null,
                     backdrop = glassBackdrop,
                     navBarOpacity = if (floatingBottomBar) floatingBarOpacity else navBarOpacity,
                     followThemeColor = followThemeColor,
@@ -3050,10 +3347,9 @@ fun AppScaffold(
                     onNext = { playNext() },
                     onPlayerClick = {
                         scope.launch {
-                            isRevealAnimating = true
-                            playerRevealY.snapTo(screenHeightPx * 0.75f)
-                            animateRevealTo(0f, tween(350, easing = FastOutSlowInEasing))
-                            showPlayerPage = true
+                            // 从底栏顶部位置起升（而非固定的屏高比例）：底栏随页面升起
+                            // 同步滚出，避免起手瞬间底栏被直接推出屏幕的"闪烁"观感
+                            expandPlayer(miniBarTopY)
                         }
                     }
                 )

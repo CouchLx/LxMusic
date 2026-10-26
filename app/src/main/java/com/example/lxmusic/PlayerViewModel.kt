@@ -532,8 +532,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     // ==================== 工具 ====================
 
     private fun SongInfo.toMediaItem(): MediaItem {
-        // 网易云歌曲：netease://<songId> 直接作为播放 URI（SongDataSource 识别）
-        if (NeteaseApi.isNeteasePath(filePath)) {
+        // 在线歌曲（netease:// / tx:// / kw:// / lxsrc://）直接作为播放 URI（SongDataSource 识别）
+        if (filePath.contains("://")) {
             return MediaItem.Builder()
                 .setUri(Uri.parse(filePath))
                 .setMediaMetadata(

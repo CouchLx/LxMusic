@@ -688,13 +688,20 @@ fun SettingsPage(
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // —— 第 3 组：数据与关于（存储与缓存 / 激活与在线服务 / 关于应用） ——
+                        // —— 第 3 组：数据与关于（存储与缓存 / 音乐源插件 / 激活与在线服务 / 关于应用） ——
                         SettingsGroupCard {
                             SettingsGroupItemRow(
                                 icon = Icons.Default.Storage,
                                 title = "存储与缓存",
                                 subtitle = "歌曲缓存占用、缓存上限与清理临时数据",
                                 onClick = { onSettingsSubPageChange("storage") },
+                                showDivider = true
+                            )
+                            SettingsGroupItemRow(
+                                icon = Icons.Default.MusicNote,
+                                title = "音乐源插件",
+                                subtitle = "导入 JS 音源脚本（兼容落雪音乐格式）",
+                                onClick = { onSettingsSubPageChange("plugins") },
                                 showDivider = true
                             )
                             SettingsGroupItemRow(
@@ -948,6 +955,10 @@ fun SettingsPage(
 
                 "storage" -> {
                     StorageCacheSection(settingsPrefs)
+                }
+
+                "plugins" -> {
+                    SettingsPluginsContent()
                 }
 
                 "proxy" -> {
@@ -2472,6 +2483,8 @@ internal fun SettingsProxyContent() {
     var refreshResult by remember { mutableStateOf<String?>(null) }
     var showLoginHint by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    // 没有配置在线服务（开源构建）时，激活入口不展示
+    val onlineConfigured = KuGouApi.bffUrl.isNotBlank()
 
     Text(
         text = "VIP 服务",
@@ -2502,7 +2515,7 @@ internal fun SettingsProxyContent() {
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = vipStatus.message,
+                    text = if (!onlineConfigured) "此版本未配置在线服务（可导入音源使用）" else vipStatus.message,
                     style = MaterialTheme.typography.bodyMedium,
                     color = when {
                         vipStatus.canUseVip -> Color(0xFF4CAF50)
@@ -2530,6 +2543,13 @@ internal fun SettingsProxyContent() {
             Spacer(modifier = Modifier.height(12.dp))
 
             // 操作按钮
+            if (!onlineConfigured) {
+                Text(
+                    text = "此版本未配置在线服务：激活功能不可用，可导入音源插件使用在线搜索/播放。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (!vipStatus.canUseVip) {
                     // 未激活或未绑定：显示激活按钮
@@ -2578,6 +2598,7 @@ internal fun SettingsProxyContent() {
                     ) { Text("解绑", color = MaterialTheme.colorScheme.error) }
                 }
             }
+            }
 
             // 自动更新开关
             if (vipStatus.canUseVip) {
@@ -2612,7 +2633,7 @@ internal fun SettingsProxyContent() {
             } else {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "未激活：在线音乐、搜索与歌单不可用，仅能播放本地音乐。",
+                    text = "未激活：搜索/榜单等公开内容可用，播放需导入音源插件或激活。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -2748,7 +2769,9 @@ internal fun SettingsProxyContent() {
                         VipConfigManager.clearActivation(context)
                         vipStatus = VipConfigManager.getStatus(context)
                         showUnbindDialog = false
-                        Toast.makeText(context, "已解绑", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "已解绑，在线内容已清理", Toast.LENGTH_SHORT).show()
+                        // 清理后重启界面：避免内存里的旧首页/排行榜数据继续显示
+                        (context as? android.app.Activity)?.recreate()
                     }
                 ) { Text("解绑", color = MaterialTheme.colorScheme.error) }
             },

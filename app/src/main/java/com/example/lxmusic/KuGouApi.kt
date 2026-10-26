@@ -30,7 +30,9 @@ data class RankItem(
     val classify: Int = 0,
     val play_times: Long = 0,
     val update_frequency_type: Int = 0,
-    val songinfo: List<RankSongBrief>? = null
+    val songinfo: List<RankSongBrief>? = null,
+    /** 榜单来源：kg / wy / tx（公开接口） */
+    val platform: String = "kg"
 ) {
     val coverUrl: String
         get() {
@@ -166,6 +168,34 @@ data class LoginData(
     val token: String? = null,
     val userid: Long = 0,
     val username: String? = null,
+    val nickname: String? = null,
+    val pic: String? = null,
+    val vip_type: Int = 0
+)
+
+/** 扫码登录：二维码 key（qrcode_img 为 data:image/png;base64,...） */
+data class LoginQrKeyResponse(
+    val status: Int = 0,
+    val error_code: Int = 0,
+    val data: LoginQrKeyData? = null
+)
+
+data class LoginQrKeyData(
+    val qrcode: String? = null,
+    val qrcode_img: String? = null
+)
+
+/** 扫码状态：data.status 0=过期 1=等待扫码 2=已扫码待确认 4=登录成功（带 token/userid） */
+data class LoginQrCheckResponse(
+    val status: Int = 0,
+    val error_code: Int = 0,
+    val data: LoginQrCheckData? = null
+)
+
+data class LoginQrCheckData(
+    val status: Int = 0,
+    val token: String? = null,
+    val userid: Long = 0,
     val nickname: String? = null,
     val pic: String? = null,
     val vip_type: Int = 0
@@ -401,7 +431,10 @@ data class LyricCandidate(
 
 data class LyricContentResponse(
     val status: Int = 0,
-    val content: String? = null
+    val content: String? = null,
+    // fmt=krc&decode=true 时服务端直接返回解码后的逐字歌词文本
+    val decodeContent: String? = null,
+    val fmt: String? = null
 )
 
 // ==================== 新歌速递 ====================
@@ -731,6 +764,62 @@ data class IpResponse(
     val data: List<IpSong>? = null
 )
 
+// ==================== 乐库「语种/风格」页（单曲推荐） ====================
+
+data class KgStyleRecommendResponse(
+    val status: Int = 0,
+    val data: KgStyleRecommendData? = null
+)
+
+data class KgStyleRecommendData(
+    val title: String? = null,
+    @com.google.gson.annotations.SerializedName("tagids")
+    val tagIds: String? = null,
+    @com.google.gson.annotations.SerializedName("song_list")
+    val songs: List<KgRecommendSong>? = null,
+    @com.google.gson.annotations.SerializedName("tag_info")
+    val tagInfo: List<KgRecommendTagGroup>? = null
+)
+
+data class KgRecommendTagGroup(
+    val name: String? = null,
+    val child: List<KgRecommendTag>? = null
+)
+
+data class KgRecommendTag(
+    val id: String? = null,
+    val name: String? = null
+)
+
+data class KgRecommendSong(
+    val hash: String? = null,
+    @com.google.gson.annotations.SerializedName("album_audio_id")
+    val albumAudioId: Long = 0,
+    @com.google.gson.annotations.SerializedName("mixsongid")
+    val mixSongId: Long = 0,
+    val songname: String? = null,
+    @com.google.gson.annotations.SerializedName("filename")
+    val fileName: String? = null,
+    @com.google.gson.annotations.SerializedName("author_name")
+    val authorName: String? = null,
+    @com.google.gson.annotations.SerializedName("album_id")
+    val albumId: String? = null,
+    // 形如 http://imge.kugou.com/stdmusic/{size}/xxx.jpg
+    @com.google.gson.annotations.SerializedName("sizable_cover")
+    val cover: String? = null,
+    val language: String? = null,
+    @com.google.gson.annotations.SerializedName("time_length")
+    val durationSec: Int = 0,
+    val tags: List<KgRecommendSongTag>? = null
+)
+
+data class KgRecommendSongTag(
+    @com.google.gson.annotations.SerializedName("tag_id")
+    val tagId: String? = null,
+    @com.google.gson.annotations.SerializedName("tag_name")
+    val tagName: String? = null
+)
+
 data class IpSong(
     val base: IpSongBase? = null,
     @com.google.gson.annotations.SerializedName("audio_info")
@@ -952,6 +1041,93 @@ data class UserPlaylistItem(
             return raw.replace("{size}", "240").replace("http://", "https://")
         }
 }
+
+// ==================== 官方歌单分类 / 场景专区 ====================
+
+data class KgPlaylistTagsResponse(
+    val status: Int = 0,
+    val data: List<KgPlaylistTagGroup>? = null
+)
+
+data class KgPlaylistTagGroup(
+    @com.google.gson.annotations.SerializedName("tag_id")
+    val tagId: String = "",
+    @com.google.gson.annotations.SerializedName("tag_name")
+    val tagName: String = "",
+    @com.google.gson.annotations.SerializedName("son")
+    val children: List<KgPlaylistTag>? = null
+)
+
+data class KgPlaylistTag(
+    @com.google.gson.annotations.SerializedName("tag_id")
+    val tagId: String = "",
+    @com.google.gson.annotations.SerializedName("tag_name")
+    val tagName: String = ""
+)
+
+data class KgTopPlaylistResponse(
+    val status: Int = 0,
+    val data: KgTopPlaylistData? = null
+)
+
+data class KgTopPlaylistData(
+    @com.google.gson.annotations.SerializedName("special_list")
+    val list: List<KgSpecialItem>? = null,
+    @com.google.gson.annotations.SerializedName("has_next")
+    val hasNext: Int = 0,
+    val total: Int = 0
+)
+
+data class KgSpecialItem(
+    @com.google.gson.annotations.SerializedName("specialid")
+    val specialId: Long = 0,
+    @com.google.gson.annotations.SerializedName("global_collection_id")
+    val globalCollectionId: String? = null,
+    @com.google.gson.annotations.SerializedName("specialname")
+    val name: String? = null,
+    val imgurl: String? = null,
+    @com.google.gson.annotations.SerializedName("play_count")
+    val playCount: Long = 0,
+    val songcount: Int = 0,
+    val nickname: String? = null
+)
+
+data class KgSceneListsResponse(
+    val status: Int = 0,
+    val data: KgSceneListsData? = null
+)
+
+data class KgSceneListsData(
+    val list: List<KgScene>? = null
+)
+
+data class KgScene(
+    @com.google.gson.annotations.SerializedName("scene_id")
+    val sceneId: Long = 0,
+    val title: String? = null,
+    val label: String? = null,
+    val popup: String? = null,
+    val pic: String? = null,
+    val icon: String? = null,
+    val color: String? = null,
+    @com.google.gson.annotations.SerializedName("music_tag")
+    val musicTag: KgSceneMusicTag? = null
+)
+
+data class KgSceneMusicTag(
+    @com.google.gson.annotations.SerializedName("module_extra")
+    val tags: List<KgSceneTag>? = null
+)
+
+data class KgSceneTag(
+    @com.google.gson.annotations.SerializedName("tag_id")
+    val tagId: Long = 0,
+    @com.google.gson.annotations.SerializedName("tag_name")
+    val name: String? = null,
+    val pic: String? = null,
+    @com.google.gson.annotations.SerializedName("content_type")
+    val contentType: Int = 0
+)
 
 // ==================== 歌单歌曲 ====================
 
@@ -1305,6 +1481,16 @@ interface KuGouService {
         @Query("code") code: String
     ): LoginResponse
 
+    // 扫码登录：生成二维码 key（含二维码图片 base64）
+    @GET("login/qr/key")
+    suspend fun getLoginQrKey(): LoginQrKeyResponse
+
+    // 扫码登录：轮询扫码状态（0 过期 / 1 等待 / 2 待确认 / 4 成功并返回 token）
+    @GET("login/qr/check")
+    suspend fun checkLoginQr(
+        @Query("key") key: String
+    ): LoginQrCheckResponse
+
     // 刷新登录：延长 token 过期时间（酷狗滑动续期，返回新 token/userid 等）。
     // 注意不要频繁调用（上游说明可能被风控），客户端由 LoginTokenKeeper 做天级低频调用。
     @GET("login/token")
@@ -1473,6 +1659,30 @@ interface KuGouService {
         @Query("page") page: Int = 1,
         @Query("pagesize") pageSize: Int = 30
     ): UserPlaylistResponse
+
+    /** 官方歌单分类（场景/主题/语种/风格/心情/年代 + 子标签） */
+    @GET("playlist/tags")
+    suspend fun getPlaylistTags(): KgPlaylistTagsResponse
+
+    /** 官方分类歌单（category_id = 标签 id；0=推荐，11292=Hi-Res） */
+    @GET("top/playlist")
+    suspend fun getTopPlaylists(
+        @Query("category_id") categoryId: String = "0",
+        @Query("page") page: Int = 1,
+        @Query("pagesize") pageSize: Int = 30,
+        @Query("withtag") withTag: Int = 1,
+        @Query("withsong") withSong: Int = 0
+    ): KgTopPlaylistResponse
+
+    /** 乐库场景专区（助眠/车载/心情/工作学习/运动/店铺/游戏/广场舞/疗愈/婚礼/母婴） */
+    @GET("scene/lists")
+    suspend fun getSceneLists(): KgSceneListsResponse
+
+    /** 乐库「语种/风格」单曲推荐（tagids 支持 S/L/M/C 码，如 S14 华语流行、L1 国语） */
+    @GET("everyday/style/recommend")
+    suspend fun getStyleRecommend(
+        @Query("tagids") tagIds: String
+    ): KgStyleRecommendResponse
 
     @GET("playlist/track/all")
     suspend fun getPlaylistTracks(

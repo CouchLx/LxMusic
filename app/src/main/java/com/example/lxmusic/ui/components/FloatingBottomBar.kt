@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -53,6 +54,14 @@ import com.kyant.backdrop.Backdrop
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
+/** 底栏条目：index 为 selectedTab 原始值（允许不连续，例如未激活模式 搜索=11） */
+data class BottomBarTab(
+    val index: Int,
+    val filledIcon: ImageVector,
+    val outlinedIcon: ImageVector,
+    val label: String
+)
+
 /**
  * 底栏入口组件。
  *
@@ -64,9 +73,13 @@ import kotlinx.coroutines.flow.StateFlow
 fun FloatingBottomBar(
     selectedTabIndex: Int,
     onTabSelected: (Int) -> Unit,
+    // 底栏条目（激活/未激活两套）；传 null 用默认 首页/发现/我的
+    tabs: List<BottomBarTab>? = null,
     blurEnabled: Boolean = false,
     isFloating: Boolean = true,
     liquidGlass: Boolean = false,
+    // 有自定义壁纸才启用玻璃；纯色主题改用不透明表面色，避免糊成灰块
+    hasCustomWallpaper: Boolean = false,
     backdrop: Backdrop? = null,
     navBarOpacity: Float = 1f,
     followThemeColor: Boolean = false,
@@ -80,12 +93,15 @@ fun FloatingBottomBar(
     onNext: () -> Unit = {},
     onPlayerClick: () -> Unit = {}
 ) {
+    val resolvedTabs = tabs ?: listOf(
+        BottomBarTab(0, Icons.Filled.Home, Icons.Outlined.Home, stringResource(R.string.nav_home)),
+        BottomBarTab(1, Icons.Filled.Search, Icons.Outlined.Search, stringResource(R.string.nav_discover)),
+        BottomBarTab(2, Icons.Filled.Person, Icons.Outlined.Person, stringResource(R.string.nav_mine))
+    )
     if (isFloating) {
-        val tabs = listOf(
-            Triple(0, Pair(Icons.Filled.Home, Icons.Outlined.Home), stringResource(R.string.nav_home)),
-            Triple(1, Pair(Icons.Filled.Search, Icons.Outlined.Search), stringResource(R.string.nav_discover)),
-            Triple(2, Pair(Icons.Filled.Person, Icons.Outlined.Person), stringResource(R.string.nav_mine))
-        )
+        val glassEnabled = liquidGlass && hasCustomWallpaper
+        val selectedPosition = resolvedTabs.indexOfFirst { it.index == selectedTabIndex }
+            .coerceAtLeast(0)
         val context = LocalContext.current
         Row(
             modifier = Modifier
@@ -97,26 +113,27 @@ fun FloatingBottomBar(
         ) {
             // 左侧：NPatch 1:1 悬浮分页底栏
             FloatingGlassBottomBar(
-                selectedIndex = selectedTabIndex.coerceIn(0, 2),
-                onSelected = { index ->
+                selectedIndex = selectedPosition,
+                onSelected = { position ->
                     context.performHapticFeedback(HapticFeedbackEffect.Click)
-                    onTabSelected(index)
+                    resolvedTabs.getOrNull(position)?.let { onTabSelected(it.index) }
                 },
                 backdrop = backdrop,
-                tabsCount = tabs.size,
-                isBlurEnabled = liquidGlass,
+                tabsCount = resolvedTabs.size,
+                isBlurEnabled = glassEnabled,
+                solidSurface = !hasCustomWallpaper,
                 navBarOpacity = navBarOpacity,
                 modifier = if (currentSong != null) Modifier.weight(1f) else Modifier.fillMaxWidth(0.92f)
             ) {
-                tabs.forEach { (index, icons, label) ->
-                    val isSelected = selectedTabIndex == index
+                resolvedTabs.forEach { tab ->
+                    val isSelected = selectedTabIndex == tab.index
                     FloatingGlassBottomBarItem(
                         onClick = {
                             context.performHapticFeedback(HapticFeedbackEffect.Click)
-                            onTabSelected(index)
+                            onTabSelected(tab.index)
                         },
                         selected = isSelected,
-                        label = label
+                        label = tab.label
                     ) {
                         val tint = when {
                             liquidGlass -> MaterialTheme.colorScheme.onSurface
@@ -125,12 +142,12 @@ fun FloatingBottomBar(
                         }
                         FloatingGlassBottomBarIcon(
                             selected = isSelected,
-                            selectedIcon = icons.first,
-                            unselectedIcon = icons.second,
+                            selectedIcon = tab.filledIcon,
+                            unselectedIcon = tab.outlinedIcon,
                             tint = tint
                         )
                         FloatingGlassBottomBarLabel(
-                            label = label,
+                            label = tab.label,
                             color = tint
                         )
                     }
@@ -152,7 +169,7 @@ fun FloatingBottomBar(
                         onNext = onNext,
                         onClick = onPlayerClick,
                         backdrop = backdrop,
-                        isBlurEnabled = liquidGlass,
+                        isBlurEnabled = glassEnabled,
                         navBarOpacity = navBarOpacity
                     )
                 }
@@ -162,6 +179,7 @@ fun FloatingBottomBar(
         DefaultBottomBar(
             selectedTabIndex = selectedTabIndex,
             onTabSelected = onTabSelected,
+            tabs = resolvedTabs,
             blurEnabled = blurEnabled,
             navBarOpacity = navBarOpacity,
             bottomBarHeightScale = bottomBarHeightScale
@@ -175,6 +193,7 @@ fun FloatingBottomBar(
 private fun DefaultBottomBar(
     selectedTabIndex: Int,
     onTabSelected: (Int) -> Unit,
+    tabs: List<BottomBarTab>,
     blurEnabled: Boolean,
     navBarOpacity: Float = 1f,
     bottomBarHeightScale: Float = 1f
@@ -220,39 +239,25 @@ private fun DefaultBottomBar(
                 tonalElevation = 0.dp,
                 modifier = Modifier.height(animatedBarHeight)
             ) {
-                NavigationBarItem(
-                    selected = selectedTabIndex == 0,
-                    onClick = {
-                        context.performHapticFeedback(HapticFeedbackEffect.Click)
-                        onTabSelected(0)
-                    },
-                    icon = { Icon(Icons.Default.Home, null) },
-                    label = { Text(stringResource(R.string.nav_home)) },
-                    alwaysShowLabel = true,
-                    colors = itemColors
-                )
-                NavigationBarItem(
-                    selected = selectedTabIndex == 1,
-                    onClick = {
-                        context.performHapticFeedback(HapticFeedbackEffect.Click)
-                        onTabSelected(1)
-                    },
-                    icon = { Icon(Icons.Default.Search, null) },
-                    label = { Text(stringResource(R.string.nav_discover)) },
-                    alwaysShowLabel = true,
-                    colors = itemColors
-                )
-                NavigationBarItem(
-                    selected = selectedTabIndex == 2,
-                    onClick = {
-                        context.performHapticFeedback(HapticFeedbackEffect.Click)
-                        onTabSelected(2)
-                    },
-                    icon = { Icon(Icons.Default.Person, null) },
-                    label = { Text(stringResource(R.string.nav_mine)) },
-                    alwaysShowLabel = true,
-                    colors = itemColors
-                )
+                tabs.forEach { tab ->
+                    val isSelected = selectedTabIndex == tab.index
+                    NavigationBarItem(
+                        selected = isSelected,
+                        onClick = {
+                            context.performHapticFeedback(HapticFeedbackEffect.Click)
+                            onTabSelected(tab.index)
+                        },
+                        icon = {
+                            Icon(
+                                if (isSelected) tab.filledIcon else tab.outlinedIcon,
+                                contentDescription = null
+                            )
+                        },
+                        label = { Text(tab.label) },
+                        alwaysShowLabel = true,
+                        colors = itemColors
+                    )
+                }
             }
         }
     }

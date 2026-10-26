@@ -26,17 +26,27 @@ object LyricRepository {
     // 翻译内存缓存（进程内；主歌词已持久化，翻译体积小走内存即可）
     private val translationMemory = LruCache<String, String>(200)
 
+    // 缓存版本：歌词来源策略变更（2026-10-25 改为平台原生精确匹配）后，
+    // 旧缓存里可能存着跨平台按歌名搜到的串版本歌词，用版本前缀强制失效一次
+    private const val CACHE_VERSION = "v2_"
+
     fun getCacheKey(song: SongInfo): String {
+        if (song.filePath.startsWith("lxsrc://")) {
+            return "lx_" + song.filePath.removePrefix("lxsrc://")
+        }
+        if (song.filePath.startsWith("tx://") || song.filePath.startsWith("kw://")) {
+            return CACHE_VERSION + "third_" + song.filePath
+        }
         val isNetease = NeteaseApi.isNeteasePath(song.filePath)
         if (isNetease) {
             val id = NeteaseApi.neteaseSongIdOf(song.filePath) ?: 0L
-            return "netease_$id"
+            return CACHE_VERSION + "netease_$id"
         }
         val isLocal = song.filePath.startsWith("/")
         if (!isLocal) {
             val hash = song.filePath.split("|").firstOrNull()?.takeIf { it.isNotBlank() }
             if (!hash.isNullOrBlank()) {
-                return "kugou_$hash"
+                return CACHE_VERSION + "kugou_$hash"
             }
         }
         return "meta_${song.title.trim()}_${song.artist.trim()}"
@@ -114,6 +124,100 @@ object LyricRepository {
      * 极速拉取平台原生歌词（网易云或酷狗），通常 150ms-200ms 以内返回
      */
     suspend fun fetchNativeLyric(song: SongInfo): String? = withContext(Dispatchers.IO) {
+        // 插件音源：直接问插件要歌词（LRC/逐字由插件决定）
+        if (song.filePath.startsWith("lxsrc://")) {
+            val ctx = com.example.lxmusic.data.plugin.PluginContext.get()
+            if (ctx != null) {
+                val result = runCatching {
+                    com.example.lxmusic.data.plugin.PluginSourceProvider.getLyricLegacy(ctx, song.filePath)
+                }.getOrNull()
+                result?.second?.takeIf { it.isNotBlank() }?.let { putTranslationMemory(song, it) }
+                result?.first?.takeIf { it.isNotBlank() }?.let { return@withContext it }
+            }
+            return@withContext null
+        }
+        // QQ/酷我：内置链路的歌词接口已不可达（服务器内网化），只有插件能提供
+        val thirdParty = when {
+            song.filePath.startsWith("tx://") -> "tx"
+            song.filePath.startsWith("kw://") -> "kw"
+            else -> null
+        }
+        if (thirdParty != null) {
+            // QQ：先按 songmid 精确取 QQ 自己的 QRC/LRC（比按歌名搜索可靠，不会串版本）
+            if (thirdParty == "tx") {
+                val songmid = song.filePath.removePrefix("tx://").substringBefore('?')
+                if (songmid.isNotBlank()) {
+                    val direct = runCatching {
+                        com.example.lxmusic.data.qq.QQMusicApi.fetchLyricBySongmid(
+                            songmid = songmid,
+                            title = song.title,
+                            singer = song.artist,
+                            intervalSec = (song.duration / 1000).coerceAtLeast(0)
+                        )
+                    }.getOrNull()
+                    direct?.second?.takeIf { it.isNotBlank() }?.let { putTranslationMemory(song, it) }
+                    direct?.first?.takeIf { it.isNotBlank() }?.let { return@withContext it }
+                }
+            }
+            // QQ 直连失败 / 酷我：走插件
+            val ctx = com.example.lxmusic.data.plugin.PluginContext.get()
+            if (ctx != null) {
+                val rawId = song.filePath.substringAfter("://").substringBefore('?')
+                val albumMid = runCatching {
+                    android.net.Uri.parse(song.filePath).getQueryParameter("albummid")
+                }.getOrNull()
+                val musicInfo = org.json.JSONObject().apply {
+                    put("id", rawId)
+                    put("songmid", rawId)
+                    if (thirdParty == "kw") put("hash", rawId)
+                    if (thirdParty == "tx" && !albumMid.isNullOrBlank()) put("albumMid", albumMid)
+                    put("name", song.title)
+                    put("singer", song.artist)
+                    put("interval", (song.duration / 1000).toInt())
+                }.toString()
+                val fromPlugin = runCatching {
+                    com.example.lxmusic.data.plugin.PluginSourceProvider.resolveLyric(
+                        ctx, thirdParty, musicInfo
+                    )
+                }.getOrNull()
+                fromPlugin?.second?.takeIf { it.isNotBlank() }?.let { putTranslationMemory(song, it) }
+                fromPlugin?.first?.takeIf { it.isNotBlank() }?.let { return@withContext it }
+            }
+            return@withContext null
+        }
+        // 插件优先：支持该平台的落雪源先尝试提供歌词（失败自动回退内置）
+        val pluginCtx = com.example.lxmusic.data.plugin.PluginContext.get()
+        if (pluginCtx != null) {
+            val platform = when {
+                NeteaseApi.isNeteasePath(song.filePath) -> "wy"
+                !song.filePath.startsWith("/") -> "kg"
+                else -> null
+            }
+            if (platform != null) {
+                val musicInfo = org.json.JSONObject().apply {
+                    if (platform == "wy") {
+                        val id = NeteaseApi.neteaseSongIdOf(song.filePath) ?: 0L
+                        put("id", id)
+                        put("songmid", id.toString())
+                    } else {
+                        val hash = song.filePath.substringBefore('|')
+                        put("hash", hash)
+                        put("songmid", hash)
+                        put("albumAudioId", song.filePath.substringAfter('|', "0"))
+                    }
+                    put("name", song.title)
+                    put("singer", song.artist)
+                    put("interval", (song.duration / 1000).toInt())
+                }.toString()
+                val fromPlugin = runCatching {
+                    com.example.lxmusic.data.plugin.PluginSourceProvider.resolveLyric(
+                        pluginCtx, platform, musicInfo
+                    )
+                }.getOrNull()
+                fromPlugin?.second?.takeIf { it.isNotBlank() }?.let { putTranslationMemory(song, it) }
+                fromPlugin?.first?.takeIf { it.isNotBlank() }?.let { return@withContext it }
+            }
+        }
         try {
             if (NeteaseApi.isNeteasePath(song.filePath)) {
                 val id = NeteaseApi.neteaseSongIdOf(song.filePath) ?: return@withContext null
@@ -130,14 +234,29 @@ object LyricRepository {
                     val searchResp = KuGouApi.service.searchLyric(hash)
                     val candidate = searchResp.candidates?.firstOrNull()
                     if (candidate?.id != null && candidate.accesskey != null) {
-                        val lyricResp = KuGouApi.service.getLyric(candidate.id, candidate.accesskey)
-                        val content = lyricResp.content
-                        if (!content.isNullOrBlank()) {
-                            val decoded = try {
-                                String(android.util.Base64.decode(content, android.util.Base64.DEFAULT))
-                            } catch (_: Exception) { content }
-                            if (decoded.isNotBlank()) return@withContext decoded
-                        }
+                        // 1. 酷狗自己的逐字 KRC（按 hash 精确匹配，decodeContent 已解码）
+                        val krc = runCatching {
+                            KuGouApi.service.getLyric(
+                                candidate.id,
+                                candidate.accesskey,
+                                fmt = "krc",
+                                decode = "true"
+                            )
+                        }.getOrNull()
+                        krc?.decodeContent?.takeIf { it.isNotBlank() }?.let { return@withContext it }
+                        // 2. 普通 LRC 兜底
+                        val lyricResp = runCatching {
+                            KuGouApi.service.getLyric(candidate.id, candidate.accesskey, fmt = "lrc")
+                        }.getOrNull()
+                        val lrcText = lyricResp?.decodeContent?.takeIf { it.isNotBlank() }
+                            ?: lyricResp?.content?.let { content ->
+                                try {
+                                    String(android.util.Base64.decode(content, android.util.Base64.DEFAULT))
+                                } catch (_: Exception) {
+                                    content
+                                }
+                            }
+                        if (!lrcText.isNullOrBlank()) return@withContext lrcText
                     }
                 }
             }
@@ -148,49 +267,37 @@ object LyricRepository {
     }
 
     /**
-     * 拉取 AMLL TTML 逐字歌词（高品质音节与间奏）或降级网易云 YRC 逐字
+     * 平台对应的高精度逐字歌词：
+     * - 网易云：AMLL（按网易云 id）→ 网易云 YRC，不再按歌名去 QQ 搜索
+     * - 酷狗：逐字 KRC 已在 fetchNativeLyric 按 hash 精确取到，这里不再跨平台搜索
+     * - QQ / 酷我 / 插件源：本平台直连或插件在 fetchNativeLyric 处理
+     * - 本地文件：仍用 AMLL 按歌名+歌手+时长匹配
      */
     suspend fun fetchAmllLyric(song: SongInfo): String? = withContext(Dispatchers.IO) {
         try {
-            if (NeteaseApi.isNeteasePath(song.filePath)) {
-                val id = NeteaseApi.neteaseSongIdOf(song.filePath) ?: return@withContext null
-                // 1. 优先从 AMLL TTML 库获取
-                val amll = AmllLyricFetcher.fetchAMLLByNeteaseId(id)
-                if (!amll.isNullOrBlank()) return@withContext amll
-                // 2. 网易云原生逐字 YRC
-                val lyricResp = NeteaseApi.service.getLyric(id)
-                val yrc = lyricResp.yrc?.lyric
-                if (!yrc.isNullOrBlank()) return@withContext yrc
-                // 3. QQ 音乐 QRC 逐字库（全网最全逐字），顺带回填 QQ trans 翻译
-                val qqQrc = com.example.lxmusic.data.qq.QQMusicApi.searchAndFetchBestQrc(
-                    title = song.title,
-                    artist = song.artist,
-                    durationMs = song.duration,
-                    onTranslation = { putTranslationMemory(song, it) }
-                )
-                if (!qqQrc.isNullOrBlank()) return@withContext qqQrc
-                // 4. 网易云普通 LRC 兜底
-                val lrc = lyricResp.lrc?.lyric
-                if (!lrc.isNullOrBlank()) return@withContext lrc
-                null
-            } else {
-                val result = AmllLyricFetcher.searchAndFetchAMLL(
-                    title = song.title,
-                    artist = song.artist,
-                    durationMs = song.duration
-                )
-                if (!result.isNullOrBlank() && (isTtmlLyrics(result) || isNeteaseYrc(result))) {
-                    return@withContext result
+            when {
+                NeteaseApi.isNeteasePath(song.filePath) -> {
+                    val id = NeteaseApi.neteaseSongIdOf(song.filePath) ?: return@withContext null
+                    // 1. AMLL TTML（按网易云 id 精确匹配）
+                    val amll = AmllLyricFetcher.fetchAMLLByNeteaseId(id)
+                    if (!amll.isNullOrBlank()) return@withContext amll
+                    // 2. 网易云原生逐字 YRC
+                    val lyricResp = NeteaseApi.service.getLyric(id)
+                    lyricResp.tlyric?.lyric?.takeIf { it.isNotBlank() }?.let { putTranslationMemory(song, it) }
+                    lyricResp.yrc?.lyric?.takeIf { it.isNotBlank() }?.let { return@withContext it }
+                    null
                 }
-                // 若网易云与 AMLL 均无逐字，由 QQ 音乐 QRC 兜底（顺带回填翻译）
-                val qqQrc = com.example.lxmusic.data.qq.QQMusicApi.searchAndFetchBestQrc(
-                    title = song.title,
-                    artist = song.artist,
-                    durationMs = song.duration,
-                    onTranslation = { putTranslationMemory(song, it) }
-                )
-                if (!qqQrc.isNullOrBlank()) return@withContext qqQrc
-                result
+                song.filePath.startsWith("/") -> {
+                    val result = AmllLyricFetcher.searchAndFetchAMLL(
+                        title = song.title,
+                        artist = song.artist,
+                        durationMs = song.duration
+                    )
+                    if (!result.isNullOrBlank() && (isTtmlLyrics(result) || isNeteaseYrc(result))) result else null
+                }
+                // 在线歌曲：酷狗 KRC / QQ QRC / 酷我 / 插件均已在 fetchNativeLyric
+                // 按本平台 id 精确匹配，这里返回 null，避免按歌名跨平台搜索导致歌词串版本
+                else -> null
             }
         } catch (e: Exception) {
             Log.w(TAG, "fetchAmllLyric failed: ${e.message}")
@@ -237,17 +344,29 @@ object LyricRepository {
     suspend fun preload(context: Context, song: SongInfo?) = withContext(Dispatchers.IO) {
         if (song == null) return@withContext
         val existing = getCachedLyric(context, song)
-        if (!existing.isNullOrBlank() && (isTtmlLyrics(existing) || isNeteaseYrc(existing) || com.example.lxmusic.ui.lyrics.isQrcLyrics(existing))) {
+        if (!existing.isNullOrBlank() && (
+                isTtmlLyrics(existing) ||
+                    isNeteaseYrc(existing) ||
+                    com.example.lxmusic.ui.lyrics.isQrcLyrics(existing) ||
+                    com.example.lxmusic.ui.lyrics.isKrcLyrics(existing)
+                )
+        ) {
             return@withContext // 已经是最高精度逐字歌词，无需预加载
         }
-        // 1. 极速先预加载 Native 确保保底命中（~150ms）
-        if (existing.isNullOrBlank()) {
-            val native = fetchNativeLyric(song)
-            if (!native.isNullOrBlank()) {
+        // 1. 极速先预加载 Native 确保保底命中（~150ms）；酷狗这里会拿到逐字 KRC，
+        //    旧 LRC 缓存也顺带升级
+        val native = fetchNativeLyric(song)
+        if (!native.isNullOrBlank()) {
+            val nativeIsBetter = existing.isNullOrBlank() ||
+                isTtmlLyrics(native) ||
+                isNeteaseYrc(native) ||
+                com.example.lxmusic.ui.lyrics.isQrcLyrics(native) ||
+                com.example.lxmusic.ui.lyrics.isKrcLyrics(native)
+            if (nativeIsBetter) {
                 putCachedLyric(context, song, native)
             }
         }
-        // 2. 后台获取最高精度逐字歌词（AMLL TTML、网易云 YRC 或 QQ 音乐 QRC）并升级持久化
+        // 2. 后台获取高精度逐字歌词（网易云 AMLL/YRC；本地文件 AMLL 匹配）
         val advanced = fetchAmllLyric(song)
         if (!advanced.isNullOrBlank()) {
             putCachedLyric(context, song, advanced)

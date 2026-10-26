@@ -44,9 +44,22 @@ fun isInstrumentalPlaceholderLine(text: String): Boolean {
 
 fun hasInstrumentalPlaceholder(content: String): Boolean {
     if (content.isBlank()) return false
-    if (content.contains("没有填词的纯音乐")) return true
-    return content.lineSequence().any { isInstrumentalPlaceholderLine(it) }
+    // 逐字歌词（KRC/QRC/YRC）的占位行带音节时间标签，先剥掉再判定
+    val plain = if (content.contains('<') || content.contains('(')) {
+        content
+            .replace(Regex("""\[\d+,\d+\]"""), "")
+            .replace(Regex("""<\d+,\d+,-?\d+>"""), "")
+            .replace(Regex("""\(\d+,\d+(?:,\d+)?\)"""), "")
+    } else {
+        content
+    }
+    if (plain.contains("没有填词的纯音乐")) return true
+    return plain.lineSequence().any { isInstrumentalPlaceholderLine(it) }
 }
+
+/** 酷狗 KRC 逐字歌词（[行起始,行时长]<字偏移,字时长,0>字…） */
+fun isKrcLyrics(content: String): Boolean =
+    com.mocharealm.accompanist.lyrics.core.parser.KugouKrcParser.canParse(content)
 
 private data class LrcTimelineEntry(
     val startTimeMs: Long,
@@ -64,37 +77,51 @@ fun isTtmlLyrics(content: String): Boolean {
 
 fun parseTtmlToLyricEntries(ttml: String): List<LyricEntry> {
     return runCatching {
-        val synced = com.mocharealm.accompanist.lyrics.core.parser.TTMLParser().parse(ttml)
-        synced.lines.mapNotNull { line ->
-            when (line) {
-                is com.mocharealm.accompanist.lyrics.core.model.karaoke.KaraokeLine -> {
-                    LyricEntry(
-                        text = line.syllables.joinToString("") { it.content },
-                        startTimeMs = line.start.toLong(),
-                        endTimeMs = line.end.toLong(),
-                        translation = line.translation,
-                        words = line.syllables.map { syl ->
-                            WordTiming(
-                                startTimeMs = syl.start.toLong(),
-                                endTimeMs = syl.end.toLong(),
-                                charCount = syl.content.length
-                            )
-                        }
-                    )
-                }
-                is com.mocharealm.accompanist.lyrics.core.model.synced.SyncedLine -> {
-                    LyricEntry(
-                        text = line.content,
-                        startTimeMs = line.start.toLong(),
-                        endTimeMs = line.end.toLong(),
-                        translation = line.translation,
-                        words = null
-                    )
-                }
-                else -> null
-            }
-        }
+        syncedLyricsToEntries(
+            com.mocharealm.accompanist.lyrics.core.parser.TTMLParser().parse(ttml)
+        )
     }.getOrDefault(emptyList())
+}
+
+/** 酷狗 KRC 逐字歌词 → 统一的 LyricEntry（带 WordTiming） */
+fun parseKrcToLyricEntries(krc: String): List<LyricEntry> {
+    return runCatching {
+        syncedLyricsToEntries(
+            com.mocharealm.accompanist.lyrics.core.parser.KugouKrcParser.parse(krc)
+        )
+    }.getOrDefault(emptyList())
+}
+
+private fun syncedLyricsToEntries(
+    synced: com.mocharealm.accompanist.lyrics.core.model.SyncedLyrics
+): List<LyricEntry> = synced.lines.mapNotNull { line ->
+    when (line) {
+        is com.mocharealm.accompanist.lyrics.core.model.karaoke.KaraokeLine -> {
+            LyricEntry(
+                text = line.syllables.joinToString("") { it.content },
+                startTimeMs = line.start.toLong(),
+                endTimeMs = line.end.toLong(),
+                translation = line.translation,
+                words = line.syllables.map { syl ->
+                    WordTiming(
+                        startTimeMs = syl.start.toLong(),
+                        endTimeMs = syl.end.toLong(),
+                        charCount = syl.content.length
+                    )
+                }
+            )
+        }
+        is com.mocharealm.accompanist.lyrics.core.model.synced.SyncedLine -> {
+            LyricEntry(
+                text = line.content,
+                startTimeMs = line.start.toLong(),
+                endTimeMs = line.end.toLong(),
+                translation = line.translation,
+                words = null
+            )
+        }
+        else -> null
+    }
 }
 
 fun parseNeteaseLyricsAuto(content: String): List<LyricEntry> {
@@ -103,6 +130,7 @@ fun parseNeteaseLyricsAuto(content: String): List<LyricEntry> {
             ?: runCatching { parseNeteaseYrc(content) }.getOrDefault(emptyList())
         isNeteaseYrc(content) -> runCatching { parseNeteaseYrc(content) }.getOrDefault(emptyList())
         isQrcLyrics(content) -> runCatching { QRCParser.parseToLyricEntries(content) }.getOrDefault(emptyList())
+        isKrcLyrics(content) -> parseKrcToLyricEntries(content)
         else -> parseNeteaseLrc(content)
     }
     return entries.filterNot { isInstrumentalPlaceholderLine(it.text) }

@@ -143,6 +143,9 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.6.0")
     implementation("androidx.core:core-splashscreen:1.0.1")
 
+    // 音乐源插件运行时（QuickJS：CommonJS + Java 互调 + console/setTimeout）
+    implementation("io.github.taoweiji.quickjs:quickjs-android:1.4.6")
+
     // 专辑封面色提取
     implementation("androidx.palette:palette-ktx:1.0.0")
 

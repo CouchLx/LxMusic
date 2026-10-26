@@ -274,7 +274,7 @@ private fun resolveAdvancedBaseSyncedLyrics(
     lyrics: List<LyricEntry>
 ): SyncedLyrics {
     val rawHasEmbeddedKaraoke = !rawLyrics.isNullOrBlank() &&
-        (isTtmlLyrics(rawLyrics) || isNeteaseYrc(rawLyrics) || isQrcLyrics(rawLyrics))
+        (isTtmlLyrics(rawLyrics) || isNeteaseYrc(rawLyrics) || isQrcLyrics(rawLyrics) || isKrcLyrics(rawLyrics))
     return when {
         // 有逐字时间戳、或纯 LRC/无 raw（toSyncedLine 会自动合成逐字时间戳）：直接用我们的条目
         lyrics.isNotEmpty() && (!rawHasEmbeddedKaraoke || lyrics.hasWordTimedEntries()) ->
@@ -290,7 +290,7 @@ private fun parseRawLyrics(rawLyrics: String?): SyncedLyrics {
         return SyncedLyrics(emptyList())
     }
     return runCatching {
-        if (isTtmlLyrics(rawLyrics) || isNeteaseYrc(rawLyrics) || isQrcLyrics(rawLyrics)) {
+        if (isTtmlLyrics(rawLyrics) || isNeteaseYrc(rawLyrics) || isQrcLyrics(rawLyrics) || isKrcLyrics(rawLyrics)) {
             AutoParser().parse(rawLyrics)
         } else {
             parseNeteaseLrc(rawLyrics).toSyncedLyrics()

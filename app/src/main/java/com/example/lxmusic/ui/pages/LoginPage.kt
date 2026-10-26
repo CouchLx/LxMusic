@@ -2,6 +2,7 @@ package com.example.lxmusic.ui.pages
 
 import android.content.Context
 import android.util.Log
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -12,6 +13,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -36,6 +39,60 @@ fun LoginPage(onBack: () -> Unit, onLoginSuccess: (String) -> Unit) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var codeSent by remember { mutableStateOf(false) }
     var countdown by remember { mutableIntStateOf(0) }
+
+    // 扫码登录（收不到短信验证码时的备选；走酷狗二维码接口）
+    var showQrDialog by remember { mutableStateOf(false) }
+    var qrBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    var qrStatus by remember { mutableStateOf("正在获取二维码…") }
+    var qrExpired by remember { mutableStateOf(false) }
+    var qrRefreshTick by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(showQrDialog, qrRefreshTick) {
+        if (!showQrDialog) return@LaunchedEffect
+        qrExpired = false
+        qrBitmap = null
+        qrStatus = "正在获取二维码…"
+        val keyResp = runCatching { KuGouApi.service.getLoginQrKey() }.getOrNull()
+        val key = keyResp?.data?.qrcode
+        if (key.isNullOrBlank()) {
+            qrStatus = "获取二维码失败，请点「刷新二维码」重试"
+            return@LaunchedEffect
+        }
+        qrBitmap = decodeQrDataUri(keyResp?.data?.qrcode_img)
+        qrStatus = "请使用酷狗音乐 App 扫码登录"
+        while (true) {
+            delay(2000)
+            val resp = runCatching { KuGouApi.service.checkLoginQr(key) }.getOrNull() ?: continue
+            when (resp.data?.status ?: 1) {
+                0 -> {
+                    qrStatus = "二维码已过期，请刷新"
+                    qrExpired = true
+                    break
+                }
+                2 -> qrStatus = "已扫码，请在手机上确认登录"
+                4 -> {
+                    val token = resp.data?.token
+                    val userid = resp.data?.userid ?: 0L
+                    if (!token.isNullOrBlank() && userid != 0L) {
+                        persistLogin(
+                            context = context,
+                            authPrefs = authPrefs,
+                            token = token,
+                            userid = userid,
+                            phone = "",
+                            nicknameHint = resp.data?.nickname,
+                            onLoginSuccess = onLoginSuccess
+                        )
+                        showQrDialog = false
+                    } else {
+                        qrStatus = "登录失败：服务器未返回凭证"
+                    }
+                    break
+                }
+                else -> qrStatus = "等待扫码…"
+            }
+        }
+    }
 
     // 倒计时
     LaunchedEffect(codeSent, countdown) {
@@ -282,6 +339,62 @@ fun LoginPage(onBack: () -> Unit, onLoginSuccess: (String) -> Unit) {
             }
         }
 
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 收不到短信时的备选：扫码登录
+        TextButton(onClick = { showQrDialog = true }) {
+            Text("扫码登录（收不到验证码时使用）")
+        }
+
+        if (showQrDialog) {
+            AlertDialog(
+                onDismissRequest = { showQrDialog = false },
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                title = { Text("扫码登录") },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        val bmp = qrBitmap
+                        if (bmp != null) {
+                            Image(
+                                bitmap = bmp,
+                                contentDescription = "登录二维码",
+                                modifier = Modifier.size(220.dp)
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier.size(220.dp),
+                                contentAlignment = Alignment.Center
+                            ) { IOLoadingIndicator(modifier = Modifier.size(32.dp)) }
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = qrStatus,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (qrExpired) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "用酷狗音乐 App 扫描二维码，并在手机上确认登录",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                confirmButton = {
+                    if (qrExpired) {
+                        TextButton(onClick = { qrRefreshTick++ }) { Text("刷新二维码") }
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showQrDialog = false }) { Text("关闭") }
+                }
+            )
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
 
         // 返回按钮
@@ -309,3 +422,57 @@ private fun parseKugouError(e: retrofit2.HttpException): String? = runCatching {
     } ?: json.optString("message").takeIf { it.isNotBlank() }
         ?: json.optString("errmsg").takeIf { it.isNotBlank() }
 }.getOrNull()
+/** 解码酷狗二维码（data:image/png;base64,...） */
+private fun decodeQrDataUri(uri: String?): ImageBitmap? {
+    return runCatching {
+        val base64 = uri?.substringAfter("base64,", "") ?: return null
+        if (base64.isBlank()) return null
+        val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+    }.getOrNull()
+}
+
+/** 登录成功后的统一落盘与刷新（手机号登录与扫码登录共用） */
+private suspend fun persistLogin(
+    context: Context,
+    authPrefs: android.content.SharedPreferences,
+    token: String,
+    userid: Long,
+    phone: String,
+    nicknameHint: String?,
+    onLoginSuccess: (String) -> Unit
+) {
+    authPrefs.edit()
+        .putString("token", token)
+        .putString("nickname", nicknameHint ?: "用户")
+        .putLong("userid", userid)
+        .apply()
+    if (phone.isNotBlank()) authPrefs.edit().putString("phone", phone).apply()
+    KuGouApi.token = token
+    KuGouApi.userid = userid.toString()
+    LoginTokenKeeper.markFresh(context)
+    VipConfigManager.applySavedVipToApi(context)
+    KuGouApi.clearKugouLikeCache()
+    context.getSharedPreferences("home_cache", Context.MODE_PRIVATE).edit()
+        .remove("daily_songs_json")
+        .remove("vip_songs_json")
+        .remove("history_songs_json")
+        .remove("style_songs_json")
+        .apply()
+    context.getSharedPreferences("mine_state", Context.MODE_PRIVATE).edit()
+        .remove("playlists_json")
+        .remove("playlists_json_uid")
+        .remove("last_load_auth")
+        .apply()
+    // 补用户详情（头像/昵称）；失败不阻断登录
+    runCatching {
+        val detail = KuGouApi.service.getUserDetail(token, userid)
+        if (detail.status == 1 && detail.data != null) {
+            authPrefs.edit()
+                .putString("pic", detail.data.pic)
+                .putString("nickname", detail.data.nickname ?: (nicknameHint ?: "用户"))
+                .apply()
+        }
+    }
+    onLoginSuccess(authPrefs.getString("nickname", "用户") ?: "用户")
+}

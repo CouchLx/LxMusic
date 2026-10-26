@@ -37,10 +37,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -124,12 +126,15 @@ fun FloatingGlassBottomBar(
     modifier: Modifier = Modifier,
     isBlurEnabled: Boolean = true,
     navBarOpacity: Float = 1f,
+    // 纯色主题（无壁纸）：用不透明表面色 + 柔和阴影，避免在纯色背景上叠玻璃变成灰块
+    solidSurface: Boolean = false,
     content: @Composable RowScope.() -> Unit
 ) {
     if (!isBlurEnabled || backdrop == null) {
         FloatingGlassBottomBarFallback(
             modifier = modifier,
             navBarOpacity = navBarOpacity,
+            solidSurface = solidSurface,
             content = content
         )
         return
@@ -389,9 +394,31 @@ fun FloatingGlassBottomBar(
 private fun FloatingGlassBottomBarFallback(
     modifier: Modifier = Modifier,
     navBarOpacity: Float = 1f,
+    solidSurface: Boolean = false,
     content: @Composable RowScope.() -> Unit
 ) {
-    val barColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = (0.94f * navBarOpacity).coerceIn(0.1f, 1f))
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    // 纯色主题跟随参考图：浅色用接近纯白的 surface，深色用深一档容器色；
+    // 壁纸模式仍沿用原来的 surfaceContainer 半透明底
+    val baseColor = if (solidSurface) {
+        if (isDark) MaterialTheme.colorScheme.surfaceContainerHigh
+        else MaterialTheme.colorScheme.surface
+    } else {
+        MaterialTheme.colorScheme.surfaceContainer
+    }
+    val alpha = if (solidSurface) navBarOpacity else 0.94f * navBarOpacity
+    val barColor = baseColor.copy(alpha = alpha.coerceIn(0.1f, 1f))
+    val shadowModifier = if (solidSurface) {
+        Modifier.shadow(
+            elevation = 6.dp,
+            shape = CircleShape,
+            clip = false,
+            ambientColor = Color.Black.copy(alpha = 0.08f),
+            spotColor = Color.Black.copy(alpha = 0.10f)
+        )
+    } else {
+        Modifier
+    }
 
     Box(
         modifier = modifier.width(IntrinsicSize.Min),
@@ -399,6 +426,7 @@ private fun FloatingGlassBottomBarFallback(
     ) {
         Row(
             modifier = Modifier
+                .then(shadowModifier)
                 .clip(CircleShape)
                 .background(barColor)
                 .height(64.dp)

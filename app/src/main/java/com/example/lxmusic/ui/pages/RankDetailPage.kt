@@ -111,7 +111,7 @@ fun RankDetailPage(
     val gson = remember { com.google.gson.Gson() }
     val prefs = remember { context.getSharedPreferences("rank_cache", android.content.Context.MODE_PRIVATE) }
     var showRankNumbers by remember { mutableStateOf(prefs.getBoolean("show_rank_numbers", true)) }
-    val cacheKey = "rank_songs_${rank.rankid}"
+    val cacheKey = "rank_songs_${rank.platform}_${rank.rankid}"
     val pageSize = 30
 
     fun mapSong(song: RankSong) = SongInfo(
@@ -122,15 +122,25 @@ fun RankDetailPage(
         duration = song.durationMs
     )
 
-    // 排行榜歌曲数据源：BFF 优先，失败/未配置走原有链路
+    // 排行榜歌曲数据源：网易云/QQ 走公开接口；酷狗已激活优先 BFF，否则公开接口，最后回退原有链路
     suspend fun fetchRankPage(page: Int): Pair<List<SongInfo>, Int> {
-        return if (BffApi.isEnabled) {
-            val r = BffApi.rankSongs(rank.rankid, page, pageSize)
-            Pair(r?.items?.map { it.toSongInfo() } ?: emptyList(), r?.total ?: 0)
-        } else {
-            val resp = KuGouApi.service.getRankAudio(rank.rankid, page, pageSize)
-            Pair(resp.data?.songlist?.map { mapSong(it) } ?: emptyList(), resp.data?.total ?: 0)
+        val platform = rank.platform
+        if (platform == "wy" || platform == "tx") {
+            return com.example.lxmusic.data.search.PublicRankingProviders.rankSongs(
+                platform, rank.rankid, page, pageSize
+            )
         }
+        if (BffApi.isEnabled && BffApi.onlineAllowed) {
+            val r = BffApi.rankSongs(rank.rankid, page, pageSize)
+            val list = r?.items?.map { it.toSongInfo() } ?: emptyList()
+            if (list.isNotEmpty()) return Pair(list, r?.total ?: list.size)
+        }
+        val pub = com.example.lxmusic.data.search.PublicRankingProviders.rankSongs(
+            "kg", rank.rankid, page, pageSize
+        )
+        if (pub.first.isNotEmpty()) return pub
+        val resp = KuGouApi.service.getRankAudio(rank.rankid, page, pageSize)
+        return Pair(resp.data?.songlist?.map { mapSong(it) } ?: emptyList(), resp.data?.total ?: 0)
     }
 
     fun loadPage(page: Int, append: Boolean = false) {
