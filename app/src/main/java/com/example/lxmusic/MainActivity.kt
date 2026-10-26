@@ -271,7 +271,6 @@ import com.example.lxmusic.ui.pages.GuestMinePage
 import com.example.lxmusic.ui.pages.CollectionDetailPage
 import com.example.lxmusic.ui.pages.SearchPlaylistDetailPage
 import com.example.lxmusic.ui.pages.MinePage
-import com.example.lxmusic.ui.pages.GuestMinePage
 import com.example.lxmusic.ui.pages.SearchSourceOption
 import com.example.lxmusic.ui.pages.PlaylistManagerPage
 import com.example.lxmusic.ui.effect.PlayerBackdrop

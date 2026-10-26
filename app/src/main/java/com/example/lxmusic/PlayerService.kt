@@ -13,6 +13,7 @@ import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.AudioPlaybackConfiguration
 import android.database.ContentObserver
 import android.hardware.usb.UsbManager
 import android.net.Uri
@@ -91,6 +92,12 @@ class PlayerService : MediaSessionService() {
     // 暂时性焦点丢失：保留焦点租约并在恢复时续播
     private var keepFocusOnPause = false
     private var resumeAfterTransientFocusLoss = false
+    // 其它应用播放监测（焦点兜底）：系统播放配置回调
+    private var audioPlaybackCallback: AudioManager.AudioPlaybackCallback? = null
+    private var lastPlaybackConfigs: List<AudioPlaybackConfiguration> = emptyList()
+    private var otherAppBaseline = -1
+    private var otherAppCheckPending = false
+    private var otherAppCalibratedAtMs = 0L
     private var noisyConfirmAttempts = 0
     private var noisyPausePending = false
     private var lastUsbExclusiveSetting = false
@@ -390,6 +397,8 @@ class PlayerService : MediaSessionService() {
 
         // 音频焦点（播放时按设置持有；自动暂停开关默认开启）
         setupAudioFocus()
+        // 其它应用播放监测：MIUI 等 ROM 忽略焦点请求时的兜底
+        setupOtherAppPlaybackWatch()
 
         // 高解析度输出（重启生效）
         val highResolution = prefs.getBoolean("playback_high_res", false)
@@ -651,6 +660,8 @@ class PlayerService : MediaSessionService() {
                     }
                     // 淡入：交叉淡化后的新曲用交叉淡化时长，普通起播/恢复用淡入时长
                     startFadeInIfNeeded()
+                    // 重新校准"其它应用播放"基线（播放开始后 1.5s，等自身 AudioTrack 稳定）
+                    scheduleOtherAppBaseline()
                 } else {
                     // 睡眠定时延长态下的手动暂停（含耳机拔出暂停）→ 取消定时并告知。
                     // 定时器自身触发的暂停在 fulfillSleepTimer 里先清状态，不会走到这里。
@@ -668,6 +679,7 @@ class PlayerService : MediaSessionService() {
                         abandonAudioFocus()
                     }
                     scheduleIdleShutdownIfNeeded()
+                    resetOtherAppBaseline()
                 }
                 updateBackgroundAnchor()
                 updateUsbExclusiveVolumeRouting()
@@ -1036,6 +1048,12 @@ class PlayerService : MediaSessionService() {
             val target = userVolume()
             if (player.volume != target) player.volume = target
         }
+        // 自动暂停开关变化：重新校准兜底基线
+        if (pauseOnOtherApps()) {
+            if (player.isPlaying) scheduleOtherAppBaseline() else resetOtherAppBaseline()
+        } else {
+            resetOtherAppBaseline()
+        }
     }
 
     fun acquireAudioFocus() {
@@ -1052,6 +1070,148 @@ class PlayerService : MediaSessionService() {
         runCatching {
             getSystemService(AudioManager::class.java).abandonAudioFocusRequest(req)
         }
+    }
+
+    // ==================== 其它应用播放监测（音频焦点兜底） ====================
+
+    private val otherAppCalibrationRunnable = Runnable {
+        calibrateOtherAppBaseline()
+    }
+
+    private val otherAppConfirmRunnable = Runnable {
+        if (!otherAppCheckPending) return@Runnable
+        otherAppCheckPending = false
+        confirmOtherAppPlayback()
+    }
+
+    /**
+     * 部分 ROM（如 MIUI/HyperOS 声音助手「忽略音乐焦点请求」开启时）不会向持有焦点的
+     * 应用下发 AUDIOFOCUS_LOSS，只靠焦点监听会完全失效。
+     * 这里用系统播放配置回调兜底：播放开始后记录"当前活跃媒体播放器数"作为基线，
+     * 之后数量增加并持续 1.2s，就判定有其它应用开始播放媒体并暂停。
+     *
+     * 公开 SDK 的 AudioPlaybackConfiguration 只暴露 getAudioAttributes()，
+     * isActive()/getPlayerState() 是 @SystemApi，需要反射读取；UID 会被匿名化成 -1，
+     * 无法区分归属，所以用"基线差值"而不是 UID 判断。
+     */
+    private fun setupOtherAppPlaybackWatch() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val audioManager = getSystemService(AudioManager::class.java)
+        val callback = object : AudioManager.AudioPlaybackCallback() {
+            override fun onPlaybackConfigChanged(configs: MutableList<AudioPlaybackConfiguration>) {
+                lastPlaybackConfigs = configs.toList()
+                evaluateOtherAppPlayback()
+            }
+        }
+        audioPlaybackCallback = callback
+        runCatching {
+            audioManager.registerAudioPlaybackCallback(
+                callback,
+                Handler(Looper.getMainLooper())
+            )
+        }
+        refreshPlaybackConfigs()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun refreshPlaybackConfigs() {
+        runCatching {
+            lastPlaybackConfigs =
+                getSystemService(AudioManager::class.java).activePlaybackConfigurations
+        }
+    }
+
+    /** 是否为"正在出声的媒体/游戏"播放器（通知音、铃声、导航音不算） */
+    private fun isActiveMediaConfig(config: AudioPlaybackConfiguration): Boolean {
+        val usage = config.audioAttributes?.usage ?: return false
+        if (usage != AudioAttributes.USAGE_MEDIA && usage != AudioAttributes.USAGE_GAME) {
+            return false
+        }
+        // getActivePlaybackConfigurations() 本身只返回活跃配置；isActive 是 @SystemApi，
+        // 反射失败时按"活跃"处理，避免少数机型上兜底完全失效
+        return runCatching {
+            AudioPlaybackConfiguration::class.java
+                .getMethod("isActive")
+                .invoke(config) as? Boolean
+        }.getOrNull() ?: true
+    }
+
+    /**
+     * 当前活跃媒体播放器数量。USB 独占后台锚点是自己发的无声载波，不能算作其它应用。
+     * 若系统把本应用播放器也列进来，基线校准会把这一路抵消掉。
+     */
+    private fun activeMediaConfigCount(): Int {
+        var count = lastPlaybackConfigs.count { isActiveMediaConfig(it) }
+        if (UsbExclusiveBackgroundAudioAnchor.isActive()) count--
+        return count.coerceAtLeast(0)
+    }
+
+    /** 播放开始后重新校准基线：已经存在的其它播放（用户手动覆盖播放）不会被立刻判为抢占 */
+    private fun scheduleOtherAppBaseline() {
+        // AudioPlaybackConfiguration 是 API 26+；低版本保持纯焦点方案
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        otherAppBaseline = -1
+        otherAppCheckPending = false
+        idleHandler?.removeCallbacks(otherAppCalibrationRunnable)
+        idleHandler?.removeCallbacks(otherAppConfirmRunnable)
+        idleHandler?.postDelayed(otherAppCalibrationRunnable, OTHER_APP_CALIBRATE_MS)
+    }
+
+    private fun resetOtherAppBaseline() {
+        otherAppBaseline = -1
+        otherAppCheckPending = false
+        idleHandler?.removeCallbacks(otherAppCalibrationRunnable)
+        idleHandler?.removeCallbacks(otherAppConfirmRunnable)
+    }
+
+    private fun calibrateOtherAppBaseline() {
+        val player = mediaSession?.player ?: return
+        if (!pauseOnOtherApps() || !player.isPlaying) {
+            otherAppBaseline = -1
+            return
+        }
+        refreshPlaybackConfigs()
+        otherAppBaseline = activeMediaConfigCount()
+        otherAppCalibratedAtMs = SystemClock.elapsedRealtime()
+        android.util.Log.i("LxMusic", "其它应用播放基线=$otherAppBaseline")
+    }
+
+    private fun evaluateOtherAppPlayback() {
+        val player = mediaSession?.player ?: return
+        if (!pauseOnOtherApps() || !player.isPlaying || otherAppBaseline < 0) {
+            idleHandler?.removeCallbacks(otherAppConfirmRunnable)
+            otherAppCheckPending = false
+            return
+        }
+        if (SystemClock.elapsedRealtime() - otherAppCalibratedAtMs < OTHER_APP_CALIBRATE_MS) {
+            return
+        }
+        val others = activeMediaConfigCount() - otherAppBaseline
+        if (others <= 0) {
+            idleHandler?.removeCallbacks(otherAppConfirmRunnable)
+            otherAppCheckPending = false
+            return
+        }
+        if (otherAppCheckPending) return
+        otherAppCheckPending = true
+        idleHandler?.postDelayed(otherAppConfirmRunnable, OTHER_APP_CONFIRM_MS)
+    }
+
+    private fun confirmOtherAppPlayback() {
+        val player = mediaSession?.player ?: return
+        if (!pauseOnOtherApps() || !player.isPlaying || otherAppBaseline < 0) return
+        val count = activeMediaConfigCount()
+        val others = count - otherAppBaseline
+        if (others <= 0) return
+        android.util.Log.i(
+            "LxMusic",
+            "检测到其它应用正在播放媒体（活跃 $count，基线 $otherAppBaseline），自动暂停"
+        )
+        // 把基线抬到当前数量，避免同一次播放重复触发
+        otherAppBaseline = count
+        suppressPauseFade = true
+        runCatching { player.pause() }
+        suppressPauseFade = false
     }
 
     // ==================== 暂停后退出播放服务 ====================
@@ -1223,6 +1383,13 @@ class PlayerService : MediaSessionService() {
             volumeChangeReceiver?.let { unregisterReceiver(it) }
         }
         volumeChangeReceiver = null
+        runCatching {
+            audioPlaybackCallback?.let {
+                getSystemService(AudioManager::class.java)
+                    .unregisterAudioPlaybackCallback(it)
+            }
+        }
+        audioPlaybackCallback = null
         UsbExclusiveVolumeRoutingSession.refresh(this, active = false)
         EqualizerController.release()
         mediaSession?.run {
@@ -1233,3 +1400,8 @@ class PlayerService : MediaSessionService() {
         super.onDestroy()
     }
 }
+
+/** 播放开始后等待自身 AudioTrack 稳定再取"其它应用播放"基线 */
+private const val OTHER_APP_CALIBRATE_MS = 1_500L
+/** 其它应用持续出声多久才判定为抢占 */
+private const val OTHER_APP_CONFIRM_MS = 1_200L
