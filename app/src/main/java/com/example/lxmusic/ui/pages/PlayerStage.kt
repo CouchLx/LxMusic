@@ -65,6 +65,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
@@ -77,6 +78,7 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -186,6 +188,9 @@ fun PlayerStage(
     // 睡眠定时（菜单-睡眠定时；状态由 PlayerService.sleepTimerFlow 提供，服务内存活）
     onStartSleepTimer: (minutes: Int, extendOnSongEnd: Boolean) -> Unit = { _, _ -> },
     onStopSleepTimer: () -> Unit = {},
+    // 播放器菜单 → 独立页面（声音设置 / 均衡器）
+    onOpenSoundSettings: () -> Unit = {},
+    onOpenEqualizer: () -> Unit = {},
     // 封面/背景旋转相位（由 MainActivity 舞台层统一驱动）
     rotationAngle: Float = 0f,
     isRoundAlbum: Boolean = false,
@@ -981,6 +986,8 @@ fun PlayerStage(
             sleepProgress = progressState,
             onStartSleepTimer = onStartSleepTimer,
             onStopSleepTimer = onStopSleepTimer,
+            onOpenSoundSettings = onOpenSoundSettings,
+            onOpenEqualizer = onOpenEqualizer,
             targetLabel = if (onCoverPage) "封面卡歌词" else "歌词页歌词",
             lyricFontSize = if (onCoverPage) coverLyricFontSize else lyricFontSize,
             onLyricFontSizeChange = if (onCoverPage) onCoverLyricFontSizeChange else onLyricFontSizeChange,
@@ -1850,6 +1857,9 @@ private fun PlayerMenuSheet(
     sleepProgress: PlayerProgress = PlayerProgress(),
     onStartSleepTimer: (minutes: Int, extendOnSongEnd: Boolean) -> Unit = { _, _ -> },
     onStopSleepTimer: () -> Unit = {},
+    // 独立页面入口（声音设置 / 均衡器）
+    onOpenSoundSettings: () -> Unit = {},
+    onOpenEqualizer: () -> Unit = {},
     // 当前菜单对应的歌词对象（封面卡歌词 / 歌词页歌词），两套设置独立
     targetLabel: String,
     lyricFontSize: Float,
@@ -1951,6 +1961,91 @@ private fun PlayerMenuSheet(
                             )
                             Text(
                                 text = "定时暂停播放，可自动延长到整首播完",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // 声音设置入口（独立页面：音量/声道平衡/变速变调/输出开关）
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            onDismiss()
+                            onOpenSoundSettings()
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.VolumeUp,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "声音设置",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "音量、声道平衡、速度与音调、输出选项",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 均衡器入口（独立页面：预设/多段图示均衡/音效增强/专业模式）
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            onDismiss()
+                            onOpenEqualizer()
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Equalizer,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "均衡器",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "多段均衡、低音增强、环绕声与专业模式",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

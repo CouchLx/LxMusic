@@ -14,6 +14,8 @@ class LxMusicApplication : Application() {
         applyUsbAttachHandlingComponentState()
         // 定时自动备份自愈：开关开着但周期任务被系统清理/重装丢失时补建（KEEP 策略不会重置计时）
         runCatching { com.example.lxmusic.backup.AutoBackupScheduler.ensureScheduled(this) }
+        // 均衡器：提前读取设置并探测可选音效（引擎要等播放会话建立后才挂载）
+        runCatching { com.example.lxmusic.audio.eq.EqualizerController.initialize(this) }
     }
 
     /**

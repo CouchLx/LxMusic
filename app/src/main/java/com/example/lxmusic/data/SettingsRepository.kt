@@ -78,6 +78,8 @@ class SettingsRepository(context: Context) {
         const val PLAYBACK_VOLUME_BALANCE = "playback_volume_balance"
         const val PLAYBACK_HIGH_RES = "playback_high_res"
         const val PLAYBACK_PREEMPT_FOCUS = "playback_preempt_focus"
+        // 其它应用播放媒体时自动暂停（默认开启：持有音频焦点并响应焦点丢失）
+        const val PLAYBACK_PAUSE_ON_OTHER_APP = "playback_pause_on_other_app"
         const val BG_IMAGE_PATH = "bg_image_path"
         const val BG_OPACITY = "bg_opacity"
         const val LIQUID_GLASS = "liquid_glass"
@@ -693,6 +695,17 @@ class SettingsRepository(context: Context) {
         }
     private var _playbackPreemptFocus: Boolean by mutableStateOf(
         prefs.getBoolean(Keys.PLAYBACK_PREEMPT_FOCUS, false)
+    )
+
+    // 其它应用播放媒体时自动暂停：播放中持有音频焦点，焦点被抢占时暂停
+    var playbackPauseOnOtherApp: Boolean
+        get() = _playbackPauseOnOtherApp
+        set(value) {
+            _playbackPauseOnOtherApp = value
+            prefs.edit().putBoolean(Keys.PLAYBACK_PAUSE_ON_OTHER_APP, value).apply()
+        }
+    private var _playbackPauseOnOtherApp: Boolean by mutableStateOf(
+        prefs.getBoolean(Keys.PLAYBACK_PAUSE_ON_OTHER_APP, true)
     )
 
     init {

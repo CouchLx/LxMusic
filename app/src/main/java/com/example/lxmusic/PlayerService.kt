@@ -35,6 +35,9 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.session.DefaultMediaNotificationProvider
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import com.example.lxmusic.audio.eq.EqualizerController
 import com.example.lxmusic.util.AudioReactive
 import com.example.lxmusic.util.MeshSpectrumProvider
 import com.example.lxmusic.util.PlaybackVolumeBalanceState
@@ -81,6 +84,13 @@ class PlayerService : MediaSessionService() {
     private var screenOffReceiver: BroadcastReceiver? = null
     private var audioFocusRequest: AudioFocusRequest? = null
     private var volumeFadeJob: Job? = null
+    // 内部暂停（焦点丢失等）不淡出
+    private var suppressPauseFade = false
+    // 交叉淡化后等待下一次真正出声时淡入
+    private var pendingCrossfadeIn = false
+    // 暂时性焦点丢失：保留焦点租约并在恢复时续播
+    private var keepFocusOnPause = false
+    private var resumeAfterTransientFocusLoss = false
     private var noisyConfirmAttempts = 0
     private var noisyPausePending = false
     private var lastUsbExclusiveSetting = false
@@ -236,6 +246,8 @@ class PlayerService : MediaSessionService() {
                 }
                 updateBackgroundAnchor()
                 updateUsbExclusiveVolumeRouting()
+                // 焦点策略 / 淡入淡出开关切换后立即生效
+                refreshAudioFocusPolicy()
                 // 同步 USB 插入自动响应 alias 状态
                 applyComponentStateForAttachHandling(prefs)
             }
@@ -376,8 +388,8 @@ class PlayerService : MediaSessionService() {
         // 同步 USB 插入自动响应组件状态
         applyComponentStateForAttachHandling(prefs)
 
-        // 音频焦点（抢占模式启用时主动请求）
-        setupAudioFocus(prefs.getBoolean("playback_preempt_focus", false))
+        // 音频焦点（播放时按设置持有；自动暂停开关默认开启）
+        setupAudioFocus()
 
         // 高解析度输出（重启生效）
         val highResolution = prefs.getBoolean("playback_high_res", false)
@@ -438,6 +450,30 @@ class PlayerService : MediaSessionService() {
             .setMediaSourceFactory(mediaSourceFactory)
             .build()
 
+        // ===== 声音设置恢复：音量 / 变速变调 / 跳过静音 =====
+        // 与 PlayerViewModel 共用 "playback" prefs，重启服务后设置不丢
+        val soundPrefs = getSharedPreferences("playback", Context.MODE_PRIVATE)
+        val savedVolume = soundPrefs.getFloat(KEY_SOUND_VOLUME, 1f).coerceIn(0f, 1f)
+        val savedSpeed = soundPrefs.getFloat(KEY_SOUND_SPEED, 1f)
+            .coerceIn(MIN_SOUND_SPEED, MAX_SOUND_SPEED)
+        val savedPitch = soundPrefs.getFloat(KEY_SOUND_PITCH, 1f)
+            .coerceIn(MIN_SOUND_SPEED, MAX_SOUND_SPEED)
+        val savedFixedPitch = soundPrefs.getBoolean(KEY_SOUND_FIXED_PITCH, true)
+        player.volume = savedVolume
+        runCatching {
+            player.playbackParameters = androidx.media3.common.PlaybackParameters(
+                savedSpeed,
+                if (savedFixedPitch) savedSpeed else savedPitch
+            )
+        }
+        runCatching {
+            player.skipSilenceEnabled = soundPrefs.getBoolean(KEY_SOUND_SKIP_SILENCE, false)
+        }
+
+        // 均衡器：读设置 + 绑定当前播放会话（会话 id 变化时由 Player.Listener 重新绑定）
+        EqualizerController.initialize(this)
+        EqualizerController.attachSession(player.audioSessionId)
+
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -446,21 +482,99 @@ class PlayerService : MediaSessionService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // 会话侧播放器：改写 seekToPrevious 的 Media3 默认语义（3 秒后重播当前曲），
-        // 使通知栏/蓝牙耳机按键的"上一首"始终切上一曲，与 UI 端 playPrevious 一致
+        // 会话侧播放器：
+        // 1) 改写 seekToPrevious 的 Media3 默认语义（3 秒后重播当前曲），
+        //    使通知栏/蓝牙耳机按键的"上一首"始终切上一曲，与 UI 端 playPrevious 一致；
+        // 2) 淡入淡出 / 交叉淡化统一在服务侧拦截——UI、通知栏、锁屏、蓝牙按键
+        //    都走同一条链路（之前只在 UI 的 ViewModel 里做，通知栏切歌听不到效果）。
         val sessionPlayer = object : ForwardingPlayer(player) {
+            private fun pauseNow() = super.pause()
+            private fun nextNow() = super.seekToNext()
+            private fun nextItemNow() = super.seekToNextMediaItem()
+            private fun previousNow() =
+                if (hasPreviousMediaItem()) super.seekToPreviousMediaItem() else super.seekTo(0, 0)
+            private fun previousItemNow() = super.seekToPreviousMediaItem()
+
+            override fun pause() {
+                // 焦点丢失 / 服务重建等内部暂停不做淡出
+                if (suppressPauseFade || !isPlaying) {
+                    super.pause()
+                    return
+                }
+                val duration = fadeDurationMs()
+                if (!playbackFadeEnabled() || duration <= 0) {
+                    super.pause()
+                    return
+                }
+                fadeOutThen(duration) { pauseNow() }
+            }
+
+            override fun seekToNext() {
+                switchWithCrossfade { nextNow() }
+            }
+
+            override fun seekToNextMediaItem() {
+                switchWithCrossfade { nextItemNow() }
+            }
+
             override fun seekToPrevious() {
-                if (hasPreviousMediaItem()) seekToPreviousMediaItem() else seekTo(0, 0)
+                switchWithCrossfade { previousNow() }
+            }
+
+            override fun seekToPreviousMediaItem() {
+                switchWithCrossfade { previousItemNow() }
             }
         }
         mediaSession = MediaSession.Builder(this, sessionPlayer)
             .setSessionActivity(pendingIntent)
+            .setCallback(object : MediaSession.Callback {
+                // 自定义会话命令必须在连接时声明，否则控制器发送会被拒绝
+                override fun onConnect(
+                    session: MediaSession,
+                    controller: MediaSession.ControllerInfo
+                ): MediaSession.ConnectionResult {
+                    // 通知栏/车机控制器保持默认连接结果（默认自定义布局由父类处理）
+                    if (session.isMediaNotificationController(controller) ||
+                        session.isAutomotiveController(controller) ||
+                        session.isAutoCompanionController(controller)
+                    ) {
+                        return super.onConnect(session, controller)
+                    }
+                    val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS
+                        .buildUpon()
+                        .add(SessionCommand(ACTION_SET_SKIP_SILENCE, android.os.Bundle.EMPTY))
+                        .build()
+                    return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                        .setAvailableSessionCommands(sessionCommands)
+                        .build()
+                }
+
+                // 「跳过静音」不在 Player/MediaController 公开接口里，通过会话自定义命令下发
+                override fun onCustomCommand(
+                    session: MediaSession,
+                    controller: MediaSession.ControllerInfo,
+                    customCommand: SessionCommand,
+                    args: android.os.Bundle
+                ): com.google.common.util.concurrent.ListenableFuture<SessionResult> {
+                    if (customCommand.customAction == ACTION_SET_SKIP_SILENCE) {
+                        runCatching {
+                            player.skipSilenceEnabled = args.getBoolean("enabled", false)
+                        }
+                        return com.google.common.util.concurrent.Futures.immediateFuture(
+                            SessionResult(SessionResult.RESULT_SUCCESS)
+                        )
+                    }
+                    return super.onCustomCommand(session, controller, customCommand, args)
+                }
+            })
             .build()
 
         // 添加播放器监听器，确保播放时启动前台服务 + 暂停时调度空闲退出
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
                 lastAudioFormat = null
+                // 每首歌重新统计响度，避免上一首的积分 RMS 拖慢下一首的增益收敛
+                PlaybackVolumeNormalizationState.resetForNewTrack()
                 // 睡眠定时延长态：自然播完（含单曲循环点）→ 暂停兑现；
                 // 手动切歌/跨歌 seek → 取消定时并告知
                 if (sleepTimerFlow.value.extending) {
@@ -487,17 +601,22 @@ class PlayerService : MediaSessionService() {
                 }
             }
 
+            // 播放会话 id 变化（首次出声 / 音频轨道重建）→ 重新绑定均衡器
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                EqualizerController.attachSession(audioSessionId)
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) {
-                    startForegroundIfNeeded()
                     cancelIdleShutdown()
                     // 播放时刷新系统路由：USB 音频设备可能晚注册（内核驱动
                     // 重新挂载/系统 HAL 探测），确保系统路径从小尾巴耳机出声
                     usbRoutingSink?.refreshUsbDevice()
                     // 独占激活时系统路由钉内置扬声器（避免与 libusb 双写 USB DAC 等时端点）
                     refreshUsbRouteForExclusiveState()
-                    // 独占播放期间持有音频焦点：其他 app 接管时暂停独占，避免双写
-                    if (usbExclusiveActive()) {
+                    // 需要接收"其他应用开始播放"的通知，必须先持有音频焦点：
+                    // 自动暂停（默认开）/ 抢占焦点 / USB 独占任一开启都要持有
+                    if (shouldHoldAudioFocus() || usbExclusiveActive()) {
                         acquireAudioFocus()
                     }
                     // 播放期间每 3s 轮询刷新路由：覆盖设备晚注册/重新注册场景，
@@ -530,14 +649,8 @@ class PlayerService : MediaSessionService() {
                             )
                         }
                     }
-                    // 播放淡入：开始播放时音量渐变（对齐 Neri）
-                    val fadeInEnabled = getSharedPreferences("settings", Context.MODE_PRIVATE)
-                        .getBoolean("playback_fade_in", false)
-                    val fadeInMs = getSharedPreferences("settings", Context.MODE_PRIVATE)
-                        .getInt("playback_fade_in_ms", 500)
-                    if (fadeInEnabled && fadeInMs > 0) {
-                        startVolumeFade(player, fadeInMs)
-                    }
+                    // 淡入：交叉淡化后的新曲用交叉淡化时长，普通起播/恢复用淡入时长
+                    startFadeInIfNeeded()
                 } else {
                     // 睡眠定时延长态下的手动暂停（含耳机拔出暂停）→ 取消定时并告知。
                     // 定时器自身触发的暂停在 fulfillSleepTimer 里先清状态，不会走到这里。
@@ -547,7 +660,13 @@ class PlayerService : MediaSessionService() {
                     }
                     routingRefreshJob?.cancel()
                     routingRefreshJob = null
-                    abandonAudioFocus()
+                    if (keepFocusOnPause) {
+                        // 暂时性丢失：保留焦点租约，焦点恢复后由 GAIN 回调续播
+                        keepFocusOnPause = false
+                    } else {
+                        resumeAfterTransientFocusLoss = false
+                        abandonAudioFocus()
+                    }
                     scheduleIdleShutdownIfNeeded()
                 }
                 updateBackgroundAnchor()
@@ -669,18 +788,128 @@ class PlayerService : MediaSessionService() {
         }
     }
 
-    private fun startVolumeFade(player: Player, durationMs: Int) {
+    private fun settingsPrefsForPlayback() =
+        getSharedPreferences("settings", Context.MODE_PRIVATE)
+
+    private fun playbackFadeEnabled(): Boolean =
+        settingsPrefsForPlayback().getBoolean("playback_fade_in", false)
+
+    private fun fadeDurationMs(): Int =
+        settingsPrefsForPlayback().getInt("playback_fade_in_ms", 500).coerceIn(0, 3000)
+
+    private fun crossfadeEnabled(): Boolean =
+        settingsPrefsForPlayback().getBoolean("playback_crossfade_next", false)
+
+    private fun crossfadeOutMs(): Int =
+        settingsPrefsForPlayback().getInt("playback_crossfade_out_ms", 500).coerceIn(0, 3000)
+
+    private fun crossfadeInMs(): Int =
+        settingsPrefsForPlayback().getInt("playback_crossfade_in_ms", 500).coerceIn(0, 3000)
+
+    /** 应用内音量：淡入的终点（不是固定 1f，尊重声音设置里的音量滑杆） */
+    private fun userVolume(): Float =
+        getSharedPreferences("playback", Context.MODE_PRIVATE)
+            .getFloat(KEY_SOUND_VOLUME, 1f)
+            .coerceIn(0f, 1f)
+
+    /** 淡出到静音后执行 action（暂停/切歌）。action 在主线程执行 */
+    private fun fadeOutThen(durationMs: Int, action: () -> Unit) {
+        val player = mediaSession?.player
+        if (player == null) return
         volumeFadeJob?.cancel()
+        val start = player.volume.coerceIn(0f, 1f)
+        if (durationMs <= 0 || start <= 0f) {
+            action()
+            return
+        }
         volumeFadeJob = serviceScope.launch {
-            val steps = 20
+            val steps = (durationMs / 40).coerceIn(4, 50)
             val stepDelay = (durationMs / steps).coerceAtLeast(1)
-            player.volume = 0f
             repeat(steps) { step ->
                 delay(stepDelay.toLong())
-                player.volume = ((step + 1).toFloat() / steps).coerceAtMost(1f)
+                if (mediaSession?.player !== player) return@launch
+                player.volume = (start * (1f - (step + 1f) / steps)).coerceAtLeast(0f)
             }
-            player.volume = 1f
-        }    }
+            if (mediaSession?.player !== player) return@launch
+            player.volume = 0f
+            action()
+        }
+    }
+
+    /** 从当前音量平滑升到用户音量 */
+    private fun startFadeIn(durationMs: Int) {
+        val player = mediaSession?.player ?: return
+        volumeFadeJob?.cancel()
+        val target = userVolume()
+        if (durationMs <= 0) {
+            player.volume = target
+            return
+        }
+        volumeFadeJob = serviceScope.launch {
+            val start = player.volume.coerceIn(0f, 1f)
+            val steps = (durationMs / 40).coerceIn(4, 50)
+            val stepDelay = (durationMs / steps).coerceAtLeast(1)
+            repeat(steps) { step ->
+                delay(stepDelay.toLong())
+                if (mediaSession?.player !== player) return@launch
+                player.volume = start + (target - start) * ((step + 1f) / steps)
+            }
+            if (mediaSession?.player !== player) return@launch
+            player.volume = target
+        }
+    }
+
+    /** 播放开始时的淡入：优先兑现交叉淡化，其次普通淡入；都没开则校正音量 */
+    private fun startFadeInIfNeeded() {
+        val player = mediaSession?.player ?: return
+        if (pendingCrossfadeIn) {
+            pendingCrossfadeIn = false
+            startFadeIn(crossfadeInMs())
+            return
+        }
+        if (playbackFadeEnabled()) {
+            val duration = fadeDurationMs()
+            if (duration > 0) {
+                startFadeIn(duration)
+                return
+            }
+        }
+        // 交叉淡化开启时，切歌后的新曲同样按交叉淡化时长淡入
+        // （否则 buffering 结束后的 isPlaying(true) 会把淡入中的音量直接顶满）
+        val target = userVolume()
+        if (crossfadeEnabled() && player.volume < target - 0.01f) {
+            startFadeIn(crossfadeInMs())
+            return
+        }
+        // 上一次淡出可能把音量留在了 0，这里恢复用户音量
+        if (player.volume != target) player.volume = target
+    }
+
+    /**
+     * 交叉淡化切歌：当前曲淡出 → 执行切歌 → 下一首真正出声时淡入。
+     * 未开启交叉淡化或当前没在播放时直接切歌（不额外引入延迟）。
+     */
+    private fun switchWithCrossfade(action: () -> Unit) {
+        val player = mediaSession?.player
+        if (player == null) return
+        if (!crossfadeEnabled() || !player.isPlaying) {
+            action()
+            return
+        }
+        pendingCrossfadeIn = true
+        fadeOutThen(crossfadeOutMs()) {
+            action()
+            val p = mediaSession?.player
+            if (p != null) {
+                p.volume = 0f
+                // 本地无缝/快速切歌时 isPlaying 可能不翻转，直接在这里兑现淡入
+                if (p.isPlaying && pendingCrossfadeIn) {
+                    pendingCrossfadeIn = false
+                    startFadeIn(crossfadeInMs())
+                }
+            }
+        }
+    }
 
     // ==================== 蓝牙/耳机断开自动停止 ====================
 
@@ -723,9 +952,22 @@ class PlayerService : MediaSessionService() {
 
     // ==================== 音频焦点 ====================
 
-    private fun setupAudioFocus(preempt: Boolean) {
+    /** 其它应用播放媒体时自动暂停（默认开启） */
+    private fun pauseOnOtherApps(): Boolean =
+        settingsPrefsForPlayback().getBoolean("playback_pause_on_other_app", true)
+
+    /** 抢占音频焦点：播放时请求独占焦点，让其它媒体让出声音 */
+    private fun preemptFocus(): Boolean =
+        settingsPrefsForPlayback().getBoolean("playback_preempt_focus", false)
+
+    /**
+     * 是否需要持有音频焦点。要收到"其它应用开始播放"的焦点丢失回调，前提是自己持有焦点，
+     * 所以自动暂停和抢占焦点两种策略都需要在播放开始时请求 AUDIOFOCUS_GAIN。
+     */
+    private fun shouldHoldAudioFocus(): Boolean = pauseOnOtherApps() || preemptFocus()
+
+    private fun setupAudioFocus() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val audioManager = getSystemService(AudioManager::class.java)
         val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -733,25 +975,66 @@ class PlayerService : MediaSessionService() {
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                     .build()
             )
-            .setOnAudioFocusChangeListener { change ->
-                when (change) {
-                    AudioManager.AUDIOFOCUS_LOSS,
-                    AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                        // 其他 app 接管音频：释放独占会话并抑制重开，
-                        // 避免 libusb 与系统侧双写 USB DAC 等时端点（包错误/沙沙声）
-                        usbExclusiveSink?.setFocusInhibited(true)
-                        mediaSession?.player?.pause()
-                    }
-                    AudioManager.AUDIOFOCUS_GAIN -> {
-                        // 焦点回归：解除抑制，恢复播放由用户操作触发
-                        usbExclusiveSink?.setFocusInhibited(false)
-                    }
-                }
-            }
+            // 被系统要求压低音量时直接暂停，而不是继续以低音量播放
+            .setWillPauseWhenDucked(true)
+            .setOnAudioFocusChangeListener(
+                { change -> handleAudioFocusChange(change) },
+                Handler(Looper.getMainLooper())
+            )
             .build()
         audioFocusRequest = focusRequest
-        if (preempt) {
-            runCatching { audioManager.requestAudioFocus(focusRequest) }
+    }
+
+    /**
+     * 焦点变化：
+     * - LOSS / LOSS_TRANSIENT：其它应用要出声。自动暂停开启时暂停（默认行为）；
+     *   暂时性丢失保留焦点租约，焦点回来时续播；永久性丢失放弃焦点，等待用户手动播放。
+     * - GAIN：解除 USB 独占抑制，暂时性丢失期间暂停的播放自动续播。
+     */
+    private fun handleAudioFocusChange(change: Int) {
+        val player = mediaSession?.player ?: return
+        android.util.Log.i(
+            "LxMusic",
+            "音频焦点变化: $change, playWhenReady=${player.playWhenReady}, " +
+                "pauseOnOtherApp=${pauseOnOtherApps()}, preempt=${preemptFocus()}"
+        )
+        when (change) {
+            AudioManager.AUDIOFOCUS_LOSS,
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                // 其他 app 接管音频：释放独占会话并抑制重开，
+                // 避免 libusb 与系统侧双写 USB DAC 等时端点（包错误/沙沙声）
+                usbExclusiveSink?.setFocusInhibited(true)
+                if (!pauseOnOtherApps() || !player.playWhenReady) return
+                val transient = change != AudioManager.AUDIOFOCUS_LOSS
+                keepFocusOnPause = transient
+                resumeAfterTransientFocusLoss = transient
+                suppressPauseFade = true
+                runCatching { player.pause() }
+                suppressPauseFade = false
+            }
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                usbExclusiveSink?.setFocusInhibited(false)
+                if (resumeAfterTransientFocusLoss) {
+                    resumeAfterTransientFocusLoss = false
+                    if (!player.playWhenReady) player.play()
+                }
+            }
+        }
+    }
+
+    /** 设置页切换焦点策略后立即生效（播放中也能改） */
+    private fun refreshAudioFocusPolicy() {
+        val player = mediaSession?.player ?: return
+        if (shouldHoldAudioFocus() || usbExclusiveActive()) {
+            if (player.playWhenReady) acquireAudioFocus()
+        } else if (!usbExclusiveActive()) {
+            abandonAudioFocus()
+        }
+        // 关闭淡入/交叉淡化后，避免上一次淡出把音量留在 0
+        if (!playbackFadeEnabled() && !crossfadeEnabled()) {
+            val target = userVolume()
+            if (player.volume != target) player.volume = target
         }
     }
 
@@ -885,22 +1168,14 @@ class PlayerService : MediaSessionService() {
         }
     }
 
-    private fun startForegroundIfNeeded() {
-        val player = mediaSession?.player ?: return
-        if (player.isPlaying) {
-            // 启动前台服务，确保通知栏显示媒体控制
-            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(R.mipmap.ic_launcher_foreground)
-                .setContentTitle(player.currentMediaItem?.mediaMetadata?.title ?: "正在播放")
-                .setContentText(player.currentMediaItem?.mediaMetadata?.artist ?: "未知歌手")
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                .setOngoing(true)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
-                .build()
-            startForeground(NOTIFICATION_ID, notification)
-        }
-    }
+    /*
+     * 通知栏/前台服务：完全交给 Media3 的 MediaSessionService + DefaultMediaNotificationProvider 管理。
+     * 这里曾额外用 startForeground(NOTIFICATION_ID=1001) 发过一条普通通知，和 Media3 媒体通知
+     * 使用同一个 id（DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID=1001）互相覆盖：
+     * 切歌时 isPlaying 从 false→true 会把带 MediaStyle 的媒体通知换成没有 MediaSession 的普通通知，
+     * 系统媒体卡片（状态栏/锁屏的整块歌曲控件）因此整块消失，随后 Media3 再更新又冒出来。
+     * 不要在这里自行 startForeground。
+     */
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
         return mediaSession
@@ -949,6 +1224,7 @@ class PlayerService : MediaSessionService() {
         }
         volumeChangeReceiver = null
         UsbExclusiveVolumeRoutingSession.refresh(this, active = false)
+        EqualizerController.release()
         mediaSession?.run {
             player.release()
             release()

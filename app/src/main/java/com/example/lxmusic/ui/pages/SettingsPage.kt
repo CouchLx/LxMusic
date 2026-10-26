@@ -535,6 +535,8 @@ fun SettingsPage(
     onPlaybackHighResChange: (Boolean) -> Unit = {},
     playbackPreemptFocus: Boolean = false,
     onPlaybackPreemptFocusChange: (Boolean) -> Unit = {},
+    playbackPauseOnOtherApp: Boolean = true,
+    onPlaybackPauseOnOtherAppChange: (Boolean) -> Unit = {},
     settingsSubPage: String? = null,
     onSettingsSubPageChange: (String?) -> Unit = {},
     themeDarkMode: String = "auto",
@@ -917,6 +919,8 @@ fun SettingsPage(
                         onPlaybackHighResChange = onPlaybackHighResChange,
                         playbackPreemptFocus = playbackPreemptFocus,
                         onPlaybackPreemptFocusChange = onPlaybackPreemptFocusChange,
+                        playbackPauseOnOtherApp = playbackPauseOnOtherApp,
+                        onPlaybackPauseOnOtherAppChange = onPlaybackPauseOnOtherAppChange,
                         settingsPrefs = settingsPrefs
                     )
                 }
@@ -3837,6 +3841,8 @@ fun SettingsPlaybackContent(
     onPlaybackHighResChange: (Boolean) -> Unit,
     playbackPreemptFocus: Boolean,
     onPlaybackPreemptFocusChange: (Boolean) -> Unit,
+    playbackPauseOnOtherApp: Boolean,
+    onPlaybackPauseOnOtherAppChange: (Boolean) -> Unit,
     settingsPrefs: android.content.SharedPreferences
 ) {
     val context = LocalContext.current
@@ -3952,7 +3958,20 @@ fun SettingsPlaybackContent(
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
                 )
 
-                // (3) 抢占音频焦点
+                // (3) 其它应用播放时自动暂停
+                PlayerSettingSwitchRow(
+                    title = "其它应用播放时自动暂停",
+                    subtitle = "检测到其它应用开始播放媒体（如视频、短视频、语音）时自动暂停本应用，避免声音叠加",
+                    checked = playbackPauseOnOtherApp,
+                    onCheckedChange = onPlaybackPauseOnOtherAppChange
+                )
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                )
+
+                // (4) 抢占音频焦点
                 PlayerSettingSwitchRow(
                     title = "抢占音频焦点",
                     subtitle = "启动播放时主动请求系统独占焦点，暂停其他媒体声音",
@@ -3965,7 +3984,7 @@ fun SettingsPlaybackContent(
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
                 )
 
-                // (4) 声道平衡
+                // (5) 声道平衡
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -4214,7 +4233,7 @@ fun SettingsPlaybackContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "淡入时长",
+                                text = "淡入 / 淡出时长",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Medium
                             )

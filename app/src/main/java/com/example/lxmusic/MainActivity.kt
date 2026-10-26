@@ -279,6 +279,8 @@ import com.example.lxmusic.ui.pages.LocalMusicPage
 import com.example.lxmusic.ui.pages.LocalMusicTopBar
 import com.example.lxmusic.ui.pages.SearchTopBar
 import com.example.lxmusic.ui.pages.SettingsPage
+import com.example.lxmusic.ui.pages.EqualizerPage
+import com.example.lxmusic.ui.pages.SoundSettingsPage
 import com.example.lxmusic.util.applyPreferredHighRefreshRate
 import com.example.lxmusic.MusicDatabase
 import kotlinx.coroutines.Dispatchers
@@ -670,10 +672,11 @@ fun AppScaffold(
     val playerViewModel: PlayerViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val uiState by playerViewModel.uiState.collectAsState()
     val audioFormat by playerViewModel.audioFormat.collectAsState()
-    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     // 未激活 = 「本地/插件模式」：有在线服务（BFF）但未激活时启用精简界面。
     // 开源构建（无 BFF）不做激活门禁，isGuest 恒为 false，保持原有界面与逻辑。
     val isGuest = KuGouApi.bffUrl.isNotBlank() && !ActivationState.canUseVip
+    // 初始 tab 按模式选择：未激活直接落在搜索（11），避免冷启动先组合一帧首页触发首页请求
+    var selectedTab by rememberSaveable { mutableIntStateOf(if (isGuest) 11 else 0) }
     // 两种模式的顶层 tab 集合（未激活没有首页，搜索成为顶层 tab）
     val topLevelTabs = remember(isGuest) { if (isGuest) setOf(11, 1, 2) else setOf(0, 1, 2) }
     // 未激活搜索音源：本地 + 公开元数据搜索 + 已启用插件。
@@ -715,6 +718,9 @@ fun AppScaffold(
     var themeRevealFallbackColor by remember { mutableStateOf<Color?>(null) }
     val currentBgColor = MaterialTheme.colorScheme.background
     var showPlayerPage by rememberSaveable { mutableStateOf(false) }
+    // 播放器菜单 → 独立页面（声音设置 / 均衡器）：覆盖在播放器之上，返回键优先关闭
+    var showSoundSettingsPage by rememberSaveable { mutableStateOf(false) }
+    var showEqualizerPage by rememberSaveable { mutableStateOf(false) }
     // 歌词页状态：由播放器翻页器驱动，此处仅作进程重建时的持久化镜像
     var showLyricsPage by rememberSaveable { mutableStateOf(false) }
     // 播放器 ↔ 歌词页翻页器（0=播放页 1=歌词页）。hoist 到 MainActivity 层：
@@ -1045,6 +1051,7 @@ fun AppScaffold(
     var playbackVolumeBalance by remember { mutableFloatStateOf(settingsRepository.playbackVolumeBalance) }
     var playbackHighRes by remember { mutableStateOf(settingsRepository.playbackHighRes) }
     var playbackPreemptFocus by remember { mutableStateOf(settingsRepository.playbackPreemptFocus) }
+    var playbackPauseOnOtherApp by remember { mutableStateOf(settingsRepository.playbackPauseOnOtherApp) }
     var backgroundImageUri by remember {
         val saved = settingsRepository.bgImagePath
         mutableStateOf(saved?.let { Uri.fromFile(File(it)).toString() })
@@ -1251,6 +1258,7 @@ fun AppScaffold(
     // 未激活时搜索是顶层 tab：不拦截系统返回，直接退出应用
     val backEnabled = showLoginPage || showRankDetail != null || showPublicPlaylist != null ||
         showPublicAlbum != null || showPlayerPage ||
+        showSoundSettingsPage || showEqualizerPage ||
         selectedTab == 3 || selectedTab in 4..7 || selectedTab in 8..10 ||
         (selectedTab == 11 && !isGuest) ||
         selectedTab == 12 || selectedTab == 13 || selectedTab == 14 ||
@@ -1281,6 +1289,9 @@ fun AppScaffold(
     androidx.activity.compose.BackHandler(enabled = backEnabled) {
         when {
             showLoginPage -> showLoginPage = false
+            // 播放器菜单弹出的独立页面在最上层：先关页面，再处理播放器
+            showEqualizerPage -> showEqualizerPage = false
+            showSoundSettingsPage -> showSoundSettingsPage = false
             // 播放器在最上层：先处理播放器，避免一次返回先把下层榜单/歌单关掉
             showPlayerPage -> {
                 // 返回键两级：歌词页先回播放页，播放页再收起（带滑出动画）
@@ -2681,6 +2692,15 @@ fun AppScaffold(
                                 playbackPreemptFocus = enabled
                                 settingsRepository.playbackPreemptFocus = enabled
                             },
+                            playbackPauseOnOtherApp = playbackPauseOnOtherApp,
+                            onPlaybackPauseOnOtherAppChange = { enabled ->
+                                playbackPauseOnOtherApp = enabled
+                                settingsRepository.playbackPauseOnOtherApp = enabled
+                                // 立即刷新服务的音频焦点策略（播放中切换也生效）
+                                context.sendBroadcast(
+                                    android.content.Intent("com.example.lxmusic.SETTINGS_CHANGED")
+                                )
+                            },
                             themeDarkMode = themeDarkMode,
                             onThemeDarkModeChange = { value ->
                                 onThemeDarkModeChange(value)
@@ -3109,6 +3129,8 @@ fun AppScaffold(
                             playerViewModel.startSleepTimer(minutes, extend)
                         },
                         onStopSleepTimer = { playerViewModel.cancelSleepTimer() },
+                        onOpenSoundSettings = { showSoundSettingsPage = true },
+                        onOpenEqualizer = { showEqualizerPage = true },
                         playMode = playMode,
                         onPlayModeChange = { newMode -> playerViewModel.setPlayMode(newMode) },
                         isFavorite = isCurrentSongFavorite,
@@ -3257,6 +3279,35 @@ fun AppScaffold(
                         lyricsText = currentLyricsText
                 )
             }
+        }
+
+        // ===== 播放器菜单弹出的独立页面（声音设置 / 均衡器）：覆盖播放器，返回键先关页面 =====
+        if (showEqualizerPage) {
+            EqualizerPage(onBack = { showEqualizerPage = false })
+        }
+        if (showSoundSettingsPage) {
+            SoundSettingsPage(
+                playerViewModel = playerViewModel,
+                audioFormat = audioFormat,
+                balance = playbackVolumeBalance,
+                onBalanceChange = { value ->
+                    playbackVolumeBalance = value
+                    settingsRepository.playbackVolumeBalance = value
+                    com.example.lxmusic.util.PlaybackVolumeBalanceState.update(value)
+                },
+                normalization = playbackVolumeNormalization,
+                onNormalizationChange = { enabled ->
+                    playbackVolumeNormalization = enabled
+                    settingsRepository.playbackVolumeNormalization = enabled
+                    com.example.lxmusic.util.PlaybackVolumeNormalizationState.updateEnabled(enabled)
+                },
+                highRes = playbackHighRes,
+                onHighResChange = { enabled ->
+                    playbackHighRes = enabled
+                    settingsRepository.playbackHighRes = enabled
+                },
+                onBack = { showSoundSettingsPage = false }
+            )
         }
 
         // 播放列表面板

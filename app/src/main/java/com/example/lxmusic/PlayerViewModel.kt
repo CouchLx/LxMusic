@@ -52,6 +52,30 @@ data class PlayerUiState(
 }
 
 /**
+ * 声音设置页状态：音量 / 变速变调 / 跳过静音。
+ * fixedPitch=true 表示音调跟随速度（pitch 滑杆禁用），与 BoomingMusic 语义一致。
+ */
+data class SoundUiState(
+    val volume: Float = 1f,
+    val speed: Float = 1f,
+    val pitch: Float = 1f,
+    val fixedPitch: Boolean = true,
+    val skipSilence: Boolean = false
+) {
+    /** 界面显示的音调值：锁定跟随速度时直接显示速度 */
+    val displayPitch: Float get() = if (fixedPitch) speed else pitch
+}
+
+const val MIN_SOUND_SPEED = 0.5f
+const val MAX_SOUND_SPEED = 2.0f
+const val KEY_SOUND_VOLUME = "sound_volume"
+const val KEY_SOUND_SPEED = "sound_speed"
+const val KEY_SOUND_PITCH = "sound_pitch"
+const val KEY_SOUND_FIXED_PITCH = "sound_fixed_pitch"
+const val KEY_SOUND_SKIP_SILENCE = "sound_skip_silence"
+const val ACTION_SET_SKIP_SILENCE = "com.example.lxmusic.action.SET_SKIP_SILENCE"
+
+/**
  * 播放器状态管理：负责 MediaController 连接、播放队列、播放状态与进度。
  * 从 MainActivity 中抽出，使进度变化只重组订阅 progress 的组件，避免整页重组。
  */
@@ -72,6 +96,20 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     // 当前音频格式（采样率/位深/编码，来自 PlayerService 的 ExoPlayer；无信息时为 null）
     private val _audioFormat = MutableStateFlow<androidx.media3.common.Format?>(null)
     val audioFormat: StateFlow<androidx.media3.common.Format?> = _audioFormat.asStateFlow()
+
+    // 声音设置（音量/变速变调/跳过静音）：PlayerService 启动时按同一份 prefs 恢复
+    private val _soundState = MutableStateFlow(
+        SoundUiState(
+            volume = playbackPrefs.getFloat(KEY_SOUND_VOLUME, 1f).coerceIn(0f, 1f),
+            speed = playbackPrefs.getFloat(KEY_SOUND_SPEED, 1f)
+                .coerceIn(MIN_SOUND_SPEED, MAX_SOUND_SPEED),
+            pitch = playbackPrefs.getFloat(KEY_SOUND_PITCH, 1f)
+                .coerceIn(MIN_SOUND_SPEED, MAX_SOUND_SPEED),
+            fixedPitch = playbackPrefs.getBoolean(KEY_SOUND_FIXED_PITCH, true),
+            skipSilence = playbackPrefs.getBoolean(KEY_SOUND_SKIP_SILENCE, false)
+        )
+    )
+    val soundState: StateFlow<SoundUiState> = _soundState.asStateFlow()
 
     private var controller: MediaController? = null
     private var restored = false
@@ -124,6 +162,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private fun onControllerReady(c: MediaController) {
         applyPlayMode(c, _uiState.value.playMode)
         c.addListener(playerListener)
+        // 以控制器实际状态为准（PlayerService 启动时已按 prefs 恢复）
+        _soundState.update {
+            it.copy(
+                volume = c.volume,
+                speed = c.playbackParameters.speed,
+                pitch = if (it.fixedPitch) c.playbackParameters.speed else c.playbackParameters.pitch
+            )
+        }
         restoreIfNeeded(c)
         pendingPlay?.let { p ->
             pendingPlay = null
@@ -220,6 +266,24 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             } else {
                 Toast.makeText(getApplication(), "播放列表已结束", Toast.LENGTH_SHORT).show()
             }
+        }
+
+        // ===== 声音设置状态同步（系统音量键/其他控制器改动时界面跟随） =====
+        override fun onVolumeChanged(volume: Float) {
+            _soundState.update { it.copy(volume = volume) }
+        }
+
+        override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
+            _soundState.update {
+                it.copy(
+                    speed = playbackParameters.speed,
+                    pitch = if (it.fixedPitch) playbackParameters.speed else playbackParameters.pitch
+                )
+            }
+        }
+
+        override fun onSkipSilenceEnabledChanged(enabled: Boolean) {
+            _soundState.update { it.copy(skipSilence = enabled) }
         }
     }
 
@@ -344,30 +408,73 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // 切歌交叉淡化（对齐 Neri：淡出当前曲 → 切歌 → 淡入下一首）
-    private suspend fun crossfadeToNext(block: () -> Unit) {
-        val c = controller ?: return
-        val enabled = settingsPrefs.getBoolean("playback_crossfade_next", false)
-        if (!enabled) {
-            block()
-            return
-        }
-        val outMs = settingsPrefs.getInt("playback_crossfade_out_ms", 500)
-        val inMs = settingsPrefs.getInt("playback_crossfade_in_ms", 500)
-        val steps = 10
-        val outDelay = (outMs / steps).coerceAtLeast(1)
-        repeat(steps) { i ->
-            c.volume = (1f - (i + 1).toFloat() / steps).coerceAtLeast(0f)
-            delay(outDelay.toLong())
-        }
+    // 切歌交叉淡化统一由 PlayerService 的服务侧播放器处理：
+    // UI、通知栏、锁屏、蓝牙按键走同一条淡出→切歌→淡入链路，这里只执行切歌动作，
+    // 避免 ViewModel 和 Service 两层各淡出一次。
+    private fun crossfadeToNext(block: () -> Unit) {
         block()
-        c.volume = 0f
-        val inDelay = (inMs / steps).coerceAtLeast(1)
-        repeat(steps) { i ->
-            c.volume = ((i + 1).toFloat() / steps).coerceAtMost(1f)
-            delay(inDelay.toLong())
+    }
+
+    // ==================== 声音设置 ====================
+
+    fun setVolume(volume: Float) {
+        val clamped = volume.coerceIn(0f, 1f)
+        _soundState.update { it.copy(volume = clamped) }
+        playbackPrefs.edit().putFloat(KEY_SOUND_VOLUME, clamped).apply()
+        controller?.volume = clamped
+    }
+
+    fun setSpeed(speed: Float) {
+        val clamped = speed.coerceIn(MIN_SOUND_SPEED, MAX_SOUND_SPEED)
+        _soundState.update { it.copy(speed = clamped) }
+        playbackPrefs.edit().putFloat(KEY_SOUND_SPEED, clamped).apply()
+        applyPlaybackParameters()
+    }
+
+    fun setPitch(pitch: Float) {
+        if (_soundState.value.fixedPitch) return
+        val clamped = pitch.coerceIn(MIN_SOUND_SPEED, MAX_SOUND_SPEED)
+        _soundState.update { it.copy(pitch = clamped) }
+        playbackPrefs.edit().putFloat(KEY_SOUND_PITCH, clamped).apply()
+        applyPlaybackParameters()
+    }
+
+    /** 锁定音调跟随速度（true）/ 解锁独立变调（false） */
+    fun setFixedPitch(fixed: Boolean) {
+        _soundState.update {
+            it.copy(fixedPitch = fixed, pitch = if (fixed) it.speed else it.pitch)
         }
-        c.volume = 1f
+        playbackPrefs.edit().putBoolean(KEY_SOUND_FIXED_PITCH, fixed).apply()
+        applyPlaybackParameters()
+    }
+
+    fun resetSpeedAndPitch() {
+        _soundState.update { it.copy(speed = 1f, pitch = 1f) }
+        playbackPrefs.edit()
+            .putFloat(KEY_SOUND_SPEED, 1f)
+            .putFloat(KEY_SOUND_PITCH, 1f)
+            .apply()
+        applyPlaybackParameters()
+    }
+
+    fun setSkipSilence(enabled: Boolean) {
+        _soundState.update { it.copy(skipSilence = enabled) }
+        playbackPrefs.edit().putBoolean(KEY_SOUND_SKIP_SILENCE, enabled).apply()
+        // Player/MediaController 没有跳过静音的公开接口，走会话自定义命令交给 PlayerService
+        val c = controller ?: return
+        runCatching {
+            c.sendCustomCommand(
+                androidx.media3.session.SessionCommand(ACTION_SET_SKIP_SILENCE, android.os.Bundle.EMPTY),
+                android.os.Bundle().apply { putBoolean("enabled", enabled) }
+            )
+        }
+    }
+
+    private fun applyPlaybackParameters() {
+        val state = _soundState.value
+        val targetPitch = if (state.fixedPitch) state.speed else state.pitch
+        val params = androidx.media3.common.PlaybackParameters(state.speed, targetPitch)
+        runCatching { controller?.playbackParameters = params }
     }
 
     fun seekTo(positionMs: Long) {
