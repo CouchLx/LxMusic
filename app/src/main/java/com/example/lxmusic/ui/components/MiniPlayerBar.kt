@@ -119,6 +119,9 @@ fun MiniPlayerBar(
     playerBarOpacity: Float = 1f,
     playerBarWhiteBlend: Float = 0.8f,
     liquidGlass: Boolean = false,
+    // 原生主题下液态玻璃播放条会出显示 bug：降级成「毛玻璃」（只模糊、不做透镜折射）。
+    // 由调用方按主题传入；现代主题仍走液态玻璃。其它组件/布局完全不受影响。
+    frostedGlass: Boolean = false,
     // 有自定义壁纸才启用玻璃；纯色主题改用实色播放条，避免糊成灰块
     hasCustomWallpaper: Boolean = false,
     backdrop: Backdrop? = null,
@@ -191,7 +194,10 @@ fun MiniPlayerBar(
 
     // 液态玻璃：开启且背景层可用时启用（与导航栏保持一致的苹果风格）
     val isDarkTheme = isSystemInDarkTheme()
-    val glassActive = liquidGlass && backdrop != null && hasCustomWallpaper
+    // 不再要求必须有自定义壁纸：纯色主题下也要有玻璃质感，否则开关看起来像没生效
+    val glassActive = liquidGlass && backdrop != null
+    // 毛玻璃降级（原生主题）：只模糊背板，不做透镜折射
+    val frostedActive = !glassActive && frostedGlass && backdrop != null
     // 玻璃容器色：半透明材质并注入当前主题/专辑微光 tint
     val glassContainerColor = MaterialTheme.colorScheme.surfaceContainer.copy(
         alpha = (0.24f * barOpacity).coerceIn(0.08f, 1f)
@@ -245,6 +251,34 @@ fun MiniPlayerBar(
                             onDrawSurface = {
                                 drawRect(glassContainerColor)
                                 drawRect(primaryColor.copy(alpha = if (isDarkTheme) 0.10f else 0.08f))
+                            }
+                        )
+                    } else if (frostedActive) {
+                        // 毛玻璃降级（原生主题）：背板模糊 + 半透明表面，不做透镜折射
+                        Modifier.drawBackdrop(
+                            backdrop = backdrop,
+                            shape = { barShape },
+                            effects = {
+                                blur(18.dp.toPx())
+                            },
+                            highlight = {
+                                Highlight.Default.copy(
+                                    alpha = if (isDarkTheme) 0.10f else 0.16f
+                                )
+                            },
+                            shadow = {
+                                Shadow.Default.copy(
+                                    color = Color.Black.copy(if (isDarkTheme) 0.12f else 0.06f)
+                                )
+                            },
+                            onDrawSurface = {
+                                drawRect(glassContainerColor)
+                                // 轻微跟随主题色（只是一点点染色，不改变磨砂观感）
+                                drawRect(
+                                    primaryColor.copy(
+                                        alpha = if (isDarkTheme) 0.08f else 0.05f
+                                    )
+                                )
                             }
                         )
                     } else {

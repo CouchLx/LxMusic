@@ -49,6 +49,41 @@ import kotlinx.coroutines.withContext
  * 3. 硬件级高斯漫反射（Android 12+ RenderEffect MIRROR 镜像）+ 1.3 倍缩放抗裁剪黑边。
  * 4. 底部非线性暗化遮罩，兼顾流光溢彩与歌词文字极佳可读性。
  */
+/** 进程级流体配色缓存：key = 封面 model + 明暗。进入播放器首帧直接命中，避免默认色闪一下。 */
+private val fluidColorCache =
+    java.util.concurrent.ConcurrentHashMap<String, List<Color>>()
+
+private fun fluidCacheKey(model: Any?, isDark: Boolean): String? =
+    model?.toString()?.takeIf { it.isNotBlank() }?.let { "$it|$isDark" }
+
+/**
+ * 预热灵动流体配色：换歌时调用。
+ * 不预热的话，进入播放器会先显示默认紫蓝色，再花 1.2s 渐变到封面配色。
+ */
+suspend fun warmFluidColorCache(
+    context: android.content.Context,
+    imageLoader: coil.ImageLoader,
+    model: Any,
+    isDark: Boolean
+) {
+    val key = fluidCacheKey(model, isDark) ?: return
+    if (fluidColorCache.containsKey(key)) return
+    withContext(Dispatchers.IO) {
+        try {
+            val request = ImageRequest.Builder(context)
+                .data(model)
+                .size(200)
+                .allowHardware(false)
+                .build()
+            val result = imageLoader.execute(request)
+            if (result is SuccessResult) {
+                val colors = extractVibrantColorsImproved(result.drawable.toBitmap(), isDark)
+                if (colors.size >= 4) fluidColorCache[key] = colors
+            }
+        } catch (_: Exception) {}
+    }
+}
+
 @Composable
 fun FluidAmbientBackground(
     coverModel: Any?,
@@ -79,10 +114,20 @@ fun FluidAmbientBackground(
         }
     }
 
-    var fluidColors by remember { mutableStateOf(defaultColors) }
+    var fluidColors by remember {
+        mutableStateOf(
+            fluidCacheKey(coverModel, isDark)?.let { fluidColorCache[it] } ?: defaultColors
+        )
+    }
 
-    LaunchedEffect(coverModel) {
+    LaunchedEffect(coverModel, isDark) {
         if (coverModel == null) return@LaunchedEffect
+        val cacheKey = fluidCacheKey(coverModel, isDark)
+        // 预热命中：直接用封面色，不再从默认色慢速渐变过来
+        cacheKey?.let { fluidColorCache[it] }?.let {
+            fluidColors = it
+            return@LaunchedEffect
+        }
         withContext(Dispatchers.IO) {
             try {
                 // 复用组合级单例：每封面 new ImageLoader 会泄漏独立线程池与内存缓存
@@ -99,6 +144,7 @@ fun FluidAmbientBackground(
                     val newColors = extractVibrantColorsImproved(bitmap, isDark)
                     if (newColors.size >= 4) {
                         fluidColors = newColors
+                        cacheKey?.let { fluidColorCache[it] = newColors }
                     }
                 }
             } catch (_: Exception) {}
@@ -160,8 +206,7 @@ fun FluidAmbientBackground(
                 )
         ) {
             FluidCanvas(
-                colors = listOf(c1, c2, c3, c4),
-                playing = playing
+                colors = listOf(c1, c2, c3, c4)
             )
         }
 
@@ -183,15 +228,16 @@ fun FluidAmbientBackground(
 
 @Composable
 private fun FluidCanvas(
-    colors: List<Color>,
-    playing: Boolean
+    colors: List<Color>
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "fluid_movement")
 
-    // 三种互质周期（15s, 23s, 18s），打破规律感
+    // 三种互质周期（15s, 23s, 18s），打破规律感。
+    // 注意 targetValue 必须恒定：之前绑定 playing（1f/0.5f），播放状态一变
+    // infiniteRepeatable 会从 0 重新开始 → 光斑瞬移，看起来像"闪一下"。
     val t1 by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = if (playing) 1f else 0.5f,
+        targetValue = 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(15000, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
@@ -200,7 +246,7 @@ private fun FluidCanvas(
     )
     val t2 by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = if (playing) 1f else 0.5f,
+        targetValue = 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(23000, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
@@ -209,7 +255,7 @@ private fun FluidCanvas(
     )
     val t3 by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = if (playing) 1f else 0.5f,
+        targetValue = 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(18000, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse

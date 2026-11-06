@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -57,10 +58,14 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -149,67 +154,16 @@ fun ModernHomeTopBar(
             .fillMaxWidth()
             .height(topBarHeight)
     ) {
-        val isGlass = liquidGlass && backdrop != null && hasCustomWallpaper
-        val useWallpaperHaze = hasCustomWallpaper && hazeState != null
-        when {
-            // 壁纸模式：渐进模糊（顶部满强度 → 底边强度归零）+ 极轻纱罩。
-            // 模糊由 haze 从背景层实时采样，滑到顶栏下方的内容会一起被磨砂掉，
-            // 而不是被一块半透明色直接盖住。
-            useWallpaperHaze -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .hazeEffect(
-                            state = hazeState,
-                            style = HazeStyle(
-                                backgroundColor = Color.Unspecified,
-                                tints = emptyList(),
-                                blurRadius = blurRadius,
-                                noiseFactor = if (isDark) 0.07f else 0.05f
-                            )
-                        ) {
-                            // 顶边就是屏幕边缘，钳制采样，避免把屏外透明像素糊进来
-                            blurredEdgeTreatment = BlurredEdgeTreatment.Rectangle
-                            progressive = HazeProgressive.verticalGradient(
-                                easing = LinearEasing,
-                                startY = 0f,
-                                startIntensity = 1f,
-                                endY = Float.POSITIVE_INFINITY,
-                                endIntensity = 0f
-                            )
-                        }
-                )
-                Box(modifier = Modifier.fillMaxSize().background(scrimBrush))
-                Box(modifier = Modifier.fillMaxSize().background(tintBrush))
-            }
-            isGlass -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .drawBackdrop(
-                            backdrop = backdrop,
-                            shape = { RectangleShape },
-                            effects = {
-                                vibrancy()
-                                blur(10.dp.toPx())
-                            },
-                            onDrawSurface = {
-                                drawRect(brush = scrimBrush)
-                                drawRect(brush = tintBrush)
-                            }
-                        )
-                )
-            }
-            else -> {
-                // 纯色主题：只留背景色 → 透明的垂直渐变（内容从顶栏下柔和淡出），
-                // 不叠模糊/主题微染，避免在纯色背景上出现一块灰色"浆糊"
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(scrimBrush)
-                )
-            }
-        }
+        ModernTopBarBackground(
+            backdrop = backdrop,
+            liquidGlass = liquidGlass,
+            hasCustomWallpaper = hasCustomWallpaper,
+            hazeState = hazeState,
+            blurRadius = blurRadius,
+            isDark = isDark,
+            scrimBrush = scrimBrush,
+            tintBrush = tintBrush
+        )
 
         // 浮在羽化层上方的悬浮双胶囊 Row
         Row(
@@ -331,6 +285,128 @@ fun ModernHomeTopBar(
 }
 
 /**
+ * 现代主题「我的」页悬浮顶栏：与首页共用同一套背景/胶囊材质。
+ * 左侧固定标题「我的」，右侧只保留一个圆形设置按键（比胶囊内图标更大）；
+ * 高度与首页一致（状态栏 + 54dp），保证三个顶层页面切换时顶栏不跳变。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ModernMineTopBar(
+    onSettings: () -> Unit,
+    backdrop: Backdrop? = null,
+    liquidGlass: Boolean = false,
+    hasCustomWallpaper: Boolean = false,
+    hazeState: HazeState? = null,
+    modifier: Modifier = Modifier
+) {
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val solidHeight = statusBarTop + 8.dp
+    val fadeHeight = 46.dp
+    val topBarHeight = solidHeight + fadeHeight
+    val solidRatio = (solidHeight / topBarHeight).coerceIn(0.1f, 0.85f)
+    val bgColor = MaterialTheme.colorScheme.background
+    val primaryColor = MaterialTheme.colorScheme.primary
+
+    val scrimBrush = remember(bgColor, isDark, hasCustomWallpaper, solidRatio) {
+        if (hasCustomWallpaper) {
+            val veil = if (isDark) Color.Black else Color.White
+            verticalFadeBrush(
+                color = veil,
+                topAlpha = if (isDark) 0.34f else 0.42f,
+                solidRatio = solidRatio
+            )
+        } else {
+            verticalFadeBrush(color = bgColor, topAlpha = 1f, solidRatio = solidRatio)
+        }
+    }
+    val tintBrush = remember(primaryColor, solidRatio) {
+        verticalFadeBrush(color = primaryColor, topAlpha = 0.05f, solidRatio = solidRatio, steps = 6)
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(topBarHeight)
+    ) {
+        ModernTopBarBackground(
+            backdrop = backdrop,
+            liquidGlass = liquidGlass,
+            hasCustomWallpaper = hasCustomWallpaper,
+            hazeState = hazeState,
+            blurRadius = 20.dp,
+            isDark = isDark,
+            scrimBrush = scrimBrush,
+            tintBrush = tintBrush
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = statusBarTop + 3.dp, bottom = 6.dp)
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // 左侧固定标题「我的」：直接压在顶栏模糊层上，不再包胶囊底
+            Text(
+                text = "我的",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+
+            // 右侧：单个圆形设置按键（比原来的胶囊内图标更大）
+            ModernCapsuleContainer(
+                modifier = Modifier.size(42.dp),
+                backdrop = backdrop,
+                liquidGlass = liquidGlass,
+                hasCustomWallpaper = hasCustomWallpaper
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { onSettings() }
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = stringResource(R.string.title_settings),
+                        modifier = Modifier.size(22.dp),
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 顶栏背景材质：壁纸渐进磨砂 / 液态玻璃 / 纯色渐隐，首页与「我的」共用，
+ * 保证两个页面切换时顶栏观感完全一致。
+ */
+@Composable
+private fun ModernTopBarBackground(
+    backdrop: Backdrop?,
+    liquidGlass: Boolean,
+    hasCustomWallpaper: Boolean,
+    hazeState: HazeState?,
+    blurRadius: androidx.compose.ui.unit.Dp,
+    isDark: Boolean,
+    scrimBrush: Brush,
+    tintBrush: Brush
+) {
+    // 顶栏自身始终透明：无论有没有壁纸，都由内容层的 DstIn 渐隐统一处理「顶部渐变模糊」，
+    // 保证两种状态下观感一致（有壁纸时露出壁纸、无壁纸时渐隐到背景色）。
+    // 液态玻璃胶囊直接浮在这层之上，不再叠一层顶栏渐隐。
+}
+
+/**
  * 左侧一键播放模式胶囊
  */
 @Composable
@@ -351,6 +427,11 @@ private fun ModernPlayModeCapsule(
         else -> "顺序"
     }
 
+    // 浅色主题微染胶囊：强调用主题主色，次级图标/分隔线用表面前景色
+    val capsuleAccent = MaterialTheme.colorScheme.primary
+    val capsuleContent = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+    val capsuleDivider = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)
+
     ModernCapsuleContainer(
         modifier = modifier
             .alpha(if (hasSongs) 1f else 0.45f)
@@ -368,7 +449,7 @@ private fun ModernPlayModeCapsule(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier.size(20.dp)
             ) {
-                ModernPlayEqIcon(playing = isThisPlaying)
+                ModernPlayEqIcon(playing = isThisPlaying, tint = capsuleAccent)
             }
 
             Spacer(modifier = Modifier.width(6.dp))
@@ -378,7 +459,7 @@ private fun ModernPlayModeCapsule(
                 text = modeLabel,
                 style = MaterialTheme.typography.labelLarge.copy(fontSize = 13.5.sp),
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
+                color = capsuleAccent,
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .clickable(
@@ -403,7 +484,7 @@ private fun ModernPlayModeCapsule(
                     imageVector = if (isThisPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                     contentDescription = if (isThisPlaying) "暂停" else stringResource(R.string.action_play_all),
                     modifier = Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.primary
+                    tint = capsuleAccent
                 )
             }
 
@@ -412,7 +493,7 @@ private fun ModernPlayModeCapsule(
                 modifier = Modifier
                     .width(0.8.dp)
                     .height(15.dp)
-                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f))
+                    .background(capsuleDivider)
             )
 
             // 下拉展开切换模式
@@ -429,7 +510,7 @@ private fun ModernPlayModeCapsule(
                 Icon(
                     imageVector = Icons.Default.ExpandMore,
                     contentDescription = "切换播放模式",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                    tint = capsuleContent,
                     modifier = Modifier.size(18.dp)
                 )
             }
@@ -462,6 +543,10 @@ private fun ModernActionCapsule(
         label = "refresh_rotation"
     )
 
+    val capsuleContent = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+    val capsuleAccent = MaterialTheme.colorScheme.primary
+    val capsuleDivider = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)
+
     ModernCapsuleContainer(
         modifier = modifier.height(42.dp),
         backdrop = backdrop,
@@ -492,8 +577,7 @@ private fun ModernActionCapsule(
                         .graphicsLayer {
                             if (isRefreshing) rotationZ = spinAngle
                         },
-                    tint = if (isRefreshing) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                    tint = if (isRefreshing) capsuleAccent else capsuleContent
                 )
             }
 
@@ -502,7 +586,7 @@ private fun ModernActionCapsule(
                 modifier = Modifier
                     .width(0.8.dp)
                     .height(15.dp)
-                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f))
+                    .background(capsuleDivider)
             )
 
             // 搜索按钮
@@ -520,12 +604,90 @@ private fun ModernActionCapsule(
                     imageVector = Icons.Default.Search,
                     contentDescription = stringResource(R.string.title_search),
                     modifier = Modifier.size(19.dp),
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                    tint = capsuleContent
                 )
             }
         }
     }
 }
+
+/**
+ * 「歌词边缘渐隐」同款内容遮罩（DstIn）：
+ * - 顶部：topBarPx 范围内完全不可见，随后按歌词节奏在 topTailPx 内渐显；
+ * - 底部：bottomFadePx 范围内从可见渐隐到完全透明（露出背景/壁纸）。
+ * 传入 0 表示该方向不做处理。
+ */
+internal fun Modifier.lyricEdgeFadeMask(
+    topBarPx: Float,
+    topTailPx: Float,
+    bottomFadePx: Float
+): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        val h = size.height.coerceAtLeast(1f)
+        val stops = ArrayList<Pair<Float, Color>>()
+        fun add(pos: Float, alpha: Float) {
+            val p = (pos / h).coerceIn(0f, 1f)
+            if (stops.isEmpty() || p > stops.last().first) {
+                stops += p to Color.Black.copy(alpha = alpha)
+            }
+        }
+        if (topBarPx > 0f && topTailPx > 0f) {
+            add(0f, 0f)
+            add(topBarPx * 0.60f, 0f)
+            add(topBarPx * 0.75f, 0.08f)
+            add(topBarPx * 0.88f, 0.22f)
+            add(topBarPx, 0.45f)
+            add(topBarPx + topTailPx * 0.35f, 0.68f)
+            add(topBarPx + topTailPx * 0.65f, 0.86f)
+            add(topBarPx + topTailPx, 1f)
+        } else {
+            add(0f, 1f)
+        }
+        if (bottomFadePx > 0f) {
+            val start = (h - bottomFadePx).coerceAtLeast(0f)
+            add(start, 1f)
+            add(start + bottomFadePx * 0.35f, 0.70f)
+            add(start + bottomFadePx * 0.65f, 0.38f)
+            add(start + bottomFadePx * 0.85f, 0.12f)
+            add(h, 0f)
+        } else {
+            add(h, 1f)
+        }
+        drawRect(brush = Brush.verticalGradient(*stops.toTypedArray()), blendMode = BlendMode.DstIn)
+    }
+
+/**
+ * 歌词顶部渐隐同款遮罩（对应 SyncedLyricsView 的 verticalEdgeFade，这里取反用底色遮）：
+ * 顶边完全不透明（内容一个字都看不见）→ 30% 处 88% → 65% 处 42% → 90% 处 6% → 底边完全透明。
+ * 节奏与歌词上下边缘的渐隐一致，所以内容看起来是"从屏幕顶端隐入背景"。
+ */
+private fun lyricEdgeFadeBrush(color: Color): Brush = Brush.verticalGradient(
+    0f to color.copy(alpha = 1f),
+    0.60f to color.copy(alpha = 1f),
+    0.75f to color.copy(alpha = 0.92f),
+    0.88f to color.copy(alpha = 0.78f),
+    1f to color.copy(alpha = TOP_BAR_FADE_BOTTOM_ALPHA)
+)
+
+/**
+ * 顶栏渐隐在内容区的延伸尾巴高度：
+ * 顶栏自身只到 0.55 透明度，剩下的在内容区顶部继续渐隐，让"渐渐隐"的过渡更长。
+ */
+internal val TopBarFadeTailHeight = 30.dp
+
+/** 顶栏底边透明度（与内容区尾巴起点严格对齐，避免出现接缝） */
+private const val TOP_BAR_FADE_BOTTOM_ALPHA = 0.55f
+
+/** 内容区顶部的渐隐尾巴（背景色 → 透明），接在顶栏底边之后 */
+internal fun topBarFadeTailBrush(color: Color): Brush = Brush.verticalGradient(
+    0f to color.copy(alpha = TOP_BAR_FADE_BOTTOM_ALPHA),
+    0.35f to color.copy(alpha = 0.32f),
+    0.65f to color.copy(alpha = 0.14f),
+    0.85f to color.copy(alpha = 0.04f),
+    1f to color.copy(alpha = 0f)
+)
 
 /**
  * 垂直渐隐画刷：从顶部到 [solidRatio] 保持恒定透明度，之后用 smoothstep 平滑淡到 0。
@@ -564,27 +726,10 @@ private fun ModernCapsuleContainer(
 ) {
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
-    // 胶囊背景材质：壁纸模式半透明玻璃；纯色主题用不透明表面色 + 柔和阴影（参考图样式）
-    val containerColor = if (hasCustomWallpaper) {
-        if (isDark) {
-            Color.Black.copy(alpha = 0.42f)
-        } else {
-            Color.White.copy(alpha = 0.65f)
-        }
-    } else {
-        if (isDark) {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        } else {
-            MaterialTheme.colorScheme.surface
-        }
-    }
-
-    // 胶囊外轮廓高光边框：壁纸模式下更明显；纯色主题浅色不描边，深色留一点提亮
-    val borderColor = if (hasCustomWallpaper) {
-        if (isDark) Color.White.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.85f)
-    } else {
-        if (isDark) Color.White.copy(alpha = 0.10f) else Color.Transparent
-    }
+    // 统一用与底部播放条胶囊相同的主题容器色（secondaryContainer），
+    // 不再区分壁纸/纯色，也不做毛玻璃——背景图模式下与无背景保持同一套观感。
+    val containerColor = MaterialTheme.colorScheme.secondaryContainer
+    val borderColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.08f)
 
     val shadowColor = if (isDark) {
         Color.Black.copy(alpha = 0.30f)
@@ -592,46 +737,56 @@ private fun ModernCapsuleContainer(
         Color.Black.copy(alpha = 0.06f)
     }
 
-    val isGlassEnabled = liquidGlass && backdrop != null && hasCustomWallpaper
+    // 液态玻璃：与悬浮底栏/迷你播放条同一套 drawBackdrop（vibrancy + 4dp 模糊 + lens 折射）。
+    // 只要求「液态玻璃开 + 有 backdrop」——不要求必须有自定义壁纸：
+    // 纯色主题下也要有玻璃质感，否则开关看起来像没生效。
+    val glassBackdrop = backdrop
+    val glassEnabled = liquidGlass && glassBackdrop != null
+    // 玻璃表面色在组合期取出（draw lambda 里不能读 MaterialTheme）
+    val glassSurface = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.18f)
 
-    val glassModifier = if (isGlassEnabled) {
-        Modifier.drawBackdrop(
-            backdrop = backdrop,
-            shape = { CircleShape },
-            effects = {
-                vibrancy()
-                blur(8.dp.toPx())
-                lens(18.dp.toPx(), 18.dp.toPx())
-            },
-            highlight = {
-                Highlight.Default.copy(alpha = 0.9f)
-            },
-            shadow = {
-                Shadow.Default.copy(color = shadowColor)
-            },
-            onDrawSurface = {
-                drawRect(containerColor)
-            }
-        )
+    if (glassEnabled) {
+        Box(
+            modifier = modifier.drawBackdrop(
+                backdrop = glassBackdrop!!,
+                shape = { CircleShape },
+                effects = {
+                    vibrancy()
+                    blur(4.dp.toPx())
+                    lens(22.dp.toPx(), 22.dp.toPx())
+                },
+                highlight = {
+                    Highlight.Default.copy(alpha = 1f)
+                },
+                shadow = {
+                    Shadow.Default.copy(
+                        color = Color.Black.copy(if (isDark) 0.14f else 0.06f)
+                    )
+                },
+                onDrawSurface = {
+                    drawRect(glassSurface)
+                }
+            ),
+            contentAlignment = Alignment.Center
+        ) {
+            content()
+        }
     } else {
-        Modifier
-            .shadow(
-                elevation = 2.5.dp,
-                shape = CircleShape,
-                ambientColor = shadowColor,
-                spotColor = shadowColor
-            )
-            .background(containerColor, CircleShape)
-    }
-
-    Box(
-        modifier = modifier
-            .clip(CircleShape)
-            .then(glassModifier)
-            .border(width = 1.dp, color = borderColor, shape = CircleShape),
-        contentAlignment = Alignment.Center
-    ) {
-        content()
+        Box(
+            modifier = modifier
+                .clip(CircleShape)
+                .shadow(
+                    elevation = 2.5.dp,
+                    shape = CircleShape,
+                    ambientColor = shadowColor,
+                    spotColor = shadowColor
+                )
+                .background(containerColor, CircleShape)
+                .border(width = 1.dp, color = borderColor, shape = CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            content()
+        }
     }
 }
 

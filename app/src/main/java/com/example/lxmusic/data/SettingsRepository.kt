@@ -40,6 +40,13 @@ class SettingsRepository(context: Context) {
         const val PLAYER_HYPER_BG = "player_hyper_bg"
         const val PLAYER_FLUID_AMBIENT_BG = "player_fluid_ambient_bg"
         const val PLAYER_MESH_BG = "player_mesh_bg"
+        // 频谱律动（Mesh）高级参数（对齐 MeiloX 的 6 个设置）
+        const val PLAYER_MESH_FLOW_SPEED = "player_mesh_flow_speed"
+        const val PLAYER_MESH_RENDER_SCALE = "player_mesh_render_scale"
+        const val PLAYER_MESH_SENSITIVITY = "player_mesh_sensitivity"
+        const val PLAYER_MESH_SUBDIVISION = "player_mesh_subdivision"
+        const val PLAYER_MESH_STATIC_MODE = "player_mesh_static_mode"
+        const val PLAYER_MESH_ANIMATION = "player_mesh_animation"
         const val PLAYER_WAVEFORM_SLIDER = "player_waveform_slider"
         // 逐字歌词动效：当前行逐字点亮（关闭=整行高亮，其余样式不变）
         const val PLAYER_LYRICS_WORD_EFFECT = "player_lyrics_word_effect"
@@ -110,11 +117,13 @@ class SettingsRepository(context: Context) {
         const val USB_EXCLUSIVE_BIT_DEPTH = "usb_exclusive_bit_depth"
         // 自动更新
         const val AUTO_CHECK_UPDATE_DIALOG = "auto_check_update_dialog"
-        // 一次性首页刷新请求：切换播放页背景/歌词动效开关或登录成功时置位，
+        // 一次性首页刷新请求：仅在登录/激活成功（账号身份变化）时置位，
         // 首页进入时消费一次（刷新后清除），平时进首页不刷新
         const val PENDING_HOME_REFRESH = "home_pending_refresh"
         // 默认值换代迁移标记（2026-10：背景默认→MeiloX 网格渐变，歌词动效默认→液态歌词，底栏高度默认→85%）
         const val SETTINGS_DEFAULT_V4 = "settings_default_v4"
+        // 2026-11-06 默认换代标记（歌词默认居左 / 黑胶唱机默认关闭）
+        const val SETTINGS_DEFAULT_V5 = "settings_default_v5"
     }
 
     // ==================== 主题 ====================
@@ -266,7 +275,6 @@ class SettingsRepository(context: Context) {
         set(value) {
             _playerDynamicBg = value
             prefs.edit().putBoolean(Keys.PLAYER_DYNAMIC_BG, value).apply()
-            requestHomeRefresh()
         }
     private var _playerDynamicBg: Boolean by mutableStateOf(
         prefs.getBoolean(Keys.PLAYER_DYNAMIC_BG, false)
@@ -297,7 +305,8 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PLAYER_VINYL_STYLE, value).apply()
         }
     private var _playerVinylStyle: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_VINYL_STYLE, true)
+        // 2026-11 起默认关闭（老用户由 SETTINGS_DEFAULT_V5 迁移覆盖一次）
+        prefs.getBoolean(Keys.PLAYER_VINYL_STYLE, false)
     )
 
     var playerVinylPointer: Boolean
@@ -335,7 +344,6 @@ class SettingsRepository(context: Context) {
         set(value) {
             _playerHyperBg = value
             prefs.edit().putBoolean(Keys.PLAYER_HYPER_BG, value).apply()
-            requestHomeRefresh()
         }
     private var _playerHyperBg: Boolean by mutableStateOf(
         // 2026-10 默认换代：流体动态背景让位 MeiloX 网格渐变（老用户由 init 的 V3 迁移负责切换）
@@ -347,7 +355,6 @@ class SettingsRepository(context: Context) {
         set(value) {
             _playerFluidAmbientBg = value
             prefs.edit().putBoolean(Keys.PLAYER_FLUID_AMBIENT_BG, value).apply()
-            requestHomeRefresh()
         }
     private var _playerFluidAmbientBg: Boolean by mutableStateOf(
         prefs.getBoolean(Keys.PLAYER_FLUID_AMBIENT_BG, false)
@@ -358,10 +365,78 @@ class SettingsRepository(context: Context) {
         set(value) {
             _playerMeshBg = value
             prefs.edit().putBoolean(Keys.PLAYER_MESH_BG, value).apply()
-            requestHomeRefresh()
         }
     private var _playerMeshBg: Boolean by mutableStateOf(
         prefs.getBoolean(Keys.PLAYER_MESH_BG, false)
+    )
+
+    // ==================== 频谱律动（Mesh）高级参数 ====================
+    // 默认值全部对齐 MeiloX 原版
+
+    /** 流动速度，默认 0.25 */
+    var meshFlowSpeed: Float
+        get() = _meshFlowSpeed
+        set(value) {
+            _meshFlowSpeed = value
+            prefs.edit().putFloat(Keys.PLAYER_MESH_FLOW_SPEED, value).apply()
+        }
+    private var _meshFlowSpeed: Float by mutableFloatStateOf(
+        prefs.getFloat(Keys.PLAYER_MESH_FLOW_SPEED, 0.25f)
+    )
+
+    /** 渲染精度（Surface 缓冲缩放），默认 0.75；越低越省电 */
+    var meshRenderScale: Float
+        get() = _meshRenderScale
+        set(value) {
+            _meshRenderScale = value
+            prefs.edit().putFloat(Keys.PLAYER_MESH_RENDER_SCALE, value).apply()
+        }
+    private var _meshRenderScale: Float by mutableFloatStateOf(
+        prefs.getFloat(Keys.PLAYER_MESH_RENDER_SCALE, 0.75f)
+    )
+
+    /** 节拍灵敏度，默认 0.1（送进渲染器时 ×2） */
+    var meshSensitivity: Float
+        get() = _meshSensitivity
+        set(value) {
+            _meshSensitivity = value
+            prefs.edit().putFloat(Keys.PLAYER_MESH_SENSITIVITY, value).apply()
+        }
+    private var _meshSensitivity: Float by mutableFloatStateOf(
+        prefs.getFloat(Keys.PLAYER_MESH_SENSITIVITY, 0.1f)
+    )
+
+    /** 网格细分，默认 50（MeiloX 有效范围 10..50，再大内部会 clamp） */
+    var meshSubdivision: Int
+        get() = _meshSubdivision
+        set(value) {
+            _meshSubdivision = value
+            prefs.edit().putInt(Keys.PLAYER_MESH_SUBDIVISION, value).apply()
+        }
+    private var _meshSubdivision: Int by mutableIntStateOf(
+        prefs.getInt(Keys.PLAYER_MESH_SUBDIVISION, 50)
+    )
+
+    /** 静态模式：过渡完成后停止动画以省电 */
+    var meshStaticMode: Boolean
+        get() = _meshStaticMode
+        set(value) {
+            _meshStaticMode = value
+            prefs.edit().putBoolean(Keys.PLAYER_MESH_STATIC_MODE, value).apply()
+        }
+    private var _meshStaticMode: Boolean by mutableStateOf(
+        prefs.getBoolean(Keys.PLAYER_MESH_STATIC_MODE, false)
+    )
+
+    /** 背景动画：开启时只在播放中流动；关闭后暂停也保持流动 */
+    var meshAnimation: Boolean
+        get() = _meshAnimation
+        set(value) {
+            _meshAnimation = value
+            prefs.edit().putBoolean(Keys.PLAYER_MESH_ANIMATION, value).apply()
+        }
+    private var _meshAnimation: Boolean by mutableStateOf(
+        prefs.getBoolean(Keys.PLAYER_MESH_ANIMATION, true)
     )
 
     var playerWaveformSlider: Boolean
@@ -381,7 +456,6 @@ class SettingsRepository(context: Context) {
         set(value) {
             _playerLyricsWordEffect = value
             prefs.edit().putBoolean(Keys.PLAYER_LYRICS_WORD_EFFECT, value).apply()
-            requestHomeRefresh()
         }
     private var _playerLyricsWordEffect: Boolean by mutableStateOf(
         prefs.getBoolean(Keys.PLAYER_LYRICS_WORD_EFFECT, true)
@@ -392,7 +466,6 @@ class SettingsRepository(context: Context) {
         set(value) {
             _playerMeiloxLyrics = value
             prefs.edit().putBoolean(Keys.PLAYER_MEILOX_LYRICS, value).apply()
-            requestHomeRefresh()
         }
     private var _playerMeiloxLyrics: Boolean by mutableStateOf(
         prefs.getBoolean(Keys.PLAYER_MEILOX_LYRICS, false)
@@ -413,7 +486,6 @@ class SettingsRepository(context: Context) {
         set(value) {
             _playerCoverBlurBg = value
             prefs.edit().putBoolean(Keys.PLAYER_COVER_BLUR_BG, value).apply()
-            requestHomeRefresh()
         }
     private var _playerCoverBlurBg: Boolean by mutableStateOf(
         prefs.getBoolean(Keys.PLAYER_COVER_BLUR_BG, false)
@@ -540,7 +612,8 @@ class SettingsRepository(context: Context) {
             prefs.edit().putString(Keys.PLAYER_LYRIC_ALIGNMENT, value).apply()
         }
     private var _playerLyricAlignment: String by mutableStateOf(
-        prefs.getString(Keys.PLAYER_LYRIC_ALIGNMENT, "center") ?: "center"
+        // 2026-11 起默认居左（老用户由 SETTINGS_DEFAULT_V5 迁移覆盖一次）
+        prefs.getString(Keys.PLAYER_LYRIC_ALIGNMENT, "left") ?: "left"
     )
 
     // ==================== 封面卡歌词显示（主页菜单-歌词设置，与歌词页独立） ====================
@@ -725,7 +798,8 @@ class SettingsRepository(context: Context) {
         // 新装用户 key 本来就不存在，读默认值即 true，老用户升级同样生效。
         if (!prefs.contains(Keys.PLAYER_ROUND_ALBUM)) playerRoundAlbum = true
         if (!prefs.contains(Keys.PLAYER_ROTATE)) playerRotate = true
-        if (!prefs.contains(Keys.PLAYER_VINYL_STYLE)) playerVinylStyle = true
+        // 黑胶唱机 2026-11 起默认关闭
+        if (!prefs.contains(Keys.PLAYER_VINYL_STYLE)) playerVinylStyle = false
         if (!prefs.contains(Keys.PLAYER_VINYL_POINTER)) playerVinylPointer = true
         // 2026-10-09 发布换代迁移（SETTINGS_DEFAULT_V4 一次性，强制作废 v3 的"只动没动过的"版本）：
         // 播放页背景默认「流体动态」→「MeiloX 网格渐变」，歌词动效默认「逐字点亮」→「MeiloX 液态歌词」，
@@ -733,8 +807,8 @@ class SettingsRepository(context: Context) {
         // 本版是无条件统一代换：真机上凡是试过开关又切回默认的用户（prefs 里留了 key）
         // 之前会被"尊重现状"拦住、永远看不到新默认，这与"版本换代"语义相悖，故本版强制写入；
         // 动过设置的用户会被覆盖一次（有意为之），之后 V4 标记写掉，永不再跑、不再覆盖。
-        // 注意：迁移会经过带 requestHomeRefresh() 的 setter，末尾必须清一次标记，
-        // 保证「版本升级」本身不触发首页自动刷新（只有用户手动切开关才触发）。
+        // 注意：迁移会经过各个 setter。旧版 setter 会置位首页刷新标记，这里仍清一次兜底，
+        // 保证「版本升级」本身不触发首页自动刷新（背景/歌词动效已改为实时生效，不再刷新首页）。
         if (!prefs.getBoolean(Keys.SETTINGS_DEFAULT_V4, false)) {
             // 背景统一切到 MeiloX 网格渐变：互斥组全部收干净（对齐设置页 UI 的手动互斥行为）
             playerMeshBg = true
@@ -754,10 +828,20 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PENDING_HOME_REFRESH, false).apply()
             prefs.edit().putBoolean(Keys.SETTINGS_DEFAULT_V4, true).apply()
         }
+
+        // 2026-11-06 默认换代（SETTINGS_DEFAULT_V5 一次性强制，老用户也覆盖一次）：
+        // 歌词页排版默认「居中」→「居左」；黑胶唱机模式默认「开」→「关」。
+        if (!prefs.getBoolean(Keys.SETTINGS_DEFAULT_V5, false)) {
+            playerLyricAlignment = "left"
+            playerVinylStyle = false
+            prefs.edit().putBoolean(Keys.SETTINGS_DEFAULT_V5, true).apply()
+        }
     }
 
     /** 请求一次首页自动刷新（首页进入时消费一次，刷新后清除）。
-     *  由播放页背景 / 歌词动效开关的 setter 与「登录成功」调用；版本升级迁移不调用。 */
+     *  只在「账号/激活状态变化」时调用（登录成功、激活成功）。
+     *  播放页背景 / 歌词动效是纯本地状态（mutableStateOf），切换后立即生效，
+     *  不需要也不应该刷新首页（旧实现靠刷新才生效，是历史遗留）。 */
     fun requestHomeRefresh() {
         prefs.edit().putBoolean(Keys.PENDING_HOME_REFRESH, true).apply()
     }

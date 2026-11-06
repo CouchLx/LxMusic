@@ -227,7 +227,7 @@ fun PlayerStage(
     onLyricFontSizeChange: (Float) -> Unit = {},
     lyricFontWeight: Float = 600f,
     onLyricFontWeightChange: (Float) -> Unit = {},
-    lyricAlignment: String = "center",
+    lyricAlignment: String = "left",
     onLyricAlignmentChange: (String) -> Unit = {},
     coverLyricFontSize: Float = 16f,
     onCoverLyricFontSizeChange: (Float) -> Unit = {},
@@ -1493,6 +1493,15 @@ private fun PlayerCoverCard(
                             else -> File(targetSong.filePath)
                         }
                         val targetPainter = rememberAsyncImagePainter(model = targetModel)
+                        // 封面加载完成前显示音符占位；完成时做一次淡入淡出，
+                        // 避免打开播放器瞬间「音符 → 封面」硬切闪一下
+                        val coverLoaded =
+                            targetPainter.state is coil.compose.AsyncImagePainter.State.Success
+                        val coverAlpha by androidx.compose.animation.core.animateFloatAsState(
+                            targetValue = if (coverLoaded) 1f else 0f,
+                            animationSpec = tween(220),
+                            label = "coverFade"
+                        )
 
                         Box(
                             modifier = Modifier.fillMaxSize(),
@@ -1533,16 +1542,18 @@ private fun PlayerCoverCard(
                                     Image(
                                         painter = targetPainter,
                                         contentDescription = "专辑封面",
-                                        modifier = Modifier.fillMaxSize(),
+                                        modifier = Modifier.fillMaxSize().alpha(coverAlpha),
                                         contentScale = ContentScale.Crop
                                     )
 
                                     // 默认图标
-                                    if (targetPainter.state !is coil.compose.AsyncImagePainter.State.Success) {
+                                    if (coverAlpha < 1f) {
                                         Icon(
                                             imageVector = Icons.Default.MusicNote,
                                             contentDescription = null,
-                                            modifier = Modifier.size(80.dp),
+                                            modifier = Modifier
+                                                .size(80.dp)
+                                                .alpha(1f - coverAlpha),
                                             tint = uiTintVariant.copy(alpha = 0.5f)
                                         )
                                     }
@@ -1847,6 +1858,58 @@ internal fun LyricsDisplay(
  * 播放器菜单 BottomSheet（功能已迁移至 设置-播放器设置，暂时留空）
  */
 @OptIn(ExperimentalMaterial3Api::class)
+/** 播放器菜单行：图标 + 标题/副标题 + 右箭头（四个入口共用，统一间距） */
+@Composable
+private fun PlayerMenuRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(22.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun PlayerMenuDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 52.dp, end = 16.dp),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+    )
+}
+
 @Composable
 private fun PlayerMenuSheet(
     onDismiss: () -> Unit,
@@ -1895,165 +1958,46 @@ private fun PlayerMenuSheet(
                 )
                 HorizontalDivider(modifier = Modifier.padding(bottom = 8.dp))
 
-                // 歌词设置入口
+                // 四个入口收进同一张圆角卡，用分隔线隔开：
+                // 原来每项各自一张卡片且首尾紧贴，观感拥挤（用户反馈"太紧凑"）
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(18.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { subPage = "lyrics" }
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.primary
+                    Column {
+                        PlayerMenuRow(
+                            icon = Icons.Default.Settings,
+                            title = "歌词设置",
+                            subtitle = "$targetLabel：字体大小、粗细与排版",
+                            onClick = { subPage = "lyrics" }
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "歌词设置",
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "$targetLabel：字体大小、粗细与排版",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        PlayerMenuDivider()
+                        PlayerMenuRow(
+                            icon = Icons.Default.Timer,
+                            title = "睡眠定时",
+                            subtitle = "定时暂停播放，可自动延长到整首播完",
+                            onClick = { subPage = "sleep" }
                         )
-                    }
-                }
-
-                // 睡眠定时入口
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { subPage = "sleep" }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Timer,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.primary
+                        PlayerMenuDivider()
+                        PlayerMenuRow(
+                            icon = Icons.Default.VolumeUp,
+                            title = "声音设置",
+                            subtitle = "音量、声道平衡、速度与音调、输出选项",
+                            onClick = {
+                                onDismiss()
+                                onOpenSoundSettings()
+                            }
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "睡眠定时",
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "定时暂停播放，可自动延长到整首播完",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                // 声音设置入口（独立页面：音量/声道平衡/变速变调/输出开关）
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onDismiss()
-                            onOpenSoundSettings()
-                        }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.VolumeUp,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "声音设置",
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "音量、声道平衡、速度与音调、输出选项",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // 均衡器入口（独立页面：预设/多段图示均衡/音效增强/专业模式）
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onDismiss()
-                            onOpenEqualizer()
-                        }
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Equalizer,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "均衡器",
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "多段均衡、低音增强、环绕声与专业模式",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        PlayerMenuDivider()
+                        PlayerMenuRow(
+                            icon = Icons.Default.Equalizer,
+                            title = "均衡器",
+                            subtitle = "多段均衡、低音增强、环绕声与专业模式",
+                            onClick = {
+                                onDismiss()
+                                onOpenEqualizer()
+                            }
                         )
                     }
                 }
@@ -2095,86 +2039,106 @@ private fun PlayerMenuSheet(
                 }
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // 字体大小（实时生效）
-                Text(
-                    text = "字体大小",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Slider(
-                        value = lyricFontSize,
-                        onValueChange = onLyricFontSizeChange,
-                        valueRange = 14f..50f,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        text = "${lyricFontSize.roundToInt()} sp",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.width(48.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-
-                // 字体粗细（实时生效，100-900 步进 100）
-                Text(
-                    text = "字体粗细",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Slider(
-                        value = lyricFontWeight,
-                        onValueChange = onLyricFontWeightChange,
-                        valueRange = 100f..900f,
-                        steps = 7,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        text = "${lyricFontWeight.roundToInt()}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.width(48.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-
-                // 歌词排版（居左/居中/居右）
-                Text(
-                    text = "歌词排版",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("left" to "居左", "center" to "居中", "right" to "居右")
-                        .forEach { (value, label) ->
-                            val selected = lyricAlignment == value
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (selected) {
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceContainerHigh
-                                },
-                                modifier = Modifier.clickable { onLyricAlignmentChange(value) }
-                            ) {
+                // 三项设置收进同一张卡，用分隔线隔开；数值挪到标题行右侧、与滑杆拉开间距。
+                // 原来是「4dp 间距 + 滑杆后 48dp 值」的紧凑堆叠，观感拥挤。
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column {
+                        // 字体大小（实时生效）
+                        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = label,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (selected) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)
+                                    text = "字体大小",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = "${lyricFontSize.roundToInt()} sp",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                             }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Slider(
+                                value = lyricFontSize,
+                                onValueChange = onLyricFontSizeChange,
+                                valueRange = 14f..50f
+                            )
                         }
+                        PlayerMenuDivider()
+                        // 字体粗细（实时生效，100-900 步进 100）
+                        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "字体粗细",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = "${lyricFontWeight.roundToInt()}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Slider(
+                                value = lyricFontWeight,
+                                onValueChange = onLyricFontWeightChange,
+                                valueRange = 100f..900f,
+                                steps = 7
+                            )
+                        }
+                        PlayerMenuDivider()
+                        // 歌词排版（居左/居中/居右）
+                        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp)) {
+                            Text(
+                                text = "歌词排版",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf("left" to "居左", "center" to "居中", "right" to "居右")
+                                    .forEach { (value, label) ->
+                                        val selected = lyricAlignment == value
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = if (selected) {
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                            } else {
+                                                MaterialTheme.colorScheme.surfaceContainerHighest
+                                            },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clickable { onLyricAlignmentChange(value) }
+                                        ) {
+                                            Box(
+                                                modifier = Modifier.padding(vertical = 10.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = label,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                                    color = if (selected) {
+                                                        MaterialTheme.colorScheme.primary
+                                                    } else {
+                                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                            }
+                        }
+                    }
                 }
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }

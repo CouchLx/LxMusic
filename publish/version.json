@@ -1,12 +1,12 @@
 {
-  "versionCode": 10,
-  "versionName": "3.7.63",
-  "desc": "修复服务器停机问题，优化界面显示",
-  "apkUrl": "https://github.com/CouchLx/LxMusic/releases/download/v3.7.63/app-release.apk",
+  "versionCode": 11,
+  "versionName": "3.7.64",
+  "desc": "优化播放器界面与设置项，修复若干问题",
+  "apkUrl": "https://github.com/CouchLx/LxMusic/releases/download/v3.7.64/app-release.apk",
   "apkMirrors": [
-    "https://gh-proxy.com/https://github.com/CouchLx/LxMusic/releases/download/v3.7.63/app-release.apk",
-    "https://ghproxy.net/https://github.com/CouchLx/LxMusic/releases/download/v3.7.63/app-release.apk",
-    "https://ghfast.top/https://github.com/CouchLx/LxMusic/releases/download/v3.7.63/app-release.apk",
-    "https://gh.llkk.cc/https://github.com/CouchLx/LxMusic/releases/download/v3.7.63/app-release.apk"
+    "https://gh-proxy.com/https://github.com/CouchLx/LxMusic/releases/download/v3.7.64/app-release.apk",
+    "https://ghproxy.net/https://github.com/CouchLx/LxMusic/releases/download/v3.7.64/app-release.apk",
+    "https://ghfast.top/https://github.com/CouchLx/LxMusic/releases/download/v3.7.64/app-release.apk",
+    "https://gh.llkk.cc/https://github.com/CouchLx/LxMusic/releases/download/v3.7.64/app-release.apk"
   ]
 }

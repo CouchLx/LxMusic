@@ -17,12 +17,30 @@ import android.graphics.Bitmap
 import android.graphics.LinearGradient
 import android.graphics.Shader
 import android.graphics.SweepGradient
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
@@ -54,6 +72,9 @@ fun FluidMeshBackground(
     // MeiloX 默认灵敏度 0.1 × 2 = 0.2；0 = 关闭音频响应
     audioStrength: Float = 0.2f,
     flowSpeed: Float = 0.25f,
+    // 渲染精度（Surface 缓冲缩放）与网格细分，默认对齐 MeiloX
+    renderScale: Float = 0.75f,
+    subdivision: Int = 50,
     // 静态模式：暂停且交叉淡入完成后停止渲染（省电）
     staticMode: Boolean = false
 ) {
@@ -105,6 +126,12 @@ fun FluidMeshBackground(
     LaunchedEffect(meshView, flowSpeed) {
         meshView.setFlowSpeed(flowSpeed)
     }
+    LaunchedEffect(meshView, renderScale) {
+        meshView.setRenderScale(renderScale)
+    }
+    LaunchedEffect(meshView, subdivision) {
+        meshView.setSubdivision(subdivision)
+    }
     LaunchedEffect(meshView, playing) {
         meshView.setPlaying(playing)
     }
@@ -129,10 +156,126 @@ fun FluidMeshBackground(
         }
     }
 
-    AndroidView(
-        factory = { meshView },
-        modifier = modifier
+    // GL 首帧就绪状态：表面在封面纹理/网格准备好之前是「不透明黑」（renderer 清屏色），
+    // 直接用 AndroidView 会看到打开播放器瞬间黑屏闪一下。
+    var surfaceReady by remember(meshView) { mutableStateOf(meshView.hasRenderedAlbum) }
+    DisposableEffect(meshView) {
+        meshView.onSurfaceReadyChanged = { ready -> surfaceReady = ready }
+        // GL 线程可能在我们注册监听之前就已经渲染完首帧（回调丢失），这里补读一次
+        if (meshView.hasRenderedAlbum) surfaceReady = true
+        onDispose { meshView.onSurfaceReadyChanged = null }
+    }
+    // 再兜一层轮询：注册竞态没覆盖到的场景（如表面重建）也能及时揭开占位
+    LaunchedEffect(meshView) {
+        repeat(30) {
+            if (meshView.hasRenderedAlbum) {
+                surfaceReady = true
+                return@LaunchedEffect
+            }
+            kotlinx.coroutines.delay(100)
+        }
+        // 3 秒仍未就绪：放行，避免占位色永久挡住背景（宁可显示 GL 现状）
+        surfaceReady = true
+    }
+
+    // 占位色与 renderer 的兜底位图同源，保证「占位 → 网格」切换时颜色不跳。
+    // 颜色变化用 400ms 动画过渡：首次打开时「主题色 → 封面取色」不会硬切。
+    val targetPlaceholder = remember(fallbackColors, isDark) {
+        val colors = fallbackColors.filter { it != Color.Unspecified }
+        when {
+            colors.size >= 3 -> colors.take(3)
+            colors.size == 2 -> listOf(colors[0], colors[1], colors[1])
+            isDark -> listOf(Color(0xFF2C1E4A), Color(0xFF52154E), Color(0xFF111135))
+            else -> listOf(Color(0xFF8EC5FC), Color(0xFFE0C3FC), Color(0xFFB8C0EC))
+        }
+    }
+    val ph0 by androidx.compose.animation.animateColorAsState(
+        targetValue = targetPlaceholder[0],
+        animationSpec = tween(400),
+        label = "meshPlaceholder0"
     )
+    val ph1 by androidx.compose.animation.animateColorAsState(
+        targetValue = targetPlaceholder[1],
+        animationSpec = tween(400),
+        label = "meshPlaceholder1"
+    )
+    val ph2 by androidx.compose.animation.animateColorAsState(
+        targetValue = targetPlaceholder[2],
+        animationSpec = tween(400),
+        label = "meshPlaceholder2"
+    )
+
+    Box(modifier) {
+        AndroidView(
+            factory = { meshView },
+            modifier = Modifier.fillMaxSize()
+        )
+        // 首帧未就绪时盖住 GL 的黑面，就绪后淡出（切歌/重建表面同样生效）
+        AnimatedVisibility(
+            visible = !surfaceReady,
+            enter = fadeIn(tween(0)),
+            exit = fadeOut(tween(360))
+        ) {
+            MeshLikePlaceholder(
+                colors = listOf(ph0, ph1, ph2),
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
+
+/**
+ * 仿网格占位：底色线性渐变 + 两个大的径向光斑，
+ * 比纯渐变更接近 Mesh 的有机色块，打开播放器时「占位 → 网格」的切换不突兀。
+ */
+@Composable
+private fun MeshLikePlaceholder(colors: List<Color>, modifier: Modifier = Modifier) {
+    val c0 = colors.getOrElse(0) { Color.Black }
+    val c1 = colors.getOrElse(1) { c0 }
+    val c2 = colors.getOrElse(2) { c1 }
+    // 缓慢漂移：占位阶段也有轻微流动感，切到真网格时不会显得"突然活了"
+    val drift by rememberInfiniteTransition(label = "meshPlaceholderDrift").animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(9000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "meshPlaceholderDriftValue"
+    )
+    BoxWithConstraints(modifier) {
+        val w = constraints.maxWidth.toFloat()
+        val h = constraints.maxHeight.toFloat()
+        if (w <= 0f || h <= 0f) return@BoxWithConstraints
+        val radius = maxOf(w, h)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Brush.linearGradient(listOf(c0, c1, c2)))
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(c1.copy(alpha = 0.9f), Color.Transparent),
+                        center = Offset(w * (0.18f + 0.08f * drift), h * (0.16f + 0.06f * drift)),
+                        radius = radius * 0.62f
+                    )
+                )
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(c2.copy(alpha = 0.9f), Color.Transparent),
+                        center = Offset(w * (0.88f - 0.08f * drift), h * (0.80f - 0.06f * drift)),
+                        radius = radius * 0.58f
+                    )
+                )
+        )
+    }
 }
 
 /**

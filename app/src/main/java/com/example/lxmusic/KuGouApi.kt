@@ -1969,7 +1969,12 @@ object KuGouApi {
             path.startsWith("/vip/")
 
     /** BFF 全量代理拦截器：配置了 bffUrl 时把所有酷狗请求改写到 BFF（api/kg 前缀下的所有路径）并带激活凭证头。
-     *  这样 3000 端口可以只监听回环地址，公网只保留受激活码保护的 BFF 入口。 */
+     *  这样 3000 端口可以只监听回环地址，公网只保留受激活码保护的 BFF 入口。
+     *
+     *  注意：这里**总是**改写，不再比较原 URL 的 host/port——baseUrl 只是 Retrofit 的占位模板，
+     *  指向哪里都不影响实际请求（服务端换地址时客户端无需跟着改）。
+     *  也不再对 404 回退直连：3000 已收回内网，回退只会白等一次连接超时；
+     *  真正的 404（上游没有该接口）应当原样返回给调用方。 */
     private fun bffInterceptor(): okhttp3.Interceptor = okhttp3.Interceptor { chain ->
         val original = chain.request()
         val bff = bffUrl.trim()
@@ -1980,23 +1985,16 @@ object KuGouApi {
         }
 
         var request = original
-        var rewritten = false
         val target = runCatching { java.net.URI(bff) }.getOrNull()
         val host = target?.host
         if (target != null && !host.isNullOrBlank()) {
-            val targetPort = if (target.port == -1) {
-                if (target.scheme == "https") 443 else 80
-            } else target.port
-            if (original.url.host != host || original.url.port != targetPort) {
-                val builder = okhttp3.HttpUrl.Builder()
-                    .scheme(target.scheme ?: "http")
-                    .host(host)
-                    .encodedPath("/api/kg" + original.url.encodedPath)
-                    .encodedQuery(original.url.encodedQuery)
-                if (target.port != -1) builder.port(target.port)
-                request = original.newBuilder().url(builder.build()).build()
-                rewritten = true
-            }
+            val builder = okhttp3.HttpUrl.Builder()
+                .scheme(target.scheme ?: "http")
+                .host(host)
+                .encodedPath("/api/kg" + original.url.encodedPath)
+                .encodedQuery(original.url.encodedQuery)
+            if (target.port != -1) builder.port(target.port)
+            request = original.newBuilder().url(builder.build()).build()
         }
         if (BffApi.vipCode.isNotBlank()) {
             request = request.newBuilder().header("X-Vip-Code", BffApi.vipCode).build()
@@ -2004,13 +2002,7 @@ object KuGouApi {
         if (BffApi.vipDevice.isNotBlank()) {
             request = request.newBuilder().header("X-Vip-Device", BffApi.vipDevice).build()
         }
-        val response = chain.proceed(request)
-        // BFF 尚未升级（没有 /api/kg 前缀）时回退原直连，避免服务端与 App 版本不同步直接全挂
-        if (rewritten && response.code == 404) {
-            response.close()
-            return@Interceptor chain.proceed(original)
-        }
-        response
+        chain.proceed(request)
     }
 
     private var _service: KuGouService? = null

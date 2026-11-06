@@ -146,8 +146,14 @@ import com.example.lxmusic.ui.components.ThemeModeToggleButton
 import com.example.lxmusic.ui.components.ThemeRevealOverlay
 import com.example.lxmusic.ui.components.AppUpdateDialog
 import com.example.lxmusic.ui.components.topbar.ModernHomeTopBar
+import com.example.lxmusic.ui.components.topbar.ModernMineTopBar
+import com.example.lxmusic.ui.components.topbar.TopBarFadeTailHeight
+import com.example.lxmusic.ui.components.topbar.topBarFadeTailBrush
+import com.example.lxmusic.ui.components.topbar.lyricEdgeFadeMask
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.graphics.asImageBitmap
 import kotlin.coroutines.resume
@@ -217,7 +223,10 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
@@ -408,6 +417,12 @@ class MainActivity : ComponentActivity() {
                     com.example.lxmusic.data.plugin.PluginPlayback.currentSong = currentSong
                 }
                 var albumSeedColorHex by remember { mutableStateOf<String?>(null) }
+                // 明暗模式：自动 / 浅色 / 深色（提前算好，供封面色预热使用）
+                val resolvedDarkTheme = when (themeDarkMode) {
+                    "light" -> false
+                    "dark" -> true
+                    else -> isSystemInDarkTheme()
+                }
                 LaunchedEffect(currentSong?.filePath, currentSong?.albumArtUri) {
                     albumSeedColorHex = null
                     val song = currentSong ?: return@LaunchedEffect
@@ -418,12 +433,12 @@ class MainActivity : ComponentActivity() {
                         else -> File(song.filePath)
                     }
                     albumSeedColorHex = com.example.lxmusic.ui.effect.extractAlbumSeedHex(ctx, imageLoader, albumModel)
-                }
-                // 明暗模式：自动 / 浅色 / 深色
-                val resolvedDarkTheme = when (themeDarkMode) {
-                    "light" -> false
-                    "dark" -> true
-                    else -> isSystemInDarkTheme()
+                    // 预热背景提色缓存：打开播放器首帧直接用封面色，避免先闪一帧深色兜底
+                    com.example.lxmusic.ui.effect.warmAlbumColorCache(ctx, imageLoader, albumModel)
+                    // 灵动流体背景的 4 色配色同样预热（否则会先显示默认紫蓝再渐变 1.2s）
+                    com.example.lxmusic.ui.effect.warmFluidColorCache(
+                        ctx, imageLoader, albumModel, resolvedDarkTheme
+                    )
                 }
 
                 val view = androidx.compose.ui.platform.LocalView.current
@@ -1018,6 +1033,13 @@ fun AppScaffold(
     var playerHyperBg by remember { mutableStateOf(settingsRepository.playerHyperBg) }
     var playerFluidAmbientBg by remember { mutableStateOf(settingsRepository.playerFluidAmbientBg) }
     var playerMeshBg by remember { mutableStateOf(settingsRepository.playerMeshBg) }
+    // 频谱律动（Mesh）高级参数
+    var meshFlowSpeed by remember { mutableFloatStateOf(settingsRepository.meshFlowSpeed) }
+    var meshRenderScale by remember { mutableFloatStateOf(settingsRepository.meshRenderScale) }
+    var meshSensitivity by remember { mutableFloatStateOf(settingsRepository.meshSensitivity) }
+    var meshSubdivision by remember { mutableIntStateOf(settingsRepository.meshSubdivision) }
+    var meshStaticMode by remember { mutableStateOf(settingsRepository.meshStaticMode) }
+    var meshAnimation by remember { mutableStateOf(settingsRepository.meshAnimation) }
     var playerWaveformSlider by remember { mutableStateOf(settingsRepository.playerWaveformSlider) }
     var playerLyricsWordEffect by remember { mutableStateOf(settingsRepository.playerLyricsWordEffect) }
     var playerMeiloxLyrics by remember { mutableStateOf(settingsRepository.playerMeiloxLyrics) }
@@ -1400,16 +1422,24 @@ fun AppScaffold(
                 AnimatedContent(
                     targetState = selectedTab,
                     transitionSpec = {
-                        // 未激活顶层顺序是 搜索(11)/发现(1)/我的(2)，数值大小无法代表左右方向，按位置判断
-                        val guestOrder = listOf(11, 1, 2)
-                        val fromPos = guestOrder.indexOf(initialState)
-                        val toPos = guestOrder.indexOf(targetState)
+                        // 顶层 tab（首页/发现/我的）统一用同向横移 + 交叉淡化，
+                        // 并且三段顶栏高度一致（现代 = 状态栏 + 54dp，原生 = 状态栏 + 64dp），
+                        // 切换时不会出现高度压缩/内容跳动。
+                        val topLevelOrder = if (isGuest) listOf(11, 1, 2) else listOf(0, 1, 2)
+                        val fromPos = topLevelOrder.indexOf(initialState)
+                        val toPos = topLevelOrder.indexOf(targetState)
+                        val isTopLevelSwitch = fromPos >= 0 && toPos >= 0 && fromPos != toPos
                         val isSearch = targetState == 11 || initialState == 11
                         when {
-                            isGuest && fromPos >= 0 && toPos >= 0 && fromPos != toPos -> {
+                            isTopLevelSwitch -> {
                                 val dir = if (toPos > fromPos) 1 else -1
-                                (fadeIn(tween(260)) + slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { dir * it / 6 }) togetherWith
-                                    (fadeOut(tween(180)) + slideOutHorizontally(tween(180, easing = FastOutSlowInEasing)) { -dir * it / 6 })
+                                (
+                                    fadeIn(tween(240, easing = FastOutSlowInEasing)) +
+                                        slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { dir * it / 14 }
+                                    ) togetherWith (
+                                    fadeOut(tween(150, easing = FastOutSlowInEasing)) +
+                                        slideOutHorizontally(tween(280, easing = FastOutSlowInEasing)) { -dir * it / 18 }
+                                    )
                             }
                             isSearch -> {
                                 (fadeIn(tween(260)) + slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { if (targetState == 11) it / 6 else -it / 6 }) togetherWith
@@ -1439,7 +1469,21 @@ fun AppScaffold(
                             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
                         )
                     } else if (currentTab == 1 || showPublicPlaylist != null || showPublicAlbum != null) {
-                        // 发现页 / 公开歌单详情：页面自带顶栏，不再显示"Lx Music"+搜索
+                        // 发现页 / 公开歌单详情：页面自带顶栏，不再显示额外标题栏。
+                        // "发现"顶层 tab 补一个等高的透明占位：三个顶层页面的顶栏槽位高度恒定，
+                        // 切换时 AnimatedContent 不会压缩/拉伸顶栏区域。
+                        if (currentTab == 1 && showPublicPlaylist == null && showPublicAlbum == null) {
+                            val statusTop = androidx.compose.foundation.layout.WindowInsets.statusBars
+                                .asPaddingValues()
+                                .calculateTopPadding()
+                            // 胶囊顶栏在两个主题下都是 54dp，占位高度统一
+                            val contentHeight = 54.dp
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(statusTop + contentHeight)
+                            )
+                        }
                     } else if (currentTab == 3) {
                         // 本地音乐页顶栏（汉堡菜单 + 搜索），与页面面板联动；面板展开时随内容右移
                         Box(modifier = Modifier.fillMaxWidth().clipToBounds()) {
@@ -1729,8 +1773,9 @@ fun AppScaffold(
                             },
                             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
                         )
-                    } else if (currentTab == 0 && settingsRepository.themeMode == "modern") {
-                        // 现代主题专属首页悬浮顶栏（灵动双胶囊 + 完全透明通透底栏 + 顶部灵动氛围羽化）
+                    } else if (currentTab == 0) {
+                        // 首页悬浮顶栏（灵动双胶囊）：现代 / 原生两个主题都用，
+                        // 不再只在现代化主题下生效
                         var homePlayMode by remember { mutableIntStateOf(settingsRepository.homePlayMode) }
                         val isThisPlaying = isPlaying && currentSong != null
                         val hasSongs = homeAllSongs.isNotEmpty()
@@ -1779,6 +1824,16 @@ fun AppScaffold(
                             hasCustomWallpaper = backgroundImageUri != null,
                             hazeState = homeTopHazeState,
                             scrollProgress = animatedHomeScrollProgress
+                        )
+                    } else if (currentTab == 2) {
+                        // 「我的」页悬浮顶栏（左侧固定标题 + 右侧圆形设置键）：两个主题通用
+                        // 现代主题「我的」页：左侧固定「我的」标题 + 右侧圆形设置按键
+                        ModernMineTopBar(
+                            onSettings = { selectedTab = 12 },
+                            backdrop = glassBackdrop,
+                            liquidGlass = liquidGlass,
+                            hasCustomWallpaper = backgroundImageUri != null,
+                            hazeState = homeTopHazeState
                         )
                     } else {
                         TopAppBar(
@@ -1961,8 +2016,13 @@ fun AppScaffold(
                                             Spacer(modifier = Modifier.height(28.dp))
                                         }
                                     }
-                                } else {
-                                    Text("Lx Music")
+                                } else if (currentTab == 2) {
+                                    // 「我的」标题固定，不随状态变化
+                                    Text(
+                                        text = "我的",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             },
                             colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
@@ -1975,8 +2035,9 @@ fun AppScaffold(
                                         Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.action_refresh))
                                     }
                                 }
-                                // 未激活时搜索已是最左侧顶层 tab，不再在顶栏重复放搜索入口（设置齿轮保留）
-                                if (!isGuest) {
+                                // 未激活时搜索已是最左侧顶层 tab，不再在顶栏重复放搜索入口
+                                // （「我的」页只保留设置齿轮，标题固定为「我的」）
+                                if (!isGuest && currentTab != 2) {
                                     IconButton(onClick = {
                                         previousTab = selectedTab
                                         searchQuery = ""
@@ -2021,6 +2082,12 @@ fun AppScaffold(
 
             val isModernTheme = settingsRepository.themeMode == "modern"
             val layoutDirection = LocalLayoutDirection.current
+            // 有背景图时：顶栏不做任何底色遮罩，直接对内容层做「歌词同款」DstIn 渐隐
+            // （顶部+底部），渐隐后露出壁纸，与播放器歌词边缘渐隐露背景一致，不会发白。
+            val density = LocalDensity.current
+            val fadeBarPx = with(density) { innerPadding.calculateTopPadding().toPx() }
+            val fadeTailPx = with(density) { TopBarFadeTailHeight.toPx() }
+            val fadeBottomPx = with(density) { 150.dp.toPx() }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -2036,30 +2103,72 @@ fun AppScaffold(
                 AnimatedContent(
                     targetState = selectedTab,
                     transitionSpec = {
-                        // 未激活顶层顺序 11/1/2 不能按数值判断前后，按在顶层 tab 中的位置判断
-                        val guestOrder = listOf(11, 1, 2)
-                        val fromPos = guestOrder.indexOf(initialState)
-                        val toPos = guestOrder.indexOf(targetState)
-                        val forward = if (isGuest && fromPos >= 0 && toPos >= 0) toPos > fromPos
-                            else targetState > initialState
-                        if (forward) {
-                            slideInHorizontally(tween(300)) { it } + fadeIn(tween(300)) togetherWith
-                                slideOutHorizontally(tween(300)) { -it / 3 } + fadeOut(tween(200))
+                        // 顶层 tab（首页/发现/我的）用轻量横移 + 交叉淡化，方向与顶栏一致、
+                        // 时长对齐，避免"内容整屏滑、顶栏只渐隐"的割裂感；其余页面保持整页滑动。
+                        val topLevelOrder = if (isGuest) listOf(11, 1, 2) else listOf(0, 1, 2)
+                        val fromPos = topLevelOrder.indexOf(initialState)
+                        val toPos = topLevelOrder.indexOf(targetState)
+                        val isTopLevelSwitch = fromPos >= 0 && toPos >= 0 && fromPos != toPos
+                        if (isTopLevelSwitch) {
+                            val forward = toPos > fromPos
+                            if (forward) {
+                                slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 5 } +
+                                    fadeIn(tween(240)) togetherWith
+                                    slideOutHorizontally(tween(280, easing = FastOutSlowInEasing)) { -it / 12 } +
+                                    fadeOut(tween(180))
+                            } else {
+                                slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { -it / 5 } +
+                                    fadeIn(tween(240)) togetherWith
+                                    slideOutHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 12 } +
+                                    fadeOut(tween(180))
+                            }
                         } else {
-                            slideInHorizontally(tween(300)) { -it } + fadeIn(tween(300)) togetherWith
-                                slideOutHorizontally(tween(300)) { it / 3 } + fadeOut(tween(200))
+                            val forward = if (isGuest && fromPos >= 0 && toPos >= 0) toPos > fromPos
+                                else targetState > initialState
+                            if (forward) {
+                                slideInHorizontally(tween(300)) { it } + fadeIn(tween(300)) togetherWith
+                                    slideOutHorizontally(tween(300)) { -it / 3 } + fadeOut(tween(200))
+                            } else {
+                                slideInHorizontally(tween(300)) { -it } + fadeIn(tween(300)) togetherWith
+                                    slideOutHorizontally(tween(300)) { it / 3 } + fadeOut(tween(200))
+                            }
                         }
                     },
                     label = "tabTransition"
                 ) { tab ->
                     // 横屏：页面内容限宽居中（列表行不被拉宽变形）；顶栏/底栏/播放条仍在 Scaffold 层保持全宽
-                    val isThisModernHome = isModernTheme && tab == 0
-                    val tabTopPadding = if (isThisModernHome) 0.dp else innerPadding.calculateTopPadding()
+                    val isThisModernHome = tab == 0
+                    // 「我的」页：顶栏只是悬浮胶囊（内容从下方穿过，与首页同一套观感），
+                    // 不再把内容整体压到顶栏下面。胶囊顶栏两个主题通用。
+                    val isModernMine = tab == 2
+                    // 发现页列表自带顶栏，Scaffold 顶栏槽位只是等高占位 → 内容仍从屏幕顶部开始；
+                    // 榜单详情打开时顶栏是 Scaffold 里的真实 TopAppBar，仍需按 innerPadding 让位。
+                    val isDiscoverList = tab == 1 && showRankDetail == null &&
+                        showPublicPlaylist == null && showPublicAlbum == null
+                    val tabTopPadding = if (isThisModernHome || isModernMine || isDiscoverList) 0.dp
+                        else innerPadding.calculateTopPadding()
+                    // 悬浮顶栏时首屏内容的下移量（滚动后内容从顶栏下方穿过）——胶囊顶栏两主题通用
+                    val floatingTopContentPadding = innerPadding.calculateTopPadding()
+                    // 内容层顶部（首页/我的）与底部（显示底栏时）做歌词同款渐隐。
+                    // **不再区分有没有壁纸**：无壁纸时渐隐到背景色，有壁纸时露出壁纸，
+                    // 保证两种状态下顶栏/底栏的渐变观感一致。
+                    val wallpaperMask = run {
+                        val topFade = if (tab == 0 || tab == 2) fadeBarPx else 0f
+                        val bottomFade = if (showNavBar && !showPlayerPage) fadeBottomPx else 0f
+                        if (topFade > 0f || bottomFade > 0f) {
+                            Modifier.lyricEdgeFadeMask(
+                                topBarPx = topFade,
+                                topTailPx = if (topFade > 0f) fadeTailPx else 0f,
+                                bottomFadePx = bottomFade
+                            )
+                        } else Modifier
+                    }
                     Box(
                         modifier = Modifier
                             .fillMaxHeight()
                             .widthIn(max = if (isLandscape) 640.dp else Dp.Infinity)
                             .align(Alignment.TopCenter)
+                            .then(wallpaperMask)
                             .padding(top = tabTopPadding)
                     ) {
                     when (tab) {
@@ -2074,7 +2183,7 @@ fun AppScaffold(
                                 homeRecommendOffset = homeRecommendListState.firstVisibleItemScrollOffset
                             }
                             HomePage(
-                                topContentPadding = if (isModernTheme) innerPadding.calculateTopPadding() else 0.dp,
+                                topContentPadding = innerPadding.calculateTopPadding(),
                                 onPlaySong = { songs, index -> playOnlineSong(songs, index) },
                                 onAddToQueueNext = { song -> addToQueueNext(song) },
                                 onRankClick = { showRankDetail = it },
@@ -2163,7 +2272,10 @@ fun AppScaffold(
                                         listState = discoverListState,
                                         recommendListState = discoverRecommendListState,
                                         // 乐库需要在线服务，未激活隐藏（排行榜/歌单/专区为公开接口）
-                                        showYueku = !isGuest
+                                        showYueku = !isGuest,
+                                        // 顶栏高度与首页/我的统一：胶囊顶栏两主题都是 54dp
+                                        topBarContentHeight = 54.dp,
+                                        modernTopBar = true
                                     )
                                 }
                             }
@@ -2175,7 +2287,8 @@ fun AppScaffold(
                                     selectedCollectionPlaylistId = 0L
                                     selectedTab = 14
                                 },
-                                onLocalClick = { selectedTab = 3 }
+                                onLocalClick = { selectedTab = 3 },
+                                topContentPadding = floatingTopContentPadding
                             )
                         } else MinePage(
                             loginVersion = loginVersion,
@@ -2205,7 +2318,8 @@ fun AppScaffold(
                                 selectedTab = 14
                             },
                             listState = mineListState,
-                            initialScrollOffset = mineScrollY
+                            initialScrollOffset = mineScrollY,
+                            topContentPadding = floatingTopContentPadding
                         )
                         3 -> LocalMusicPage(
                             currentPlayingPath = currentPlayingPath,
@@ -2557,6 +2671,36 @@ fun AppScaffold(
                                 playerMeshBg = enabled
                                 settingsRepository.playerMeshBg = enabled
                             },
+                            meshFlowSpeed = meshFlowSpeed,
+                            onMeshFlowSpeedChange = { value ->
+                                meshFlowSpeed = value
+                                settingsRepository.meshFlowSpeed = value
+                            },
+                            meshRenderScale = meshRenderScale,
+                            onMeshRenderScaleChange = { value ->
+                                meshRenderScale = value
+                                settingsRepository.meshRenderScale = value
+                            },
+                            meshSensitivity = meshSensitivity,
+                            onMeshSensitivityChange = { value ->
+                                meshSensitivity = value
+                                settingsRepository.meshSensitivity = value
+                            },
+                            meshSubdivision = meshSubdivision,
+                            onMeshSubdivisionChange = { value ->
+                                meshSubdivision = value
+                                settingsRepository.meshSubdivision = value
+                            },
+                            meshStaticMode = meshStaticMode,
+                            onMeshStaticModeChange = { enabled ->
+                                meshStaticMode = enabled
+                                settingsRepository.meshStaticMode = enabled
+                            },
+                            meshAnimation = meshAnimation,
+                            onMeshAnimationChange = { enabled ->
+                                meshAnimation = enabled
+                                settingsRepository.meshAnimation = enabled
+                            },
                             playerWaveformSlider = playerWaveformSlider,
                             onPlayerWaveformSliderChange = { enabled ->
                                 playerWaveformSlider = enabled
@@ -2826,6 +2970,8 @@ fun AppScaffold(
                     }
                 }
             }
+            // 顶栏渐变统一交给内容层的 DstIn 渐隐（有/无壁纸都一样），
+            // 这里不再额外汇一条色带——否则无壁纸时会在顶栏下方出现一条明显的色条。
             } // 关闭外层 Box
         }
 
@@ -2940,7 +3086,10 @@ fun AppScaffold(
             followThemeColor = followThemeColor,
             playerBarOpacity = playerBarOpacity,
             playerBarWhiteBlend = playerBarWhiteBlend,
-            liquidGlass = liquidGlass,
+            // 原生主题下液态玻璃播放条有显示 bug：降级成毛玻璃（只模糊、不折射）；
+            // 现代主题维持液态玻璃。只影响播放条本身，底栏/顶栏/主题布局都不动。
+            liquidGlass = liquidGlass && settingsRepository.themeMode == "modern",
+            frostedGlass = liquidGlass && settingsRepository.themeMode != "modern",
             hasCustomWallpaper = backgroundImageUri != null,
             backdrop = glassBackdrop,
             // BoomingMusic 同款：迷你条固定原位（不随拖动上移），
@@ -3024,26 +3173,25 @@ fun AppScaffold(
                 }
                 // 拖动/收起动画中顶部圆角（卡片感）：中间最大、完全展开/收起时归 0。
                 // 绘制阶段读取动画值（drawWithCache 只重绘不重组）
+                // 注意：必须**始终**裁剪到页面矩形。流体背景是 Compose Canvas + graphicsLayer
+                // （1.3x 放大 + RenderEffect 模糊），不裁剪时收起过程中放大出来的那圈会画到
+                // 页面顶部之外，首页上会闪出一条动效背景色（SurfaceView 的 Mesh 不受影响）。
                 .drawWithCache {
                     onDrawWithContent {
                         val progress =
                             ((miniBarTopY - playerRevealY.value) / miniBarTopY).coerceIn(0f, 1f)
                         // 4 * 28dp * p * (1-p)：p=0 或 1 时为 0，p=0.5 时最大 28dp
                         val corner = 4f * 28.dp.toPx() * progress * (1f - progress)
-                        if (corner > 0.5f) {
-                            val path = Path().apply {
-                                addRoundRect(
-                                    RoundRect(
-                                        rect = Rect(0f, 0f, size.width, size.height),
-                                        topLeft = CornerRadius(corner, corner),
-                                        topRight = CornerRadius(corner, corner)
-                                    )
+                        val path = Path().apply {
+                            addRoundRect(
+                                RoundRect(
+                                    rect = Rect(0f, 0f, size.width, size.height),
+                                    topLeft = CornerRadius(corner, corner),
+                                    topRight = CornerRadius(corner, corner)
                                 )
-                            }
-                            clipPath(path) { this@onDrawWithContent.drawContent() }
-                        } else {
-                            this@onDrawWithContent.drawContent()
+                            )
                         }
+                        clipPath(path) { this@onDrawWithContent.drawContent() }
                     }
                 }
                 // 整页下拉收起（纵向；横向翻页在卡片区，歌词滚动优先、滚动到顶后下拉才收起）
@@ -3098,6 +3246,12 @@ fun AppScaffold(
                         playerHyperBg = playerHyperBg,
                         playerFluidAmbientBg = playerFluidAmbientBg,
                         playerMeshBg = playerMeshBg,
+                        meshFlowSpeed = meshFlowSpeed,
+                        meshRenderScale = meshRenderScale,
+                        meshSensitivity = meshSensitivity,
+                        meshSubdivision = meshSubdivision,
+                        meshStaticMode = meshStaticMode,
+                        meshAnimation = meshAnimation,
                         playerAudioReactive = playerAudioReactive,
                         hyperClipTopProvider = { hyperClipTopPx.floatValue },
                         playerCoverBlurBg = playerCoverBlurBg,

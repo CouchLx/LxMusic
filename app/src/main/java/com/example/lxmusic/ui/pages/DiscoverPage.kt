@@ -21,11 +21,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -99,6 +102,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
@@ -162,7 +166,11 @@ fun DiscoverPage(
     listState: LazyListState = rememberLazyListState(),
     recommendListState: LazyListState = rememberLazyListState(),
     // 未激活模式隐藏乐库（需要在线服务）；排行榜/歌单/专区走公开接口，保留
-    showYueku: Boolean = true
+    showYueku: Boolean = true,
+    // 顶栏内容高度（不含状态栏）：现代主题 54dp / 原生主题 64dp，与首页、我的保持一致
+    topBarContentHeight: Dp = 54.dp,
+    // 现代主题：内容按首页胶囊的 42dp 轨道垂直居中；原生主题：按 TopAppBar 中心居中
+    modernTopBar: Boolean = true
 ) {
     val scope = rememberCoroutineScope()
     val tabs = remember(showYueku) {
@@ -170,8 +178,8 @@ fun DiscoverPage(
             listOf(
                 DiscoverSubTab("排行榜", Icons.Default.Leaderboard),
                 DiscoverSubTab("歌单", Icons.Default.List),
-                DiscoverSubTab("乐库", Icons.Default.LibraryMusic),
-                DiscoverSubTab("专区", Icons.Default.GridView)
+                DiscoverSubTab("专区", Icons.Default.GridView),
+                DiscoverSubTab("乐库", Icons.Default.LibraryMusic)
             )
         } else {
             listOf(
@@ -198,7 +206,9 @@ fun DiscoverPage(
                 scope.launch {
                     pagerState.animateScrollToPage(index)
                 }
-            }
+            },
+            contentHeight = topBarContentHeight,
+            modernTopBar = modernTopBar
         )
 
         // 子页面内容 Pager（全部页面常驻组合，切 Tab 不重建、不重刷接口）
@@ -222,8 +232,16 @@ fun DiscoverPage(
                     )
                 }
                 2 -> {
+                    // 专区子页面（多平台分类，点播随机 50 首）
+                    JingxuanTabContent(
+                        onPlaySong = onPlaySong,
+                        currentPlayingPath = currentPlayingPath,
+                        onAddToQueueNext = onAddToQueueNext
+                    )
+                }
+                else -> {
+                    // 乐库子页面（仅激活模式存在；酷狗语种/风格：推荐歌单 + 单曲推荐 50 首）
                     if (showYueku) {
-                        // 乐库子页面（酷狗语种/风格：推荐歌单 + 单曲推荐 50 首）
                         YuekuTabContent(
                             onOpenPlaylist = { playlist -> onPublicPlaylistClick?.invoke(playlist) },
                             onPlaySong = onPlaySong,
@@ -231,21 +249,12 @@ fun DiscoverPage(
                             isPlaying = isPlaying
                         )
                     } else {
-                        // 无乐库时第 3 个 tab 直接是专区
                         JingxuanTabContent(
                             onPlaySong = onPlaySong,
                             currentPlayingPath = currentPlayingPath,
                             onAddToQueueNext = onAddToQueueNext
                         )
                     }
-                }
-                else -> {
-                    // 专区子页面（多平台分类，点播随机 50 首）
-                    JingxuanTabContent(
-                        onPlaySong = onPlaySong,
-                        currentPlayingPath = currentPlayingPath,
-                        onAddToQueueNext = onAddToQueueNext
-                    )
                 }
             }
         }
@@ -264,7 +273,9 @@ private data class DiscoverSubTab(
 private fun DiscoverTopTabBar(
     tabs: List<DiscoverSubTab>,
     selectedIndex: Int,
-    onTabSelected: (Int) -> Unit
+    onTabSelected: (Int) -> Unit,
+    contentHeight: Dp,
+    modernTopBar: Boolean
 ) {
     val platforms = listOf(
         "kg" to "酷狗",
@@ -274,105 +285,116 @@ private fun DiscoverTopTabBar(
     var showMenu by remember { mutableStateOf(false) }
     // 乐库页是酷狗专属数据，平台切换没有意义：该页隐藏左侧平台胶囊
     val showPlatform = tabs.getOrNull(selectedIndex)?.title != "乐库"
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    // 现代主题：与首页胶囊同一 42dp 轨道（顶 3dp / 底 6dp）；原生主题：对齐 TopAppBar 中心
+    val rowTopPadding = if (modernTopBar) statusBarTop + 3.dp else statusBarTop + 11.dp
 
-    Row(
+    // 与首页/我的顶栏总高一致（状态栏 + contentHeight），三个顶层页面切换时顶栏不跳变。
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .statusBarsPadding()
-            .padding(start = 12.dp, end = 16.dp, top = 6.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .height(statusBarTop + contentHeight)
     ) {
-        if (showPlatform) {
-            // 固定平台切换（不随选栏滚动）
-            Box {
-            Surface(
-                onClick = { showMenu = true },
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.secondaryContainer
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = platforms.firstOrNull { it.first == discoverPlatform }?.second ?: "酷狗",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                    Spacer(modifier = Modifier.width(2.dp))
-                    Icon(
-                        Icons.Default.ArrowDropDown,
-                        contentDescription = "切换平台",
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
-                }
-            }
-            DropdownMenu(
-                expanded = showMenu,
-                onDismissRequest = { showMenu = false },
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-            ) {
-                platforms.forEach { (key, label) ->
-                    DropdownMenuItem(
-                        text = { Text(label, fontSize = 13.sp) },
-                        trailingIcon = {
-                            if (discoverPlatform == key) {
-                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                            }
-                        },
-                        onClick = { showMenu = false; discoverPlatform = key }
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.width(14.dp))
-        }
-
-        LazyRow(
-            modifier = Modifier.weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(22.dp),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = rowTopPadding)
+                .height(42.dp)
+                .padding(start = 12.dp, end = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            items(tabs.size) { index ->
-                val tab = tabs[index]
-                val isSelected = selectedIndex == index
-                val textColor by animateColorAsState(
-                    targetValue = if (isSelected) MaterialTheme.colorScheme.onSurface
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                    animationSpec = tween(200),
-                    label = "tab_text"
-                )
-                val underlineColor by animateColorAsState(
-                    targetValue = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                    animationSpec = tween(200),
-                    label = "tab_line"
-                )
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onTabSelected(index) }
-                        .padding(vertical = 6.dp)
-                ) {
-                    Text(
-                        text = tab.title,
-                        fontSize = 15.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = textColor
+            // 左侧：子 tab 选栏（左对齐；可横向滚动，平台切换按钮固定在右侧不参与滚动）
+            LazyRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(22.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                items(tabs.size) { index ->
+                    val tab = tabs[index]
+                    val isSelected = selectedIndex == index
+                    val textColor by animateColorAsState(
+                        targetValue = if (isSelected) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        animationSpec = tween(200),
+                        label = "tab_text"
                     )
-                    Spacer(modifier = Modifier.height(5.dp))
-                    Box(
+                    val underlineColor by animateColorAsState(
+                        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                        animationSpec = tween(200),
+                        label = "tab_line"
+                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
-                            .width(18.dp)
-                            .height(3.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(underlineColor)
-                    )
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onTabSelected(index) }
+                            .padding(vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = tab.title,
+                            fontSize = 15.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = textColor
+                        )
+                        Spacer(modifier = Modifier.height(5.dp))
+                        Box(
+                            modifier = Modifier
+                                .width(18.dp)
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(underlineColor)
+                        )
+                    }
+                }
+            }
+
+            // 右侧：平台切换按钮（固定位置，不随选栏滚动；乐库页隐藏）
+            if (showPlatform) {
+                Spacer(modifier = Modifier.width(10.dp))
+                Box {
+                    Surface(
+                        onClick = { showMenu = true },
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = platforms.firstOrNull { it.first == discoverPlatform }?.second ?: "酷狗",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Icon(
+                                Icons.Default.ArrowDropDown,
+                                contentDescription = "切换平台",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    ) {
+                        platforms.forEach { (key, label) ->
+                            DropdownMenuItem(
+                                text = { Text(label, fontSize = 13.sp) },
+                                trailingIcon = {
+                                    if (discoverPlatform == key) {
+                                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    }
+                                },
+                                onClick = { showMenu = false; discoverPlatform = key }
+                            )
+                        }
+                    }
                 }
             }
         }

@@ -99,7 +99,9 @@ fun FloatingBottomBar(
         BottomBarTab(2, Icons.Filled.Person, Icons.Outlined.Person, stringResource(R.string.nav_mine))
     )
     if (isFloating) {
-        val glassEnabled = liquidGlass && hasCustomWallpaper
+        // 液态玻璃只要求「开关开 + 有 backdrop」：没有壁纸（纯色主题）也要有玻璃质感，
+        // 否则开关看起来像没生效。solidSurface 仍按是否有壁纸决定回退样式。
+        val glassEnabled = liquidGlass && backdrop != null
         val selectedPosition = resolvedTabs.indexOfFirst { it.index == selectedTabIndex }
             .coerceAtLeast(0)
         val context = LocalContext.current

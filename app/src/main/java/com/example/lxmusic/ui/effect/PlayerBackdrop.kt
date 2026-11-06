@@ -27,6 +27,24 @@ import androidx.compose.ui.unit.dp
 import coil.compose.LocalImageLoader
 import com.example.lxmusic.ui.view.HyperBackground
 
+/** 进程级封面提色缓存：key = 封面 model 字符串。打开播放器首帧直接命中，避免主题色闪烁。 */
+private val albumColorCache =
+    java.util.concurrent.ConcurrentHashMap<String, List<Color>>()
+
+private fun albumColorKey(model: Any?): String? =
+    model?.toString()?.takeIf { it.isNotBlank() }
+
+/**
+ * 预热封面提色缓存：换歌时调用。
+ * 这样用户点开播放器时首帧就能用封面色，不会先闪一帧深色/主题色兜底。
+ */
+suspend fun warmAlbumColorCache(context: android.content.Context, imageLoader: coil.ImageLoader, model: Any) {
+    val key = albumColorKey(model) ?: return
+    if (albumColorCache.containsKey(key)) return
+    val colors = extractAlbumColors(context, imageLoader, model)
+    if (colors.size >= 2) albumColorCache[key] = colors
+}
+
 @Composable
 fun PlayerBackdrop(
     backgroundColor: Color,
@@ -39,6 +57,13 @@ fun PlayerBackdrop(
     playerHyperBg: Boolean,
     playerFluidAmbientBg: Boolean = false,
     playerMeshBg: Boolean = false,
+    // 频谱律动（Mesh）高级参数（对齐 MeiloX）
+    meshFlowSpeed: Float = 0.25f,
+    meshRenderScale: Float = 0.75f,
+    meshSensitivity: Float = 0.1f,
+    meshSubdivision: Int = 50,
+    meshStaticMode: Boolean = false,
+    meshAnimation: Boolean = true,
     playerAudioReactive: Boolean,
     // 页面顶偏移提供器（px）：流体 View 绘制裁剪到页面覆盖范围（防松手瞬间占满）
     hyperClipTopProvider: (() -> Float)? = null,
@@ -56,10 +81,24 @@ fun PlayerBackdrop(
     // 动态渐变背景：根据专辑封面提取主色（切歌时重新提取，结果缓存）
     val context = LocalContext.current
     val imageLoader = LocalImageLoader.current
-    var albumGradientColors by remember { mutableStateOf<List<Color>>(emptyList()) }
+    // 进程级提色缓存（按封面 URL）：再次打开播放器时首帧就能用封面配色，
+    // 不必先闪一下主题色再过渡到封面色
+    var albumGradientColors by remember {
+        mutableStateOf<List<Color>>(
+            albumColorKey(coverModel)?.let { albumColorCache[it] } ?: emptyList()
+        )
+    }
     LaunchedEffect(coverModel) {
         if (coverModel != null) {
-            albumGradientColors = extractAlbumColors(context, imageLoader, coverModel)
+            val key = albumColorKey(coverModel)
+            val cached = key?.let { albumColorCache[it] }
+            if (cached != null) {
+                albumGradientColors = cached
+            } else {
+                val colors = extractAlbumColors(context, imageLoader, coverModel)
+                albumGradientColors = colors
+                if (key != null && colors.size >= 2) albumColorCache[key] = colors
+            }
         }
     }
 
@@ -71,6 +110,31 @@ fun PlayerBackdrop(
             listOf(primaryColor, secondaryColor, tertiaryColor, primaryColor)
         }
     }
+
+    // 封面 / 壁纸是异步加载的：首次出图前保持透明，出图后淡入，
+    // 避免打开播放器瞬间「先空白、再突然出现图片」闪一下。
+    // 注意只在**首次**淡入：之后换歌/换壁纸保持不透明，否则整层背景会先淡出成底色再淡回来。
+    // 非 AsyncImagePainter 的传入视为已就绪（保持旧行为）。
+    val albumAsyncPainter = albumPainter as? coil.compose.AsyncImagePainter
+    val bgAsyncPainter = bgPainter as? coil.compose.AsyncImagePainter
+    val albumPainterReady = albumAsyncPainter == null ||
+        albumAsyncPainter.state is coil.compose.AsyncImagePainter.State.Success
+    val bgPainterReady = bgAsyncPainter == null ||
+        bgAsyncPainter.state is coil.compose.AsyncImagePainter.State.Success
+    var albumBgShown by remember { mutableStateOf(false) }
+    var wallpaperBgShown by remember { mutableStateOf(false) }
+    LaunchedEffect(albumPainterReady) { if (albumPainterReady) albumBgShown = true }
+    LaunchedEffect(bgPainterReady) { if (bgPainterReady) wallpaperBgShown = true }
+    val albumBgAlpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (albumPainterReady || albumBgShown) 1f else 0f,
+        animationSpec = androidx.compose.animation.core.tween(220),
+        label = "albumBgFade"
+    )
+    val wallpaperBgAlpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (bgPainterReady || wallpaperBgShown) 1f else 0f,
+        animationSpec = androidx.compose.animation.core.tween(220),
+        label = "wallpaperBgFade"
+    )
 
     Box(modifier = modifier) {
         // 兜底色：所有效果都关闭时保证不透明，避免看穿到下层页面
@@ -84,9 +148,18 @@ fun PlayerBackdrop(
         if (playerMeshBg) {
             FluidMeshBackground(
                 coverModel = coverModel,
-                playing = playing,
+                // 「背景动画」关闭后，暂停也持续流动（对齐 MeiloX shouldAnimate）
+                playing = if (meshAnimation) playing else true,
                 imageLoader = imageLoader,
                 fallbackColors = dynamicBgColors,
+                // 全局「音频律动响应」关闭时不做频谱驱动；灵敏度 ×2 对齐 MeiloX
+                audioStrength = if (playerAudioReactive) {
+                    (meshSensitivity * 2f).coerceIn(0f, 1f)
+                } else 0f,
+                flowSpeed = meshFlowSpeed,
+                renderScale = meshRenderScale,
+                subdivision = meshSubdivision,
+                staticMode = meshStaticMode,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -97,6 +170,7 @@ fun PlayerBackdrop(
                 contentDescription = null,
                 modifier = Modifier
                     .fillMaxSize()
+                    .alpha(albumBgAlpha)
                     .blur(playerCoverBlurAmount.dp),
                 contentScale = ContentScale.Crop
             )
@@ -146,7 +220,7 @@ fun PlayerBackdrop(
                 contentDescription = null,
                 modifier = Modifier
                     .fillMaxSize()
-                    .alpha(playerBgOpacity)
+                    .alpha(playerBgOpacity * wallpaperBgAlpha)
                     .then(if (playerBlur) Modifier.blur(40.dp) else Modifier),
                 contentScale = ContentScale.Crop
             )

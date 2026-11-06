@@ -1244,6 +1244,14 @@ fun HomePage(
         if (onlineReady && consumePendingHomeRefresh()) {
             performRefresh(isAuto = true)
         }
+
+        // 自愈：老版本残留或上游临时失败会在缓存里留下空的「百万收藏」「热歌推荐」，
+        // 而首页平时不自动刷新 → 会一直停在空卡片。检测到缺块就补拉一次（每次启动最多一次）。
+        if (onlineReady && isLoggedIn &&
+            (feed.millionSongs.isEmpty() || feed.networkSongs.isEmpty())
+        ) {
+            performRefresh(isAuto = true)
+        }
     }
 
     // 登录成功世代号变化（含登录时首页正挂在组合里的场景）：消费一次性刷新标记。

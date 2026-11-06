@@ -15,6 +15,7 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -72,6 +73,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import coil.compose.AsyncImage
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
@@ -103,7 +105,9 @@ fun MinePage(
     onManagePlaylists: () -> Unit = {},
     onManageKugouPlaylists: () -> Unit = {},
     listState: LazyListState = rememberLazyListState(),
-    initialScrollOffset: Int = 0
+    initialScrollOffset: Int = 0,
+    // 顶栏悬浮时预留的顶部内容内边距（首屏内容从胶囊下方开始，向上滚动时从顶栏下方穿过）
+    topContentPadding: Dp = 0.dp
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -301,7 +305,8 @@ fun MinePage(
 
     LazyColumn(
         state = scrollState,
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = topContentPadding)
     ) {
         item {
         Column(

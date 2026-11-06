@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 
 /**
  * 未激活「我的」：只有收藏、本地音乐两个入口。
@@ -33,13 +34,15 @@ import androidx.compose.ui.unit.dp
 fun GuestMinePage(
     onFavoritesClick: () -> Unit,
     onLocalClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // 现代主题顶栏悬浮时的顶部内容内边距（与首页一致：首屏在胶囊下方）
+    topContentPadding: Dp = 0.dp
 ) {
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp)
-            .padding(top = 28.dp)
+            .padding(top = 28.dp + topContentPadding)
     ) {
         Text(
             text = "Lx Music",

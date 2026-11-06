@@ -155,6 +155,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -350,6 +351,8 @@ internal fun BackgroundPresetCard(
     selected: Boolean,
     enabled: Boolean = true,
     previewBrush: Brush,
+    previewImage: Any? = null,
+    previewIcon: ImageVector? = null,
     onClick: () -> Unit
 ) {
     Surface(
@@ -374,10 +377,26 @@ internal fun BackgroundPresetCard(
                 modifier = Modifier
                     .size(44.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(previewBrush)
-                    .border(0.8.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(12.dp)),
+                    .background(previewBrush),
                 contentAlignment = Alignment.Center
             ) {
+                // 有真实图片（如用户壁纸）时直接展示缩略图，比渐变更直观；
+                // 没有图片时用渐变色 + 图标占位
+                if (previewImage != null) {
+                    Image(
+                        painter = rememberAsyncImagePainter(model = previewImage),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else if (previewIcon != null) {
+                    Icon(
+                        imageVector = previewIcon,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.9f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
                 if (selected) {
                     Box(
                         modifier = Modifier
@@ -394,6 +413,12 @@ internal fun BackgroundPresetCard(
                         )
                     }
                 }
+                // 边框画在内容之上，避免壁纸缩略图把描边盖住
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .border(0.8.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                )
             }
             Spacer(modifier = Modifier.width(14.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -434,6 +459,39 @@ internal fun BackgroundPresetCard(
     }
 }
 
+/** 频谱律动参数滑块行（标题 + 当前值 + 滑杆） */
+@Composable
+private fun MeshParamSliderRow(
+    title: String,
+    valueText: String,
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int = 0,
+    onValueChange: (Float) -> Unit
+) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = valueText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = valueRange,
+            steps = steps
+        )
+    }
+}
+
 @Composable
 fun SettingsPage(
     currentUri: String? = null,
@@ -469,7 +527,7 @@ fun SettingsPage(
     onPlayerRoundAlbumChange: (Boolean) -> Unit = {},
     playerRotate: Boolean = true,
     onPlayerRotateChange: (Boolean) -> Unit = {},
-    playerVinylStyle: Boolean = true,
+    playerVinylStyle: Boolean = false,
     onPlayerVinylStyleChange: (Boolean) -> Unit = {},
     playerVinylPointer: Boolean = true,
     onPlayerVinylPointerChange: (Boolean) -> Unit = {},
@@ -483,6 +541,19 @@ fun SettingsPage(
     onPlayerFluidAmbientBgChange: (Boolean) -> Unit = {},
     playerMeshBg: Boolean = false,
     onPlayerMeshBgChange: (Boolean) -> Unit = {},
+    // 频谱律动（Mesh）高级参数
+    meshFlowSpeed: Float = 0.25f,
+    onMeshFlowSpeedChange: (Float) -> Unit = {},
+    meshRenderScale: Float = 0.75f,
+    onMeshRenderScaleChange: (Float) -> Unit = {},
+    meshSensitivity: Float = 0.1f,
+    onMeshSensitivityChange: (Float) -> Unit = {},
+    meshSubdivision: Int = 50,
+    onMeshSubdivisionChange: (Int) -> Unit = {},
+    meshStaticMode: Boolean = false,
+    onMeshStaticModeChange: (Boolean) -> Unit = {},
+    meshAnimation: Boolean = true,
+    onMeshAnimationChange: (Boolean) -> Unit = {},
     playerWaveformSlider: Boolean = false,
     onPlayerWaveformSliderChange: (Boolean) -> Unit = {},
     playerLyricsWordEffect: Boolean = true,
@@ -624,12 +695,13 @@ fun SettingsPage(
                         val appearanceBadge = "$appearanceModeText · $appearanceThemeText"
 
                         val playerStageBadge = when {
-                            playerHyperBg -> "灵动流体"
-                            playerMeshBg -> "Mesh频谱"
+                            playerMeshBg -> "频谱律动"
+                            playerFluidAmbientBg -> "灵动流体"
+                            playerHyperBg -> "极简弥散"
                             playerCoverBlurBg -> "封面模糊"
                             playerDynamicBg -> "封面渐变"
-                            playerFluidAmbientBg -> "极简弥散"
-                            else -> "极简黑调"
+                            playerBgEnhance -> "壁纸背景"
+                            else -> "极简"
                         }
 
                         val audioQualityBadge = when (settingsPrefs.getString("audio_quality", null)) {
@@ -848,6 +920,19 @@ fun SettingsPage(
                         onPlayerFluidAmbientBgChange = onPlayerFluidAmbientBgChange,
                         playerMeshBg = playerMeshBg,
                         onPlayerMeshBgChange = onPlayerMeshBgChange,
+                        meshFlowSpeed = meshFlowSpeed,
+                        onMeshFlowSpeedChange = onMeshFlowSpeedChange,
+                        meshRenderScale = meshRenderScale,
+                        onMeshRenderScaleChange = onMeshRenderScaleChange,
+                        meshSensitivity = meshSensitivity,
+                        onMeshSensitivityChange = onMeshSensitivityChange,
+                        meshSubdivision = meshSubdivision,
+                        onMeshSubdivisionChange = onMeshSubdivisionChange,
+                        meshStaticMode = meshStaticMode,
+                        onMeshStaticModeChange = onMeshStaticModeChange,
+                        meshAnimation = meshAnimation,
+                        onMeshAnimationChange = onMeshAnimationChange,
+                        wallpaperUri = currentUri,
                         playerCoverBlurBg = playerCoverBlurBg,
                         onPlayerCoverBlurBgChange = onPlayerCoverBlurBgChange,
                         playerCoverBlurAmount = playerCoverBlurAmount,
@@ -3176,7 +3261,7 @@ internal fun SettingsAboutContent() {
 /**
  * 新「播放界面」设置统一页面
  * 包含：
- * 1. 背景动效与氛围（灵动流体、MeiloX 网格、流体着色器、封面模糊、动态渐变、壁纸背景与音频律动）
+ * 1. 背景动效与氛围（频谱律动、灵动流体、极简弥散、封面模糊、动态渐变、壁纸背景与音频律动）
  * 2. 黑胶唱片与封面（圆形专辑、旋转动画、黑胶质感、机械唱针、复古底座、触屏切歌词）
  * 3. 歌词特效与体验（逐字卡拉OK、MeiloX 液态歌词、歌词景深虚化、拖动预览）
  * 4. 播放控制与进度条（简约风控件、波浪动态进度条、紧凑控制栏）
@@ -3192,6 +3277,20 @@ internal fun SettingsPlayerStageContent(
     onPlayerFluidAmbientBgChange: (Boolean) -> Unit,
     playerMeshBg: Boolean,
     onPlayerMeshBgChange: (Boolean) -> Unit,
+    // 频谱律动（Mesh）高级参数
+    meshFlowSpeed: Float = 0.25f,
+    onMeshFlowSpeedChange: (Float) -> Unit = {},
+    meshRenderScale: Float = 0.75f,
+    onMeshRenderScaleChange: (Float) -> Unit = {},
+    meshSensitivity: Float = 0.1f,
+    onMeshSensitivityChange: (Float) -> Unit = {},
+    meshSubdivision: Int = 50,
+    onMeshSubdivisionChange: (Int) -> Unit = {},
+    meshStaticMode: Boolean = false,
+    onMeshStaticModeChange: (Boolean) -> Unit = {},
+    meshAnimation: Boolean = true,
+    onMeshAnimationChange: (Boolean) -> Unit = {},
+    wallpaperUri: String? = null,
     playerCoverBlurBg: Boolean,
     onPlayerCoverBlurBgChange: (Boolean) -> Unit,
     playerCoverBlurAmount: Float,
@@ -3211,7 +3310,7 @@ internal fun SettingsPlayerStageContent(
     onPlayerRoundAlbumChange: (Boolean) -> Unit,
     playerRotate: Boolean,
     onPlayerRotateChange: (Boolean) -> Unit,
-    playerVinylStyle: Boolean = true,
+    playerVinylStyle: Boolean = false,
     onPlayerVinylStyleChange: (Boolean) -> Unit = {},
     playerVinylPointer: Boolean = true,
     onPlayerVinylPointerChange: (Boolean) -> Unit = {},
@@ -3253,8 +3352,8 @@ internal fun SettingsPlayerStageContent(
             )
 
             val currentBgPreset = when {
-                playerFluidAmbientBg -> "fluid"
                 playerMeshBg -> "mesh"
+                playerFluidAmbientBg -> "fluid"
                 playerHyperBg -> "hyper"
                 playerCoverBlurBg -> "blur"
                 playerDynamicBg -> "dynamic"
@@ -3272,26 +3371,27 @@ internal fun SettingsPlayerStageContent(
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 推荐/默认项排第一：频谱律动（原 Mesh 频谱背景）
+                BackgroundPresetCard(
+                    title = "频谱律动背景",
+                    tag = "推荐 · 默认",
+                    subtitle = "封面取色驱动流体网格形变，随音乐鼓点与频谱律动",
+                    selected = currentBgPreset == "mesh",
+                    previewBrush = Brush.sweepGradient(
+                        listOf(Color(0xFF2193b0), Color(0xFF6dd5ed), Color(0xFF8E2DE2), Color(0xFF2193b0))
+                    ),
+                    onClick = { selectBgPreset("mesh") }
+                )
+
                 BackgroundPresetCard(
                     title = "灵动流体背景",
-                    tag = "推荐 · Apple 风格",
+                    tag = "Apple 风格",
                     subtitle = "仿 Apple Music 流体光场，多频有机流动与智能高饱和取色",
                     selected = currentBgPreset == "fluid",
                     previewBrush = Brush.linearGradient(
                         listOf(Color(0xFFE94057), Color(0xFF8A2387), Color(0xFFF27121))
                     ),
                     onClick = { selectBgPreset("fluid") }
-                )
-
-                BackgroundPresetCard(
-                    title = "Mesh 频谱背景",
-                    tag = "自适应律动",
-                    subtitle = "封面取色驱动 GL 网格流体形变，随音乐鼓点与频谱律动",
-                    selected = currentBgPreset == "mesh",
-                    previewBrush = Brush.sweepGradient(
-                        listOf(Color(0xFF2193b0), Color(0xFF6dd5ed), Color(0xFF8E2DE2), Color(0xFF2193b0))
-                    ),
-                    onClick = { selectBgPreset("mesh") }
                 )
 
                 BackgroundPresetCard(
@@ -3332,18 +3432,25 @@ internal fun SettingsPlayerStageContent(
                 BackgroundPresetCard(
                     title = "应用壁纸背景",
                     tag = "相册壁纸",
-                    subtitle = "使用在外观设置中选择的背景图片作为播放器底图",
+                    subtitle = if (wallpaperUri != null) {
+                        "使用在外观设置中选择的背景图片作为播放器底图"
+                    } else {
+                        "尚未选择壁纸，可到「外观与个性化」里添加"
+                    },
                     selected = currentBgPreset == "wallpaper",
+                    // 选中壁纸时直接预览真实图片；没选时用中性灰底 + 图标，不再用蓝色渐变
                     previewBrush = Brush.linearGradient(
-                        listOf(Color(0xFF667EEA), Color(0xFF764BA2))
+                        listOf(Color(0xFF9AA5B1), Color(0xFF5B6672))
                     ),
+                    previewImage = wallpaperUri,
+                    previewIcon = Icons.Default.Palette,
                     onClick = { selectBgPreset("wallpaper") }
                 )
 
                 BackgroundPresetCard(
-                    title = "纯净极简黑调",
-                    tag = "纯黑省电",
-                    subtitle = "关闭所有动效背景，经典纯黑深邃沉浸，低功耗省电",
+                    title = "极简",
+                    tag = "省电",
+                    subtitle = "关闭所有动效背景，使用纯净底色，低功耗省电",
                     selected = currentBgPreset == "pure",
                     previewBrush = Brush.linearGradient(
                         listOf(Color(0xFF232526), Color(0xFF0F0C29))
@@ -3469,6 +3576,76 @@ internal fun SettingsPlayerStageContent(
                         subtitle = "背景流动与形变随当前播放的音量频谱自适应律动",
                         checked = playerAudioReactive,
                         onCheckedChange = onPlayerAudioReactiveChange
+                    )
+                }
+            }
+
+            // 频谱律动高级参数（完整对齐 MeiloX「流动背景」设置）
+            androidx.compose.animation.AnimatedVisibility(
+                visible = currentBgPreset == "mesh",
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                SettingsGroupCard {
+                    Text(
+                        text = "频谱律动参数",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 2.dp)
+                    )
+                    MeshParamSliderRow(
+                        title = "流动速度",
+                        valueText = String.format("%.2f", meshFlowSpeed),
+                        value = meshFlowSpeed,
+                        valueRange = 0.05f..0.5f,
+                        steps = 8,
+                        onValueChange = onMeshFlowSpeedChange
+                    )
+                    MeshParamSliderRow(
+                        title = "渲染精度",
+                        valueText = String.format("%.0f%%", meshRenderScale * 100),
+                        value = meshRenderScale,
+                        valueRange = 0.25f..1f,
+                        steps = 2,
+                        onValueChange = onMeshRenderScaleChange
+                    )
+                    MeshParamSliderRow(
+                        title = "节拍灵敏度",
+                        valueText = String.format("%.1f", meshSensitivity),
+                        value = meshSensitivity,
+                        valueRange = 0f..0.5f,
+                        steps = 4,
+                        onValueChange = onMeshSensitivityChange
+                    )
+                    MeshParamSliderRow(
+                        title = "网格细分",
+                        // MeiloX 内部 clamp 到 50，60/70/80 实际无效，这里只给有效范围
+                        valueText = meshSubdivision.toString(),
+                        value = meshSubdivision.toFloat(),
+                        valueRange = 10f..50f,
+                        steps = 3,
+                        onValueChange = { onMeshSubdivisionChange(it.roundToInt()) }
+                    )
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                    )
+                    PlayerSettingSwitchRow(
+                        title = "静态模式",
+                        subtitle = "过渡完成后停止动画以节省电量",
+                        checked = meshStaticMode,
+                        onCheckedChange = onMeshStaticModeChange
+                    )
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                    )
+                    PlayerSettingSwitchRow(
+                        title = "背景动画",
+                        subtitle = "开启后只在播放中流动；关闭后暂停也保持流动",
+                        checked = meshAnimation,
+                        onCheckedChange = onMeshAnimationChange
                     )
                 }
             }
