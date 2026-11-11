@@ -1,8 +1,6 @@
 package com.example.lxmusic
 
 import com.example.lxmusic.model.SongInfo
-import okhttp3.Cookie
-import okhttp3.CookieJar
 import okhttp3.HttpUrl
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -81,8 +79,100 @@ data class NeteaseLyricPart(
     val lyric: String? = null
 )
 
+// ==================== 登录 / 账号 DTO ====================
+// 接口按 网易云api.txt：/login/qr/* 扫码、/captcha/sent + /login/cellphone 手机验证码。
+// 所有登录接口都必须带 timestamp——NCM 服务端有 2 分钟缓存，否则轮询拿的是旧状态。
+
+/** /login/qr/key 响应（新版字段是 unikey，老版是 key，两个都接） */
+data class NeteaseQrKeyResponse(
+    val code: Int = 0,
+    val data: NeteaseQrKeyData? = null
+)
+
+data class NeteaseQrKeyData(
+    val code: Int = 0,
+    val unikey: String? = null,
+    val key: String? = null
+) {
+    val loginKey: String?
+        get() = unikey?.takeIf { it.isNotBlank() } ?: key?.takeIf { it.isNotBlank() }
+}
+
+/** /login/qr/create 响应：qrimg 是 data:image/png;base64,... */
+data class NeteaseQrCreateResponse(
+    val code: Int = 0,
+    val data: NeteaseQrCreateData? = null
+)
+
+data class NeteaseQrCreateData(
+    val qrurl: String? = null,
+    val qrimg: String? = null
+)
+
+/** /login/qr/check 响应：code 在顶层，800 过期 / 801 待扫码 / 802 待确认 / 803 成功 */
+data class NeteaseQrCheckResponse(
+    val code: Int = 0,
+    val message: String? = null,
+    val cookie: String? = null
+)
+
+/** 通用结果体（发送验证码 / 退出登录） */
+data class NeteaseBaseResponse(
+    val code: Int = 0,
+    val message: String? = null,
+    val msg: String? = null
+) {
+    val reason: String?
+        get() = message?.takeIf { it.isNotBlank() } ?: msg?.takeIf { it.isNotBlank() }
+}
+
+/** /login/cellphone 响应；v3.30.0+ 会在 cookie 字段里直接返回登录凭证 */
+data class NeteaseLoginResponse(
+    val code: Int = 0,
+    val message: String? = null,
+    val msg: String? = null,
+    val cookie: String? = null,
+    val account: NeteaseAccount? = null,
+    val profile: NeteaseProfile? = null
+) {
+    val reason: String?
+        get() = message?.takeIf { it.isNotBlank() } ?: msg?.takeIf { it.isNotBlank() }
+}
+
+data class NeteaseAccount(
+    val id: Long = 0,
+    val userName: String? = null
+)
+
+/** 账号资料（/user/account 与 /login/cellphone 共用） */
+data class NeteaseProfile(
+    val userId: Long = 0,
+    val nickname: String? = null,
+    val avatarUrl: String? = null,
+    val vipType: Int = 0
+)
+
+/** /user/account 响应 */
+data class NeteaseAccountResponse(
+    val code: Int = 0,
+    val account: NeteaseAccount? = null,
+    val profile: NeteaseProfile? = null
+)
+
+/** /login/status 响应（登录态校验） */
+data class NeteaseLoginStatusResponse(
+    val code: Int = 0,
+    val data: NeteaseLoginStatusData? = null
+)
+
+data class NeteaseLoginStatusData(
+    val code: Int = 0,
+    val account: NeteaseAccount? = null,
+    val profile: NeteaseProfile? = null
+)
+
 // ==================== Retrofit 接口 ====================
-// 本轮只实现单曲搜索闭环；登录/歌单/榜单等留待后续按文档逐个接入
+// 单曲搜索/取流/歌词 + 登录/账号；歌单与推荐按后续轮次接入
 
 interface NeteaseService {
     /** 单曲搜索（type=1），文档：keywords 必选，limit 默认 30，offset 分页 */
@@ -109,13 +199,54 @@ interface NeteaseService {
         @Query("id") id: Long
     ): NeteaseLyricResponse
 
-    // ========== 后续扩展（按网易云api.txt 文档） ==========
-    // @GET("playlist/track/all") 歌单全部歌曲
-    // @GET("toplist/detail") 所有榜单
-    // @GET("top/list") 榜单歌曲
-    // @GET("login/qr/key|create|check") 二维码登录
-    // @GET("like/v1") / @GET("likelist") 红心
-    // @GET("recommend/songs") 每日推荐（需登录）
+    // ========== 登录 / 账号 ==========
+
+    /** 二维码 key */
+    @GET("login/qr/key")
+    suspend fun qrKey(@Query("timestamp") timestamp: Long): NeteaseQrKeyResponse
+
+    /** 二维码图片（qrimg=true 额外返回 base64 data URI） */
+    @GET("login/qr/create")
+    suspend fun qrCreate(
+        @Query("key") key: String,
+        @Query("qrimg") qrimg: Boolean,
+        @Query("timestamp") timestamp: Long
+    ): NeteaseQrCreateResponse
+
+    /** 二维码状态轮询；扫码后若返回 502，按文档加 noCookie=true 重试 */
+    @GET("login/qr/check")
+    suspend fun qrCheck(
+        @Query("key") key: String,
+        @Query("timestamp") timestamp: Long,
+        @Query("noCookie") noCookie: Boolean? = null
+    ): NeteaseQrCheckResponse
+
+    /** 发送手机验证码 */
+    @GET("captcha/sent")
+    suspend fun sendCaptcha(
+        @Query("phone") phone: String,
+        @Query("timestamp") timestamp: Long
+    ): NeteaseBaseResponse
+
+    /** 手机验证码登录（成功返回 cookie） */
+    @GET("login/cellphone")
+    suspend fun loginCellphone(
+        @Query("phone") phone: String,
+        @Query("captcha") captcha: String,
+        @Query("timestamp") timestamp: Long
+    ): NeteaseLoginResponse
+
+    /** 当前登录账号资料（昵称/头像/uid） */
+    @GET("user/account")
+    suspend fun userAccount(@Query("timestamp") timestamp: Long): NeteaseAccountResponse
+
+    /** 登录状态（cookie 失效校验） */
+    @GET("login/status")
+    suspend fun loginStatus(@Query("timestamp") timestamp: Long): NeteaseLoginStatusResponse
+
+    /** 退出登录（尽力调用，失败也不该阻断本地清理） */
+    @GET("logout")
+    suspend fun logout(@Query("timestamp") timestamp: Long): NeteaseBaseResponse
 }
 
 // ==================== 单例 ====================
@@ -129,7 +260,85 @@ object NeteaseApi {
     @Volatile
     var baseUrl: String = "http://your-server:3001/"
 
-    private var _cookieStore: MutableMap<String, String>? = null
+    /**
+     * 网易云登录态 cookie（原始串，如 "MUSIC_U=xxx; __csrf=yyy"）。
+     *
+     * 由 [NeteaseAuth] 在启动时恢复、登录成功后写入；每次请求通过 Cookie 头带给 BFF，
+     * 由 BFF 转发给内网 3001。不再依赖 OkHttp 的 CookieJar（那个只存在内存里，进程一死就丢）。
+     */
+    @Volatile
+    var authCookie: String = ""
+
+    /** cookie 变化回调（登录/退出/上游轮换），由 [NeteaseAuth] 负责落盘 */
+    @Volatile
+    var onAuthCookieChanged: ((String) -> Unit)? = null
+
+    /** "a=1; b=2" → 有序 map */
+    private fun parseCookie(raw: String): LinkedHashMap<String, String> {
+        val map = linkedMapOf<String, String>()
+        raw.split(';').forEach { part ->
+            val idx = part.indexOf('=')
+            if (idx > 0) {
+                val name = part.substring(0, idx).trim()
+                val value = part.substring(idx + 1).trim()
+                if (name.isNotEmpty() && value.isNotEmpty()) map[name] = value
+            }
+        }
+        return map
+    }
+
+    private val COOKIE_ATTRIBUTES = setOf(
+        "max-age", "expires", "path", "domain", "secure", "httponly",
+        "samesite", "priority", "version", "comment"
+    )
+
+    /**
+     * 清洗登录接口返回的 cookie 串。
+     *
+     * NCM 的 /login/qr/check 803 把多份 Set-Cookie 用 ";" 拼在 body 的 cookie 字段里，
+     * 形如 "MUSIC_U=xxx; Max-Age=15552000; Expires=...; Path=/;;__csrf=yyy; ..."。
+     * 原样当 Cookie 头发出去后 NCM 解析不出会话（实测 /user/account 返回 account/profile 全 null），
+     * 这里只保留 name=value，丢掉属性项与空值项（MUSIC_SNS= 这种）。
+     */
+    fun cleanCookie(raw: String): String {
+        val map = linkedMapOf<String, String>()
+        raw.split(';').forEach { part ->
+            val text = part.trim()
+            if (text.isEmpty()) return@forEach
+            val idx = text.indexOf('=')
+            if (idx <= 0) return@forEach
+            val name = text.substring(0, idx).trim()
+            val value = text.substring(idx + 1).trim()
+            if (name.isEmpty() || value.isEmpty()) return@forEach
+            if (name.lowercase() in COOKIE_ATTRIBUTES) return@forEach
+            map[name] = value
+        }
+        return map.entries.joinToString("; ") { "${it.key}=${it.value}" }
+    }
+
+    /** 写入登录态（空串=已退出），清洗后落库并通知持久化 */
+    fun updateAuthCookie(cookie: String) {
+        val trimmed = cleanCookie(cookie)
+        if (trimmed == authCookie) return
+        authCookie = trimmed
+        onAuthCookieChanged?.invoke(trimmed)
+    }
+
+    /** 合并上游下发的 cookie（MUSIC_U 轮换 / 扫码 502 走 noCookie 时只剩 Set-Cookie） */
+    fun mergeAuthCookies(updates: Map<String, String>) {
+        if (updates.isEmpty()) return
+        val map = parseCookie(authCookie)
+        var changed = false
+        updates.forEach { (name, value) ->
+            if (value.isBlank()) {
+                if (map.remove(name) != null) changed = true
+            } else if (map[name] != value) {
+                map[name] = value
+                changed = true
+            }
+        }
+        if (changed) updateAuthCookie(map.entries.joinToString("; ") { "${it.key}=${it.value}" })
+    }
 
     /** 从酷狗服务器地址推导网易云地址（同一主机换端口 3001） */
     fun deriveDefaultBaseUrl(): String {
@@ -157,10 +366,9 @@ object NeteaseApi {
         neteaseServerUrlPref = url
     }
 
-    /** 重建 API 服务（服务器地址变更后调用） */
+    /** 重建 API 服务（服务器地址变更后调用）；登录态 cookie 不随之清空 */
     fun rebuildService() {
         _service = null
-        _cookieStore?.clear()
         android.util.Log.d("LxMusic", "网易云 API 服务已重建，baseUrl=$baseUrl")
     }
 
@@ -195,6 +403,30 @@ object NeteaseApi {
         "higher" -> 192000
         "standard" -> 128000
         else -> 0
+    }
+
+    /** 登录态注入：所有请求统一带上 Cookie 头（BFF 会原样转发给内网 NCM） */
+    private fun cookieInterceptor(): okhttp3.Interceptor = okhttp3.Interceptor { chain ->
+        val cookie = authCookie.trim()
+        if (cookie.isEmpty()) return@Interceptor chain.proceed(chain.request())
+        chain.proceed(chain.request().newBuilder().header("Cookie", cookie).build())
+    }
+
+    /**
+     * 收下上游轮换下来的 Set-Cookie（BFF 已把 Domain 去掉）。
+     * 二维码登录走 803 的 body cookie 就够，这里是兜底：MUSIC_U 轮换、或 502 后用
+     * noCookie=true 重试时只有响应头里带 cookie。
+     */
+    private fun cookieSyncInterceptor(): okhttp3.Interceptor = okhttp3.Interceptor { chain ->
+        val response = chain.proceed(chain.request())
+        val updates = response.headers("Set-Cookie").mapNotNull { header ->
+            val pair = header.substringBefore(';')
+            val idx = pair.indexOf('=')
+            if (idx <= 0) null
+            else pair.substring(0, idx).trim() to pair.substring(idx + 1).trim()
+        }.toMap()
+        if (updates.isNotEmpty()) mergeAuthCookies(updates)
+        response
     }
 
     /** BFF 全量代理拦截器：配置了 bffUrl 时把网易云请求改写到 BFF（api/ne 前缀下的所有路径）并带激活凭证头，
@@ -237,35 +469,13 @@ object NeteaseApi {
             android.util.Log.d("LxMusic_Netease", message)
         }.apply {
             level = okhttp3.logging.HttpLoggingInterceptor.Level.BODY
-        }
-
-        // 简易 CookieJar：网易云登录态 cookie（MUSIC_U 等）由登录接口回写，为后续登录留位
-        val cookieStore = mutableMapOf<String, String>()
-        this._cookieStore = cookieStore
-        val cookieJar = object : CookieJar {
-            override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-                cookies.forEach { cookie ->
-                    if (cookie.value.isNotBlank()) {
-                        cookieStore[cookie.name] = cookie.value
-                    } else {
-                        cookieStore.remove(cookie.name)
-                    }
-                }
-            }
-            override fun loadForRequest(url: HttpUrl): List<Cookie> {
-                return cookieStore.filter { it.value.isNotBlank() }.map { (name, value) ->
-                    Cookie.Builder()
-                        .domain(url.host)
-                        .path("/")
-                        .name(name)
-                        .value(value)
-                        .build()
-                }
-            }
+            // 登录态不进日志：BODY 级别会打印请求头，Cookie 必须打码
+            redactHeader("Cookie")
         }
 
         val client = okhttp3.OkHttpClient.Builder()
-            .cookieJar(cookieJar)
+            .addInterceptor(cookieInterceptor())
+            .addInterceptor(cookieSyncInterceptor())
             .addInterceptor(bffInterceptor())
             .addInterceptor(loggingInterceptor)
             .build()

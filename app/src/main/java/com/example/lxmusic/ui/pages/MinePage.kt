@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
@@ -43,6 +44,7 @@ import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Checklist
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -82,6 +84,8 @@ import com.example.lxmusic.R
 import androidx.compose.ui.res.stringResource
 import com.example.lxmusic.KuGouApi
 import com.example.lxmusic.MusicDatabase
+import com.example.lxmusic.NeteaseApi
+import com.example.lxmusic.NeteaseAuth
 import com.example.lxmusic.ui.components.PlaylistCard
 import com.example.lxmusic.UserPlaylistEntity
 import com.example.lxmusic.UserPlaylistItem
@@ -93,13 +97,20 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+
+/** 网易云品牌红（账号卡未登录占位与 VIP 标识；不参与主题配色） */
+private val NeteaseBrand = Color(0xFFE60026)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MinePage(
     loginVersion: Int = 0,
+    neteaseVersion: Int = 0,
     onLocalClick: () -> Unit,
     onAvatarClick: () -> Unit,
+    onNeteaseLoginClick: () -> Unit = {},
+    onNeteaseAuthChanged: () -> Unit = {},
     onPlaylistDetailClick: (UserPlaylistItem) -> Unit = {},
     onCollectionDetailClick: (String, Long) -> Unit = { _, _ -> },
     onManagePlaylists: () -> Unit = {},
@@ -121,6 +132,12 @@ fun MinePage(
 
     val gson = remember { Gson() }
     val minePrefs = remember { context.getSharedPreferences("mine_state", Context.MODE_PRIVATE) }
+    // 账号卡：酷狗 / 网易云 分段切换（选中平台持久化，默认酷狗）
+    val neteaseAccount = remember(neteaseVersion) { NeteaseAuth.load(context) }
+    var accountTab by remember {
+        mutableStateOf(minePrefs.getString("account_card_selected", "kugou") ?: "kugou")
+    }
+    var showNeteaseAccountDialog by remember { mutableStateOf(false) }
     // 官方收藏模式：歌单区把“喜欢镜像”歌单（本地先写）持久置顶显示
     val mineSettingsPrefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
     val kugouFavOn = mineSettingsPrefs.getBoolean("favorite_to_kugou", false)
@@ -315,67 +332,99 @@ fun MinePage(
                 .padding(16.dp)
                 .padding(bottom = 120.dp + navBarDp)
         ) {
-        // 用户信息卡片
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(120.dp)
-                .then(if (!isLoggedIn) Modifier.clickable { onAvatarClick() } else Modifier),
-            shape = RoundedCornerShape(16.dp),
-            color = Color.Transparent
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(
-                    modifier = Modifier.size(80.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer
-                ) {
-                    if (isLoggedIn && !avatarUrl.isNullOrBlank()) {
-                        val painter = rememberAsyncImagePainter(
-                            model = ImageRequest.Builder(LocalContext.current)
-                                .data(avatarUrl)
-                                .memoryCacheKey(avatarUrl)
-                                .crossfade(150)
-                                .build()
+        // 账号卡：分段胶囊切换 酷狗 / 网易云，卡片内容随选中平台切换
+        AccountPlatformSwitch(
+            selected = accountTab,
+            kugouLoggedIn = isLoggedIn,
+            neteaseLoggedIn = neteaseAccount.loggedIn,
+            onSelect = { tab ->
+                accountTab = tab
+                minePrefs.edit().putString("account_card_selected", tab).apply()
+            }
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (accountTab == "netease") {
+            AccountCard(
+                icon = Icons.Default.Cloud,
+                loggedIn = neteaseAccount.loggedIn,
+                avatarUrl = neteaseAccount.avatarUrl.replace("http://", "https://").ifBlank { null },
+                title = if (neteaseAccount.loggedIn) {
+                    neteaseAccount.nickname.ifBlank { "网易云用户" }
+                } else "点击登录",
+                subtitle = if (neteaseAccount.loggedIn) "已登录 · 网易云音乐" else "登录后同步歌单与每日推荐",
+                containerColor = NeteaseBrand.copy(alpha = 0.16f),
+                iconTint = NeteaseBrand,
+                onClick = {
+                    if (neteaseAccount.loggedIn) showNeteaseAccountDialog = true else onNeteaseLoginClick()
+                }
+            )
+        } else {
+            AccountCard(
+                icon = Icons.Default.MusicNote,
+                loggedIn = isLoggedIn,
+                avatarUrl = avatarUrl,
+                title = if (isLoggedIn) nickname else "点击登录",
+                subtitle = if (isLoggedIn) "已登录 · 酷狗音乐" else "登录后享受更多功能",
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                onClick = if (isLoggedIn) null else onAvatarClick
+            )
+        }
+
+        if (showNeteaseAccountDialog) {
+            AlertDialog(
+                onDismissRequest = { showNeteaseAccountDialog = false },
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                title = { Text("网易云音乐") },
+                text = {
+                    Column {
+                        Text(
+                            text = neteaseAccount.nickname.ifBlank { "网易云用户" },
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
                         )
-                        Image(
-                            painter = painter,
-                            contentDescription = "头像",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "UID: ${neteaseAccount.uid}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    } else {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.Person,
-                                contentDescription = "头像",
-                                modifier = Modifier.size(48.dp),
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        if (neteaseAccount.vipType > 0) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "黑胶 VIP",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = NeteaseBrand
                             )
                         }
                     }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showNeteaseAccountDialog = false
+                        scope.launch {
+                            try {
+                                // 尽力让服务端会话失效；本地清理放 finally，断网也能退出
+                                withTimeoutOrNull(4000) {
+                                    withContext(Dispatchers.IO) {
+                                        runCatching { NeteaseApi.service.logout(System.currentTimeMillis()) }
+                                    }
+                                }
+                            } finally {
+                                NeteaseAuth.clear(context)
+                                onNeteaseAuthChanged()
+                            }
+                        }
+                    }) {
+                        Text("退出登录", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showNeteaseAccountDialog = false }) { Text("取消") }
                 }
-                Spacer(modifier = Modifier.width(16.dp))
-                Column {
-                    Text(
-                        text = if (isLoggedIn) nickname else "点击登录",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = if (isLoggedIn) "已登录" else "登录后享受更多功能",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -804,6 +853,173 @@ fun FunctionButton(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface
             )
+        }
+    }
+}
+
+/** 账号平台切换：两段式胶囊，圆点表示各自登录状态（实心=已登录） */
+@Composable
+private fun AccountPlatformSwitch(
+    selected: String,
+    kugouLoggedIn: Boolean,
+    neteaseLoggedIn: Boolean,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+            .padding(3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AccountPlatformSegment(
+            label = "酷狗音乐",
+            loggedIn = kugouLoggedIn,
+            selected = selected == "kugou",
+            modifier = Modifier.weight(1f)
+        ) { onSelect("kugou") }
+        AccountPlatformSegment(
+            label = "网易云音乐",
+            loggedIn = neteaseLoggedIn,
+            selected = selected == "netease",
+            modifier = Modifier.weight(1f)
+        ) { onSelect("netease") }
+    }
+}
+
+@Composable
+private fun AccountPlatformSegment(
+    label: String,
+    loggedIn: Boolean,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val dotColor = if (loggedIn) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+    }
+    Row(
+        modifier = modifier
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(15.dp))
+            .background(
+                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else Color.Transparent
+            )
+            .clickable { onClick() },
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(if (loggedIn) dotColor else Color.Transparent)
+                .then(if (loggedIn) Modifier else Modifier.border(1.dp, dotColor, CircleShape))
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/** 账号卡：未登录可点击去登录；已登录且传了 onClick 时可点（网易云=账号操作） */
+@Composable
+private fun AccountCard(
+    icon: ImageVector,
+    loggedIn: Boolean,
+    avatarUrl: String?,
+    title: String,
+    subtitle: String,
+    containerColor: Color,
+    iconTint: Color,
+    onClick: (() -> Unit)?,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(120.dp)
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
+        shape = RoundedCornerShape(16.dp),
+        color = Color.Transparent
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(80.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = containerColor
+            ) {
+                if (loggedIn && !avatarUrl.isNullOrBlank()) {
+                    val painter = rememberAsyncImagePainter(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(avatarUrl)
+                            .memoryCacheKey(avatarUrl)
+                            .crossfade(150)
+                            .build()
+                    )
+                    Image(
+                        painter = painter,
+                        contentDescription = "头像",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = "头像",
+                            modifier = Modifier.size(48.dp),
+                            tint = iconTint
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (onClick != null) {
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }

@@ -48,6 +48,18 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.core.graphics.drawable.toBitmap
+import coil.imageLoader
+import coil.request.ImageRequest
+import coil.request.SuccessResult
+import com.example.lxmusic.ui.animation.LocalSharedCoverFlight
+import com.example.lxmusic.ui.animation.sharedCoverSource
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
@@ -188,6 +200,25 @@ fun MiniPlayerBar(
         MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
     }
 
+    // ===== NeriPlayer 共享封面飞行：源端 =====
+    // 容器矩形 + 胶囊底色给 morph 当起点；封面用位图单独飞（缩放时仍然清晰）
+    val coverFlightState = LocalSharedCoverFlight.current
+    val flightModel: Any = remember(song.albumArtUri, song.filePath) {
+        when {
+            song.albumArtUri != null && (song.albumArtUri.startsWith("/") || song.albumArtUri.startsWith("file://")) ->
+                File(song.albumArtUri.removePrefix("file://"))
+            song.albumArtUri != null -> Uri.parse(song.albumArtUri)
+            else -> File(song.filePath)
+        }
+    }
+    var flightBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(flightModel) {
+        val request = ImageRequest.Builder(context)
+            .data(flightModel).size(512).allowHardware(false).build()
+        val result = context.imageLoader.execute(request)
+        flightBitmap = (result as? SuccessResult)?.drawable?.toBitmap()?.asImageBitmap()
+    }
+
     // 间距保持固定（不随屏幕变化）
     val horizontalPadding = 14.dp
     val verticalPadding = if (isFloatingBottomBar) 4.dp else 8.dp
@@ -233,7 +264,14 @@ fun MiniPlayerBar(
                 end = if (isFloatingBottomBar) 16.dp else 6.dp,
                 bottom = if (adaptedBottomPadding == 0.dp && isFloatingBottomBar) 8.dp else adaptedBottomPadding
             )
+            .onGloballyPositioned { coordinates ->
+                // morph 以这里为起点：卡片从播放条这张"牌"长到全屏
+                if (coordinates.isAttached) {
+                    coverFlightState?.reportMiniPlayerContainer(coordinates.boundsInWindow())
+                }
+            }
     ) {
+        SideEffect { coverFlightState?.miniPlayerContainerColor = backgroundColor }
         // 主容器 - 使用 Box 包裹，进度条绝对贴在最底部，没有任何底部空隙/白边
         Box(
             modifier = Modifier
@@ -450,6 +488,10 @@ fun MiniPlayerBar(
                                 if (coordinates.isAttached) coordinates.boundsInRoot() else null
                             )
                         }
+                        .sharedCoverSource(
+                            cornerRadius = if (isFloatingBottomBar) 12.dp else 8.dp,
+                            bitmap = flightBitmap
+                        )
                         .graphicsLayer { alpha = coverAlpha() }
                 ) {
                 AnimatedContent(

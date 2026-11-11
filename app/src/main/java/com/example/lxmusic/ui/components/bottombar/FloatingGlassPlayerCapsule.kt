@@ -28,6 +28,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.graphics.drawable.toBitmap
+import coil.imageLoader
+import coil.request.ImageRequest
+import coil.request.SuccessResult
+import com.example.lxmusic.ui.animation.LocalSharedCoverFlight
+import com.example.lxmusic.ui.animation.sharedCoverSource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -118,6 +133,18 @@ fun FloatingGlassPlayerCapsule(
         }
     }
 
+    // ===== NeriPlayer 共享封面飞行：源端（悬浮胶囊）=====
+    val coverFlightState = LocalSharedCoverFlight.current
+    val capsuleContext = LocalContext.current
+    var flightBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(albumModel) {
+        val request = ImageRequest.Builder(capsuleContext)
+            .data(albumModel).size(512).allowHardware(false).build()
+        val result = capsuleContext.imageLoader.execute(request)
+        flightBitmap = (result as? SuccessResult)?.drawable?.toBitmap()?.asImageBitmap()
+    }
+    SideEffect { coverFlightState?.miniPlayerContainerColor = containerColor }
+
     val glassModifier = if (isBlurEnabled && backdrop != null) {
         Modifier.drawBackdrop(
             backdrop = backdrop,
@@ -147,6 +174,11 @@ fun FloatingGlassPlayerCapsule(
     Box(
         modifier = modifier
             .height(64.dp)
+            .onGloballyPositioned { coordinates ->
+                if (coordinates.isAttached) {
+                    coverFlightState?.reportMiniPlayerContainer(coordinates.boundsInWindow())
+                }
+            }
             .clip(CircleShape)
             .then(glassModifier)
             .onGloballyPositioned { coordinates ->
@@ -205,6 +237,7 @@ fun FloatingGlassPlayerCapsule(
                                 if (coordinates.isAttached) coordinates.boundsInRoot() else null
                             )
                         }
+                        .sharedCoverSource(cornerRadius = 20.dp, bitmap = flightBitmap)
                         .graphicsLayer {
                             rotationZ = rotation.value
                             alpha = coverAlpha()

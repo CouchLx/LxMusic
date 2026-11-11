@@ -113,6 +113,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import com.example.lxmusic.ui.animation.sharedCoverTarget
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -1590,6 +1591,10 @@ private fun PlayerCoverCard(
                                                 )
                                             }
                                         }
+                                        // 共享封面飞行的目标端：展开/收起时真实封面让位给位图飞行
+                                        .sharedCoverTarget(
+                                            cornerRadius = if (isRoundAlbum) 999.dp else 16.dp
+                                        )
                                         .clip(
                                             if (isRoundAlbum) CircleShape else RoundedCornerShape(16.dp)
                                         )
