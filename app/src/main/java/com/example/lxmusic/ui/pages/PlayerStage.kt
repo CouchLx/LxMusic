@@ -111,6 +111,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -166,6 +169,12 @@ private val LYRIC_TIME_OFFSET_MS = 300L
  * 播放器单页面：顶栏 / 进度条 / 控制栏固定，中间卡片区 HorizontalPager（0=封面卡 1=歌词卡）。
  * 拖动进度条时封面卡与歌词卡的歌词预览实时联动（共享 isSeeking/sliderPosition）。
  */
+/** 播放页封面的最终落点：矩形（根坐标 px）与圆角（px） */
+data class PlayerCoverTarget(val bounds: Rect, val cornerRadiusPx: Float)
+
+/** 播放页顶栏文字的最终落点：矩形 + 字号 + 颜色（展开时文字从播放条飞到这里） */
+data class PlayerTextFlightTarget(val bounds: Rect, val fontSizeSp: Float, val color: androidx.compose.ui.graphics.Color)
+
 @AndroidXOptIn(UnstableApi::class)
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -235,12 +244,22 @@ fun PlayerStage(
     onCoverLyricFontWeightChange: (Float) -> Unit = {},
     coverLyricAlignment: String = "left",
     onCoverLyricAlignmentChange: (String) -> Unit = {},
-    lyricsText: String? = null
+    lyricsText: String? = null,
+    // ===== 展开动画共享元素（对齐 CurrentMusicX）=====
+    // 上报封面最终落点（根坐标 px + 圆角 px）：播放条上的小封面沿弧线飞到这里
+    onCoverTarget: (PlayerCoverTarget?) -> Unit = {},
+    // 飞行期间隐藏真实封面（1=正常显示）
+    coverAlpha: () -> Float = { 1f },
+    // 顶栏文字落点（歌名 / 歌手）：展开时文字从播放条飞到这里
+    onTitleTarget: ((PlayerTextFlightTarget?) -> Unit)? = null,
+    onArtistTarget: ((PlayerTextFlightTarget?) -> Unit)? = null
 ) {
     val progressState by progress.collectAsState()
     val currentPosition = progressState.positionMs
     val totalDuration = progressState.durationMs
     val scope = rememberCoroutineScope()
+    // 方形封面圆角（px）：上报给展开动画的封面飞行层
+    val coverCornerPx = with(androidx.compose.ui.platform.LocalDensity.current) { 16.dp.toPx() }
     // 睡眠定时状态（PlayerService 静态流：退出页面/重开仍持续显示，任务结束或手动关闭才消失）
     val sleepTimerState by PlayerService.sleepTimerFlow.collectAsState()
 
@@ -557,7 +576,9 @@ fun PlayerStage(
                         }
                     },
                     // 横屏左栏只要纯封面：隐藏封面下方歌词预览条
-                    showLyricPreview = false
+                    showLyricPreview = false,
+                    onCoverTarget = onCoverTarget,
+                    coverAlpha = coverAlpha
                 )
             }
             // ===== 右栏：横向翻页（页0 默认=歌曲信息+进度+控制；页1=歌词，滑动切换）=====
@@ -718,22 +739,46 @@ fun PlayerStage(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
+                val titleStyle = MaterialTheme.typography.titleLarge
+                val artistStyle = MaterialTheme.typography.bodyMedium
                 Text(
                     text = song.title,
-                    style = MaterialTheme.typography.titleLarge,
+                    style = titleStyle,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Start,
-                    color = uiTint
+                    color = uiTint,
+                    modifier = Modifier
+                        .onGloballyPositioned { c ->
+                            onTitleTarget?.invoke(
+                                if (!c.isAttached) null else PlayerTextFlightTarget(
+                                    bounds = c.boundsInRoot(),
+                                    fontSizeSp = titleStyle.fontSize.value,
+                                    color = uiTint
+                                )
+                            )
+                        }
+                        .graphicsLayer { alpha = coverAlpha() }
                 )
                 Text(
                     text = song.artist.ifEmpty { "未知歌手" },
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = artistStyle,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Start,
-                    color = uiTintVariant
+                    color = uiTintVariant,
+                    modifier = Modifier
+                        .onGloballyPositioned { c ->
+                            onArtistTarget?.invoke(
+                                if (!c.isAttached) null else PlayerTextFlightTarget(
+                                    bounds = c.boundsInRoot(),
+                                    fontSizeSp = artistStyle.fontSize.value,
+                                    color = uiTintVariant
+                                )
+                            )
+                        }
+                        .graphicsLayer { alpha = coverAlpha() }
                 )
             }
             // 睡眠定时进行中：在喜欢按钮左侧显示秒表图标 + 实时倒计时（延长态显示 +分:秒），
@@ -912,7 +957,9 @@ fun PlayerStage(
                         isSeeking = isSeeking,
                         tapCoverToLyrics = playerTapCoverToLyrics,
                         onSeekTo = onSeek,
-                        onOpenLyrics = { scope.launch { pagerState.animateScrollToPage(1) } }
+                        onOpenLyrics = { scope.launch { pagerState.animateScrollToPage(1) } },
+                        onCoverTarget = onCoverTarget,
+                        coverAlpha = coverAlpha
                     )
                     else -> lyricsStage()
                 }
@@ -1412,8 +1459,18 @@ private fun PlayerCoverCard(
     onSeekTo: (Long) -> Unit,
     onOpenLyrics: () -> Unit,
     // 是否显示封面下方歌词预览条（横屏左栏只要纯封面：传 false，占位/间距一起隐藏）
-    showLyricPreview: Boolean = true
+    showLyricPreview: Boolean = true,
+    // ===== 展开动画共享元素 =====
+    // 上报封面最终落点（根坐标 px + 圆角 px）
+    onCoverTarget: (PlayerCoverTarget?) -> Unit = {},
+    // 飞行期间隐藏真实封面
+    coverAlpha: () -> Float = { 1f },
+    // 顶栏文字落点（歌名 / 歌手）：展开时文字从播放条飞到这里
+    onTitleTarget: ((PlayerTextFlightTarget?) -> Unit)? = null,
+    onArtistTarget: ((PlayerTextFlightTarget?) -> Unit)? = null
 ) {
+    // 方形封面圆角（px）：上报给展开动画的封面飞行层
+    val coverCornerPx = with(androidx.compose.ui.platform.LocalDensity.current) { 16.dp.toPx() }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1517,10 +1574,27 @@ private fun PlayerCoverCard(
                                     modifier = Modifier
                                         .fillMaxSize()
                                         .aspectRatio(1f)
+                                        .onGloballyPositioned { coordinates ->
+                                            if (!coordinates.isAttached) {
+                                                onCoverTarget(null)
+                                            } else {
+                                                val w = coordinates.size.width
+                                                val h = coordinates.size.height
+                                                onCoverTarget(
+                                                    PlayerCoverTarget(
+                                                        bounds = coordinates.boundsInRoot(),
+                                                        // 圆盘=圆角取半径；方形封面=16dp 圆角
+                                                        cornerRadiusPx = if (isRoundAlbum) minOf(w, h) / 2f
+                                                        else coverCornerPx
+                                                    )
+                                                )
+                                            }
+                                        }
                                         .clip(
                                             if (isRoundAlbum) CircleShape else RoundedCornerShape(16.dp)
                                         )
                                         .graphicsLayer {
+                                            alpha = coverAlpha()
                                             if (isRoundAlbum && isRotating) {
                                                 rotationZ = rotationAngle
                                             }

@@ -30,6 +30,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -39,14 +40,23 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -83,6 +93,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -228,6 +239,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
@@ -269,6 +281,8 @@ import com.example.lxmusic.ui.pages.RankDetailPage
 import com.example.lxmusic.ui.pages.SearchPage
 import com.example.lxmusic.ui.pages.LoginPage
 import com.example.lxmusic.ui.pages.PlayerStage
+import com.example.lxmusic.ui.pages.PlayerCoverTarget
+import com.example.lxmusic.ui.pages.PlayerTextFlightTarget
 import com.example.lxmusic.ui.pages.SongListPage
 import com.example.lxmusic.ui.pages.PlaylistManagePage
 import com.example.lxmusic.ui.pages.PlaylistPage
@@ -753,11 +767,19 @@ fun AppScaffold(
     // 播放器展开/收起共用的屏幕高度
     val configuration = LocalConfiguration.current
     val screenHeightPx = with(LocalDensity.current) { configuration.screenHeightDp.dp.toPx() }
+    val screenWidthPx = with(LocalDensity.current) { configuration.screenWidthDp.dp.toPx() }
     // 播放器展开/收起统一偏移（0=完全展开，screenHeightPx=完全收起）：
     // mini 播放条上拉跟手展开 / 播放器内下拉跟手收起共用同一状态。
     // 初始为收起态（打开软件不展开播放器）
     val playerRevealY = remember { Animatable(screenHeightPx) }
+    // 跟手期间直接写这里（同步、零协程），松手后再提交给 Animatable。
+    // 原来每个 pointer delta 都 launch 一个 snapTo 协程，高刷屏快速拖动时会排队滞后，
+    // 表现为“手指和面板之间有一点点延迟”，按住时不够自由。
+    var draggedRevealY by remember { mutableStateOf<Float?>(null) }
+    fun currentRevealY(): Float = draggedRevealY ?: playerRevealY.value
     var isMiniBarDragging by remember { mutableStateOf(false) }
+    // 播放页内向下拖动收起（与上拉展开是两个手势入口，必须都算“进行中”）
+    var isPlayerDownDragging by remember { mutableStateOf(false) }
     // 页面展开/收起动画进行中（组合条件用布尔驱动，避免每帧读取动画值导致整树重组）
     var isRevealAnimating by remember { mutableStateOf(false) }
 
@@ -768,6 +790,7 @@ fun AppScaffold(
     // 收起态时立即 snap 到新屏高，从数据层面根治。
     LaunchedEffect(screenHeightPx) {
         if (!showPlayerPage && !isMiniBarDragging && !isRevealAnimating) {
+            draggedRevealY = null
             playerRevealY.snapTo(screenHeightPx)
         }
     }
@@ -1293,24 +1316,41 @@ fun AppScaffold(
         selectedTab == 15 || selectedTab == 16 || selectedTab == 17 || selectedTab == 18
     // 展开/收起播放器：页面状态在清动画标记之前提交（同一帧），
     // 避免动画结束到 showPlayerPage 生效之间闪出底栏/迷你播放条
+    // 动画令牌：新的展开/收起/回弹会取消旧的 animateTo（CancellationException 会走 finally），
+    // 用令牌保证被取消的旧动画不会把 isRevealAnimating 提前清掉 ——
+    // 否则动画中途反打断时底栏/播放条会提前退出组合（表现为闪一下）
+    var revealAnimToken by remember { mutableIntStateOf(0) }
+    // 把手势期间累积的位移提交给 Animatable（松手时调用一次）
+    suspend fun commitDraggedReveal() {
+        val v = draggedRevealY ?: return
+        playerRevealY.snapTo(v)
+        draggedRevealY = null
+    }
+
     suspend fun expandPlayer(fromY: Float? = null) {
+        commitDraggedReveal()
+        val token = ++revealAnimToken
         isRevealAnimating = true
         try {
             if (fromY != null) playerRevealY.snapTo(fromY)
-            playerRevealY.animateTo(0f, tween(350, easing = FastOutSlowInEasing))
+            // 与 CurrentMusicX 对齐：420ms + (.2,0,0,1) 减速曲线
+            playerRevealY.animateTo(0f, tween(420, easing = CubicBezierEasing(.2f, 0f, 0f, 1f)))
             showPlayerPage = true
         } finally {
-            isRevealAnimating = false
+            if (token == revealAnimToken) isRevealAnimating = false
         }
     }
 
     suspend fun collapsePlayer() {
+        commitDraggedReveal()
+        val token = ++revealAnimToken
         isRevealAnimating = true
         try {
-            playerRevealY.animateTo(screenHeightPx, tween(350, easing = FastOutSlowInEasing))
+            // 与展开对称的收起（.3,0,.2,1），视觉上由页面把底栏“推”回来
+            playerRevealY.animateTo(screenHeightPx, tween(360, easing = CubicBezierEasing(.3f, 0f, .2f, 1f)))
             showPlayerPage = false
         } finally {
-            isRevealAnimating = false
+            if (token == revealAnimToken) isRevealAnimating = false
         }
     }
 
@@ -3022,11 +3062,13 @@ fun AppScaffold(
     var revealSnapJob by remember { mutableStateOf<Job?>(null) }
     // 统一动画入口：动画期间维持组合（isRevealAnimating），结束后复位
     suspend fun animateRevealTo(target: Float, spec: androidx.compose.animation.core.AnimationSpec<Float>) {
+        commitDraggedReveal()
+        val token = ++revealAnimToken
         isRevealAnimating = true
         try {
             playerRevealY.animateTo(target, spec)
         } finally {
-            isRevealAnimating = false
+            if (token == revealAnimToken) isRevealAnimating = false
         }
     }
 
@@ -3035,8 +3077,108 @@ fun AppScaffold(
     val lastValidSong = remember { mutableStateOf<SongInfo?>(null) }
     if (currentSong != null) lastValidSong.value = currentSong
     val displaySong = lastValidSong.value
+
+    // ===== 播放器展开起点几何（两套主题各自的播放条）=====
+    // 原生主题：MiniPlayerBar —— 贴底、全宽（左右各 6dp）、58dp 高、顶部 20dp 圆角
+    // 悬浮主题：FloatingGlassPlayerCapsule —— 底栏行右侧的 64dp 胶囊（32dp 圆角）
+    // 播放页不再“整页从屏底滑上来”，而是从这个矩形长成全屏：
+    // 左右/底边从播放条矩形插值到全屏，圆角从播放条圆角一路保持到 94% 再收敛为 0。
+    var capsuleBounds by remember { mutableStateOf<Rect?>(null) }
+    var miniBarBounds by remember { mutableStateOf<Rect?>(null) }
+    // 封面飞行端点：播放条上的小封面 ↔ 播放页封面最终位置（对齐 CurrentMusicX 的共享元素）
+    var capsuleCoverBounds by remember { mutableStateOf<Rect?>(null) }
+    var miniBarCoverBounds by remember { mutableStateOf<Rect?>(null) }
+    var playerCoverTarget by remember { mutableStateOf<PlayerCoverTarget?>(null) }
+    // 文字飞行端点：播放条上的歌名/歌手 ↔ 播放页顶栏落点
+    var miniTitleBounds by remember { mutableStateOf<Rect?>(null) }
+    var miniSubtitleBounds by remember { mutableStateOf<Rect?>(null) }
+    var playerTitleTarget by remember { mutableStateOf<PlayerTextFlightTarget?>(null) }
+    var playerArtistTarget by remember { mutableStateOf<PlayerTextFlightTarget?>(null) }
+    val floatingCapsuleEntry = floatingBottomBar && showNavBar
+    val playerEntryRadiusPx = with(density) { (if (floatingCapsuleEntry) 32.dp else 20.dp).toPx() }
+    // 优先用播放条自身上报的真实矩形（两套主题各自的测量值）；
+    // 首帧还没测到时用估算值兜底，保证起手不跳。
+    val playerEntryBounds: Rect? = remember(
+        floatingCapsuleEntry, capsuleBounds, miniBarBounds,
+        miniBarTopY, miniBarHeightPx, screenWidthPx, density, displaySong
+    ) {
+        when {
+            displaySong == null -> null
+            floatingCapsuleEntry -> capsuleBounds
+            else -> miniBarBounds ?: run {
+                val inset = with(density) { 6.dp.toPx() }
+                val barHeight = if (miniBarHeightPx > 0) miniBarHeightPx.toFloat()
+                else with(density) { 58.dp.toPx() }
+                Rect(inset, miniBarTopY, screenWidthPx - inset, miniBarTopY + barHeight)
+            }
+        }
+    }
+
+    /** 展开进度：0 = 完全收起，1 = 完全展开。手势与动画共用，供 draw/graphicsLayer 阶段读取 */
+    fun revealProgress(): Float {
+        val top = playerEntryBounds?.top ?: return 0f
+        if (top <= 0f) return 0f
+        return ((top - currentRevealY()) / top).coerceIn(0f, 1f)
+    }
+
+    // 展开起点的顶边（px）：点击展开 / 跟手展开的 snap 目标
+    fun playerEntryTop(): Float = playerEntryBounds?.top ?: miniBarTopY
+
+    // 内容显影曲线（对齐 CurrentMusicX 的 playerSheetContentAlpha）：16%→76% 才完全显影，
+    // 中间过程只露出背景 + 飞行的封面，避免“整页布局提前露出来”的幻灯片感
+    fun playerSheetContentAlpha(progress: Float): Float = ((progress - .16f) / .6f).coerceIn(0f, 1f)
+
+    // 飞行端点：优先用当前主题真正显示的那个播放条上的封面
+    val miniCoverBounds: Rect? = if (floatingCapsuleEntry) capsuleCoverBounds else miniBarCoverBounds
+    val coverFlightReady = miniCoverBounds != null && playerCoverTarget != null
+
+    // 播放条上拉手势（两套主题共用）：跟手位移直接写入 playerRevealY（1:1 跟手）
+    val revealDragStart: () -> Unit = {
+        isMiniBarDragging = true
+        miniBarDragAccumulated = 0f
+        revealVelocityTracker.resetTracking()
+        revealSnapJob?.cancel()
+        // 同步接管：先停掉可能还在跑的动画，再把当前位置写进手势缓存
+        revealSnapJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            playerRevealY.stop()
+        }
+        draggedRevealY = currentRevealY().let { if (it > playerEntryTop()) playerEntryTop() else it }
+    }
+    val revealDrag: (Float) -> Unit = { delta ->
+        miniBarDragAccumulated += delta
+        revealVelocityTracker.addPosition(
+            SystemClock.uptimeMillis(),
+            Offset(0f, miniBarDragAccumulated)
+        )
+        // 同一帧内同步推进：面板顶边 = 手指位移，没有协程排队
+        draggedRevealY = (currentRevealY() + delta).coerceIn(0f, screenHeightPx)
+    }
+    val revealDragEnd: () -> Unit = {
+        val velocityY = revealVelocityTracker.calculateVelocity().y
+        // 判定基于手指实际累计位移：上拉超过起点高度 10% 或速度 > 80px/s → 展开
+        val threshold = playerEntryTop() * 0.1f
+        val shouldExpand = miniBarDragAccumulated < -threshold || velocityY < -80f
+        scope.launch {
+            // 先关拖动标记、紧接着置动画标记，保证页面组合条件不中断（不销毁重建）
+            isMiniBarDragging = false
+            if (shouldExpand) {
+                expandPlayer()
+            } else {
+                animateRevealTo(screenHeightPx, tween(360, easing = CubicBezierEasing(.3f, 0f, .2f, 1f)))
+            }
+        }
+    }
+    val revealDragCancel: () -> Unit = {
+        scope.launch {
+            isMiniBarDragging = false
+            animateRevealTo(screenHeightPx, tween(360, easing = CubicBezierEasing(.3f, 0f, .2f, 1f)))
+        }
+    }
+    // 展开/收起动画进行中（底栏/播放条必须保持组合，才能跟手消失/回来，而不是动画结束才弹出）
+    val revealBusy = isMiniBarDragging || isPlayerDownDragging || isRevealAnimating
+
     AnimatedVisibility(
-        visible = currentSong != null && !showPlayerPage &&
+        visible = currentSong != null && (!showPlayerPage || revealBusy) &&
             selectedTab !in listOf(12, 15, 17) && !isSelectionModeActive &&
             (!floatingBottomBar || !showNavBar),
         modifier = Modifier.align(Alignment.BottomCenter),
@@ -3050,57 +3192,24 @@ fun AppScaffold(
             onPlayPause = { playerViewModel.playPause() },
             onNext = { playNext() },
             onPrevious = { playPrevious() },
-            // 点击 = 从播放条位置生长展开（动画，BoomingMusic BOOMING_ANIM_TIME=350ms）
+            // 点击 = 从播放条位置生长展开（与上拉跟手共用同一套进度）
             onClick = {
-                scope.launch { expandPlayer(miniBarTopY) }
+                scope.launch { expandPlayer(playerEntryTop()) }
             },
             onMenuClick = { showPlaylistSheet = true },
             // 上拉跟手展开：页面顶从播放条顶部位置实时跟随手指升起
-            // （播放条淡出，变为页面被拉出的部分）
-            onVerticalDragStart = {
-                isMiniBarDragging = true
-                miniBarDragAccumulated = 0f
-                revealVelocityTracker.resetTracking()
-                revealSnapJob?.cancel()
-                revealSnapJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                    playerRevealY.snapTo(miniBarTopY)
-                }
-            },
-            onVerticalDrag = { delta ->
-                miniBarDragAccumulated += delta
-                revealVelocityTracker.addPosition(
-                    SystemClock.uptimeMillis(),
-                    Offset(0f, miniBarDragAccumulated)
-                )
-                revealSnapJob?.cancel()
-                revealSnapJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                    playerRevealY.snapTo(
-                        (playerRevealY.value + delta).coerceIn(0f, screenHeightPx)
-                    )
-                }
-            },
-            onVerticalDragEnd = {
-                val velocityY = revealVelocityTracker.calculateVelocity().y
-                // 判定基于手指实际累计位移（事件回调同步更新，不受动画值滞后影响）：
-                // 上拉累计超过 10%（miniBarTopY 的 10%，一点点距离即可拉起）或速度 > 80px/s → 展开
-                val threshold = miniBarTopY * 0.1f
-                val shouldExpand = miniBarDragAccumulated < -threshold || velocityY < -80f
-                scope.launch {
-                    // 先关拖动标记、紧接着置动画标记，保证页面组合条件不中断（不销毁重建）
-                    isMiniBarDragging = false
-                    if (shouldExpand) {
-                        expandPlayer()
-                    } else {
-                        animateRevealTo(screenHeightPx, tween(350, easing = FastOutSlowInEasing))
-                    }
-                }
-            },
-            onVerticalDragCancel = {
-                scope.launch {
-                    isMiniBarDragging = false
-                    animateRevealTo(screenHeightPx, tween(350, easing = FastOutSlowInEasing))
-                }
-            },
+            onVerticalDragStart = revealDragStart,
+            onVerticalDrag = revealDrag,
+            onVerticalDragEnd = revealDragEnd,
+            onVerticalDragCancel = revealDragCancel,
+            // 只在底栏静止（未跟手、未在动画、播放器未打开）时采样起点矩形：
+            // 展开/收起过程中底栏自身在位移，采样会污染起点，导致进度来回抖
+            onBoundsChanged = { rect -> if (!revealBusy && !showPlayerPage) miniBarBounds = rect },
+            // 封面端点 + 飞行期隐藏（只在静止态采样，避免被动画中的位移污染）
+            onCoverBounds = { rect -> if (!revealBusy && !showPlayerPage) miniBarCoverBounds = rect },
+            onTitleTextBounds = { rect -> if (!revealBusy && !showPlayerPage) miniTitleBounds = rect },
+            onSubtitleTextBounds = { rect -> if (!revealBusy && !showPlayerPage) miniSubtitleBounds = rect },
+            coverAlpha = { if (revealBusy && coverFlightReady) 0f else 1f },
             bottomPadding = miniPlayerBottomPadding,
             isFloatingBottomBar = floatingBottomBar,
             followThemeColor = followThemeColor,
@@ -3112,23 +3221,9 @@ fun AppScaffold(
             frostedGlass = liquidGlass && settingsRepository.themeMode != "modern",
             hasCustomWallpaper = backgroundImageUri != null,
             backdrop = glassBackdrop,
-            // BoomingMusic 同款：迷你条固定原位（不随拖动上移），
-            // 展开进度 0-20% 内快速淡出，之后完全由播放器页面接管。
-            // progress 在 draw 阶段读取动画值（不触发组合重组）
-            modifier = Modifier
-                .onSizeChanged { miniBarHeightPx = it.height }
-                .graphicsLayer {
-                    val progress = if (miniBarTopY > 0f) {
-                        ((miniBarTopY - playerRevealY.value) / miniBarTopY).coerceIn(0f, 1f)
-                    } else {
-                        0f
-                    }
-                    alpha = if (isMiniBarDragging) {
-                        1f - (progress / 0.2f).coerceIn(0f, 1f)
-                    } else {
-                        1f
-                    }
-                }
+            // 不再淡出：收起态下播放条就是页面的“收起形态”，展开时被页面盖住、
+            // 收起时随页面缩小自然露出来（对齐 CurrentMusicX 的 dock 行为）。
+            modifier = Modifier.onSizeChanged { miniBarHeightPx = it.height }
         )
     }
 
@@ -3186,28 +3281,45 @@ fun AppScaffold(
                 .layout { measurable, constraints ->
                     val placeable = measurable.measure(constraints)
                     // 同步页面顶偏移（布局阶段写入，流体背景 View 裁剪用）
-                    hyperClipTopPx.floatValue = playerRevealY.value
+                    hyperClipTopPx.floatValue = currentRevealY()
                     layout(placeable.width, placeable.height) {
-                        placeable.place(0, playerRevealY.value.roundToInt())
+                        placeable.place(0, currentRevealY().roundToInt())
                     }
                 }
-                // 拖动/收起动画中顶部圆角（卡片感）：中间最大、完全展开/收起时归 0。
-                // 绘制阶段读取动画值（drawWithCache 只重绘不重组）
-                // 注意：必须**始终**裁剪到页面矩形。流体背景是 Compose Canvas + graphicsLayer
-                // （1.3x 放大 + RenderEffect 模糊），不裁剪时收起过程中放大出来的那圈会画到
-                // 页面顶部之外，首页上会闪出一条动效背景色（SurfaceView 的 Mesh 不受影响）。
+                // 展开/收起时把页面裁剪成“从播放条矩形长出来的窗口”（对齐 CurrentMusicX）：
+                // 顶边 = 页面自身的布局偏移；左右/底边从播放条矩形插值到全屏；
+                // 圆角保持播放条圆角直到 94%，最后 6% 收成直角（贴合屏幕）。
+                // 绘制阶段读取动画值（drawWithCache 只重绘不重组）。
+                // 注意：网格背景是独立 SurfaceView，不受 Compose 裁剪影响，
+                // 这类背景退回原来的「全宽 + 顶边跟手」，否则拖动时背景会溢到窗口外。
                 .drawWithCache {
                     onDrawWithContent {
-                        val progress =
-                            ((miniBarTopY - playerRevealY.value) / miniBarTopY).coerceIn(0f, 1f)
-                        // 4 * 28dp * p * (1-p)：p=0 或 1 时为 0，p=0.5 时最大 28dp
-                        val corner = 4f * 28.dp.toPx() * progress * (1f - progress)
+                        val p = revealProgress()
+                        val entry = playerEntryBounds
+                        if (p >= 0.999f || entry == null) {
+                            drawContent()
+                            return@onDrawWithContent
+                        }
+                        // 左右边也从播放条矩形插值：面板从播放条的宽度长开（对齐 CMX）
+                        val clipHorizontally = true
+                        val left = if (clipHorizontally) entry.left * (1f - p) else 0f
+                        val right = if (clipHorizontally) {
+                            entry.right + (size.width - entry.right) * p
+                        } else size.width
+                        // 底边始终贴屏底：底栏绘制在播放页之上且是整体滑出的，
+                        // 若底边也跟手抬升，两者之间会露出首页内容（缝隙）
+                        val bottom = size.height
+                        if (right <= left) return@onDrawWithContent
+                        val radius = playerEntryRadiusPx *
+                            (1f - ((p - 0.94f) / 0.06f).coerceIn(0f, 1f))
                         val path = Path().apply {
                             addRoundRect(
                                 RoundRect(
-                                    rect = Rect(0f, 0f, size.width, size.height),
-                                    topLeft = CornerRadius(corner, corner),
-                                    topRight = CornerRadius(corner, corner)
+                                    rect = Rect(left, 0f, right, bottom),
+                                    topLeft = CornerRadius(radius, radius),
+                                    topRight = CornerRadius(radius, radius),
+                                    bottomLeft = CornerRadius(radius, radius),
+                                    bottomRight = CornerRadius(radius, radius)
                                 )
                             )
                         }
@@ -3219,20 +3331,19 @@ fun AppScaffold(
                     detectVerticalDragGestures(
                         onDragStart = {
                             playerDragAccumulated = 0f
+                            isPlayerDownDragging = true
                             revealVelocityTracker.resetTracking()
+                            // 接管手势：停动画并把当前位置写进同步缓存
                             scope.launch { playerRevealY.stop() }
+                            draggedRevealY = currentRevealY()
                         },
                         onVerticalDrag = { change, dragAmount ->
                             change.consume()
                             playerDragAccumulated += dragAmount
                             revealVelocityTracker.addPosition(change.uptimeMillis, change.position)
-                            // 下拉时增加偏移（页面下移），上拉时限制最小为0
-                            revealSnapJob?.cancel()
-                            revealSnapJob = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                                playerRevealY.snapTo(
-                                    (playerRevealY.value + dragAmount).coerceIn(0f, screenHeightPx)
-                                )
-                            }
+                            // 同步推进（不排队），按住时页面顶边完全跟手
+                            draggedRevealY =
+                                (currentRevealY() + dragAmount).coerceIn(0f, screenHeightPx)
                         },
                         onDragEnd = {
                             val velocityY = revealVelocityTracker.calculateVelocity().y
@@ -3246,10 +3357,12 @@ fun AppScaffold(
                                     // 回弹到完全展开
                                     expandPlayer()
                                 }
+                                // 动画整体结束后才释放标记，避免中间某一帧飞行层被拆掉
+                                isPlayerDownDragging = false
                             }
                         },
                         onDragCancel = {
-                            scope.launch { expandPlayer() }
+                            scope.launch { expandPlayer(); isPlayerDownDragging = false }
                         }
                     )
                 }
@@ -3287,6 +3400,11 @@ fun AppScaffold(
                     )
 
                     // ===== 播放器单页面（顶栏/进度/控制固定，中间卡片翻页） =====
+                    // 内容随进度显影（对齐 CurrentMusicX）：16%→76% 才完全显影，
+                    // 中间过程只露出背景 + 飞行的封面，而不是把整页布局提前铺出来
+                    Box(Modifier.fillMaxSize().graphicsLayer {
+                        alpha = playerSheetContentAlpha(revealProgress())
+                    }) {
                     PlayerStage(
                         song = song,
                         isPlaying = isPlaying,
@@ -3449,9 +3567,54 @@ fun AppScaffold(
                             playerCoverLyricAlignment = value
                             settingsRepository.playerCoverLyricAlignment = value
                         },
-                        lyricsText = currentLyricsText
+                        lyricsText = currentLyricsText,
+                        // ===== 共享元素：封面落点 + 飞行期隐藏（对齐 CurrentMusicX）=====
+                        onCoverTarget = { target ->
+                            // onGloballyPositioned 上报的是随页面位移后的根坐标；
+                            // 减去页面当前的布局偏移，得到“完全展开时”的最终位置
+                            playerCoverTarget = target?.let {
+                                it.copy(bounds = it.bounds.translate(0f, -currentRevealY()))
+                            }
+                        },
+                        coverAlpha = { if (revealBusy && coverFlightReady) 0f else 1f },
+                        onTitleTarget = { t ->
+                            playerTitleTarget = t?.copy(
+                                bounds = t.bounds.translate(0f, -currentRevealY())
+                            )
+                        },
+                        onArtistTarget = { t ->
+                            playerArtistTarget = t?.copy(
+                                bounds = t.bounds.translate(0f, -currentRevealY())
+                            )
+                        }
                 )
+                }
             }
+
+        }
+
+        // 收起动画进行中：播放条区域盖一层「按下立即反向」的透明热区（对齐 CurrentMusicX）。
+        // 否则收缩中的页面会先吃掉这次点击，用户必须等收起动画结束再点第二次才能重新打开。
+        val reopenEntry = playerEntryBounds
+        if (showPlayerPage && isRevealAnimating && reopenEntry != null) {
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(reopenEntry.left.roundToInt(), reopenEntry.top.roundToInt()) }
+                    .requiredSize(
+                        with(density) { reopenEntry.width.toDp() },
+                        with(density) { reopenEntry.height.toDp() }
+                    )
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                .consume()
+                            // 在 DOWN 阶段就反向，不等抬手：此时被点击的图层可能已经随动画移除
+                            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                                expandPlayer(currentRevealY())
+                            }
+                        }
+                    }
+            )
         }
 
         // ===== 播放器菜单弹出的独立页面（声音设置 / 均衡器）：覆盖播放器，返回键先关页面 =====
@@ -3523,7 +3686,9 @@ fun AppScaffold(
 
         // 导航栏叠加在底部
         AnimatedVisibility(
-            visible = selectedTab in topLevelTabs && !showPlayerPage && showRankDetail == null &&
+            // 展开/收起动画期间保持组合：底栏要跟着进度被页面“推走”/“推回来”，
+            // 而不是等动画结束才整体弹出（两边主题一致）
+            visible = selectedTab in topLevelTabs && (!showPlayerPage || revealBusy) && showRankDetail == null &&
                 showPublicPlaylist == null && showPublicAlbum == null && !showLoginPage,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -3531,24 +3696,19 @@ fun AppScaffold(
             enter = slideInVertically(initialOffsetY = { it }, animationSpec = tween(280)) + fadeIn(tween(220)),
             exit = slideOutVertically(targetOffsetY = { it }, animationSpec = tween(200)) + fadeOut(tween(150))
         ) {
-            // BoomingMusic 同款：跟手展开时底栏随进度向下滚出屏幕（translationY）+ 渐隐。
+            // 跟手展开时底栏整体滑出屏幕（底栏绘制在播放页之上，必须完整移出，
+            // 否则会浮在播放页上）；收起时同一进度反向滑回。
             // progress 在 draw 阶段读取动画值（不触发组合重组）
             Box(
                 modifier = Modifier.graphicsLayer {
-                    // 静止态（非跟手拖动、非展开/收起动画）progress 强制 0：
-                    // 仅手势/动画进行中底栏才跟随滚出；避免任何状态残留
-                    // （如旋转后 playerRevealY 旧值）把底栏推出屏幕导致"底栏消失"
-                    val progress = when {
-                        // 播放器已打开：底栏保持"已滚出"状态，避免收起动画开始前
-                        // 进度被重置为 0 导致底栏跳回屏幕内再滑出（打开播放器时的闪烁）
-                        showPlayerPage -> 1f
-                        !isMiniBarDragging && !isRevealAnimating -> 0f
-                        miniBarTopY > 0f -> ((miniBarTopY - playerRevealY.value) / miniBarTopY).coerceIn(0f, 1f)
-                        else -> 0f
-                    }
-                    // BoomingMusic 原值：底栏滚出 500px（非 dp）
-                    translationY = progress * 500f
-                    alpha = if (isMiniBarDragging) 1f - progress else 1f
+                    val p = revealProgress()
+                    // 滑动距离 = 底栏自身高度（含系统导航条 inset），保证 p=1 时完全离屏；
+                    // 首帧还没测到高度时退回原来的 500px
+                    val travel = if (bottomBarHeightPx > 0) bottomBarHeightPx.toFloat() else 500f
+                    translationY = p * travel
+                    // 淡出节奏对齐 CurrentMusicX 的 dock：前 14%（= 面板完全实心）内消失，
+                    // 否则底栏会作为一层“幽灵”压在已经长开的播放页上
+                    alpha = (1f - p / .14f).coerceIn(0f, 1f)
                 }
             ) {
                 FloatingBottomBar(
@@ -3571,12 +3731,127 @@ fun AppScaffold(
                     onNext = { playNext() },
                     onPlayerClick = {
                         scope.launch {
-                            // 从底栏顶部位置起升（而非固定的屏高比例）：底栏随页面升起
-                            // 同步滚出，避免起手瞬间底栏被直接推出屏幕的"闪烁"观感
-                            expandPlayer(miniBarTopY)
+                            // 从播放条顶部起升（两套主题各自的播放条矩形）
+                            expandPlayer(playerEntryTop())
                         }
-                    }
+                    },
+                    // 悬浮胶囊的上拉跟手：与原生主题的 MiniPlayerBar 共用同一套逻辑
+                    onPlayerVerticalDragStart = revealDragStart,
+                    onPlayerVerticalDrag = revealDrag,
+                    onPlayerVerticalDragEnd = revealDragEnd,
+                    onPlayerVerticalDragCancel = revealDragCancel,
+                    onPlayerBounds = { rect ->
+                        // 同上：只接受静止态采样，避免被底栏自身的滑出/滑回位移动画污染
+                        if (!revealBusy && !showPlayerPage) capsuleBounds = rect
+                    },
+                    onPlayerCoverBounds = { rect ->
+                        if (!revealBusy && !showPlayerPage) capsuleCoverBounds = rect
+                    },
+                    playerCoverAlpha = { if (revealBusy && coverFlightReady) 0f else 1f }
                 )
+            }
+        }
+
+        // ===== 展开共享元素：封面从播放条沿弧线飞到播放页（对齐 CurrentMusicX）=====
+        // 画在最上层（播放页与底栏之上）；两端真实封面在飞行期间隐藏，由这一层接管。
+        // 弧线用 CMX 的 playerSheetElementArc：横向缓出、纵向缓入（先横向倒向中轴、再抬起来），
+        // 尺寸与纵向同步缓入 —— 只改绘制变换，不重新布局内容。
+        val flightStart = miniCoverBounds
+        val flightEnd = playerCoverTarget
+        if (revealBusy && coverFlightReady && flightStart != null &&
+            flightEnd != null && flightEnd.bounds.width > 0f
+        ) {
+            val endBounds = flightEnd.bounds
+            val startRadius = with(density) {
+                when {
+                    floatingCapsuleEntry -> 20.dp.toPx()      // 胶囊：圆形封面
+                    floatingBottomBar -> 12.dp.toPx()         // 悬浮播放条：12dp 圆角
+                    else -> 8.dp.toPx()                       // 原生播放条：8dp 圆角
+                }
+            }
+            val endRadius = flightEnd.cornerRadiusPx
+            val flightModel: Any? = displaySong?.let { s ->
+                when {
+                    s.albumArtUri != null && (s.albumArtUri.startsWith("/") || s.albumArtUri.startsWith("file://")) ->
+                        File(s.albumArtUri.removePrefix("file://"))
+                    s.albumArtUri != null -> Uri.parse(s.albumArtUri)
+                    else -> File(s.filePath)
+                }
+            }
+            val flightPainter = rememberAsyncImagePainter(model = flightModel)
+            Box(
+                modifier = Modifier
+                    .requiredSize(
+                        with(density) { endBounds.width.toDp() },
+                        with(density) { endBounds.height.toDp() }
+                    )
+                    .graphicsLayer {
+                        val p = revealProgress()
+                        val frame = playerSheetFlightRect(flightStart, endBounds, p)
+                        transformOrigin = TransformOrigin(0f, 0f)
+                        translationX = frame.left
+                        translationY = frame.top
+                        val scale = if (endBounds.width > 0f) frame.width / endBounds.width else 1f
+                        scaleX = scale
+                        scaleY = scale
+                        // 圆角跟着插值；图层会缩放，所以先除回缩放比
+                        val radius = (startRadius + (endRadius - startRadius) * p) /
+                            scale.coerceAtLeast(.0001f)
+                        shape = RoundedCornerShape(radius.toDp())
+                        clip = true
+                    }
+            ) {
+                Image(
+                    painter = flightPainter,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            // ===== 文字飞行：歌名/歌手沿同一条弧线从播放条飞到播放页顶栏 =====
+            // 字号按纵向缓入插值后重新测量（一行短文本，开销可忽略），任意时刻都是清晰字形，
+            // 而不是把大字号缩小导致的模糊 —— 与 CMX「进度只改绘制变换」的思路一致。
+            val titleStart = miniTitleBounds
+            val titleEnd = playerTitleTarget
+            val artistStart = miniSubtitleBounds
+            val artistEnd = playerArtistTarget
+            if (titleStart != null && titleEnd != null) {
+                val measurer = rememberTextMeasurer()
+                Canvas(Modifier.fillMaxSize()) {
+                    val p = revealProgress()
+                    if (p <= 0.001f || p >= 0.999f) return@Canvas
+                    val alpha = playerSheetContentAlpha(p)
+                    if (alpha <= 0.001f) return@Canvas
+                    val vertical = p * p
+                    fun drawFlight(
+                        text: String?,
+                        start: Rect?,
+                        end: PlayerTextFlightTarget?,
+                        startSp: Float,
+                        bold: Boolean
+                    ) {
+                        if (text.isNullOrBlank() || start == null || end == null) return
+                        val frame = playerSheetFlightRect(start, end.bounds, p)
+                        val size = startSp + (end.fontSizeSp - startSp) * vertical
+                        val layout = measurer.measure(
+                            text = AnnotatedString(text),
+                            style = TextStyle(
+                                fontSize = size.sp,
+                                fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+                                color = end.color.copy(alpha = end.color.alpha * alpha)
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            constraints = Constraints(
+                                maxWidth = frame.width.toInt().coerceAtLeast(1)
+                            )
+                        )
+                        drawText(layout, topLeft = Offset(frame.left, frame.top))
+                    }
+                    drawFlight(displaySong?.title, titleStart, titleEnd, 15f, true)
+                    drawFlight(displaySong?.artist, artistStart, artistEnd, 12f, false)
+                }
             }
         }
 
@@ -3613,3 +3888,26 @@ fun AppScaffold(
     }
 }
 
+
+/**
+ * 展开动画的共享元素弧线（对齐 CurrentMusicX 的 playerSheetElementArc）：
+ * 横向缓出、纵向缓入 —— 元素先横向“倒”向目标中轴，再抬起来；尺寸与纵向同步缓入。
+ * 只有位置和尺寸，不重新布局内容。
+ */
+private fun playerSheetFlightRect(start: Rect, end: Rect, progress: Float): Rect {
+    val p = progress.coerceIn(0f, 1f)
+    val horizontal = 1f - (1f - p) * (1f - p)
+    val vertical = p * p
+    val startCenter = start.center
+    val endCenter = end.center
+    val centerX = startCenter.x * (1f - horizontal) + endCenter.x * horizontal
+    val centerY = startCenter.y * (1f - vertical) + endCenter.y * vertical
+    val width = start.width * (1f - vertical) + end.width * vertical
+    val height = start.height * (1f - vertical) + end.height * vertical
+    return Rect(
+        centerX - width / 2f,
+        centerY - height / 2f,
+        centerX + width / 2f,
+        centerY + height / 2f
+    )
+}

@@ -91,7 +91,17 @@ fun FloatingBottomBar(
     progress: StateFlow<PlayerProgress> = MutableStateFlow(PlayerProgress()),
     onPlayPause: () -> Unit = {},
     onNext: () -> Unit = {},
-    onPlayerClick: () -> Unit = {}
+    onPlayerClick: () -> Unit = {},
+    // 悬浮胶囊播放器：上拉跟手展开播放器（与原生主题的 MiniPlayerBar 同一套回调）
+    onPlayerVerticalDragStart: () -> Unit = {},
+    onPlayerVerticalDrag: (Float) -> Unit = {},
+    onPlayerVerticalDragEnd: () -> Unit = {},
+    onPlayerVerticalDragCancel: () -> Unit = {},
+    // 胶囊在根坐标系中的矩形：播放页从这里生长出来
+    onPlayerBounds: (androidx.compose.ui.geometry.Rect?) -> Unit = {},
+    // 胶囊封面矩形 + 飞行期隐藏（展开时封面从这里飞向播放页）
+    onPlayerCoverBounds: (androidx.compose.ui.geometry.Rect?) -> Unit = {},
+    playerCoverAlpha: () -> Float = { 1f }
 ) {
     val resolvedTabs = tabs ?: listOf(
         BottomBarTab(0, Icons.Filled.Home, Icons.Outlined.Home, stringResource(R.string.nav_home)),
@@ -172,7 +182,14 @@ fun FloatingBottomBar(
                         onClick = onPlayerClick,
                         backdrop = backdrop,
                         isBlurEnabled = glassEnabled,
-                        navBarOpacity = navBarOpacity
+                        navBarOpacity = navBarOpacity,
+                        onVerticalDragStart = onPlayerVerticalDragStart,
+                        onVerticalDrag = onPlayerVerticalDrag,
+                        onVerticalDragEnd = onPlayerVerticalDragEnd,
+                        onVerticalDragCancel = onPlayerVerticalDragCancel,
+                        onBoundsChanged = onPlayerBounds,
+                        onCoverBounds = onPlayerCoverBounds,
+                        coverAlpha = playerCoverAlpha
                     )
                 }
             }

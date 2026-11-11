@@ -62,6 +62,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -125,6 +127,16 @@ fun MiniPlayerBar(
     // 有自定义壁纸才启用玻璃；纯色主题改用实色播放条，避免糊成灰块
     hasCustomWallpaper: Boolean = false,
     backdrop: Backdrop? = null,
+    // 上报播放条本体（不含底部留白）在根坐标系中的矩形（px）：
+    // 播放页从这里长出来；只读测量，不影响任何视觉
+    onBoundsChanged: (androidx.compose.ui.geometry.Rect?) -> Unit = {},
+    // 上报封面矩形（px，根坐标）：展开时封面从这里飞向播放页
+    onCoverBounds: (androidx.compose.ui.geometry.Rect?) -> Unit = {},
+    // 飞行期间隐藏真实封面（由飞行的封面接管），1=正常显示
+    coverAlpha: () -> Float = { 1f },
+    // 上报歌名/副标题文字矩形（px，根坐标）：展开时文字从条上飞到播放页顶栏
+    onTitleTextBounds: (androidx.compose.ui.geometry.Rect?) -> Unit = {},
+    onSubtitleTextBounds: (androidx.compose.ui.geometry.Rect?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -227,6 +239,11 @@ fun MiniPlayerBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(if (isFloatingBottomBar) 64.dp else 58.dp)
+                .onGloballyPositioned { coordinates ->
+                    onBoundsChanged(
+                        if (coordinates.isAttached) coordinates.boundsInRoot() else null
+                    )
+                }
                 .then(
                     if (glassActive) {
                         // NPatch 同款液态玻璃背景：鲜明度 + 4dp 柔和模糊 + 24dp 凸透镜晶莹折射 + 边缘高光
@@ -425,6 +442,16 @@ fun MiniPlayerBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // 专辑封面：切歌时自然淡入淡出刷新（不滑动，渐变过渡）
+                // 展开动画期间真实封面让位给飞行层（对齐 CurrentMusicX 的共享元素）
+                Box(
+                    modifier = Modifier
+                        .onGloballyPositioned { coordinates ->
+                            onCoverBounds(
+                                if (coordinates.isAttached) coordinates.boundsInRoot() else null
+                            )
+                        }
+                        .graphicsLayer { alpha = coverAlpha() }
+                ) {
                 AnimatedContent(
                     targetState = song,
                     transitionSpec = {
@@ -439,6 +466,7 @@ fun MiniPlayerBar(
                         size = if (isFloatingBottomBar) 48.dp else 40.dp,
                         cornerRadius = if (isFloatingBottomBar) 12.dp else 8.dp
                     )
+                }
                 }
 
                 Spacer(modifier = Modifier.width(12.dp))
@@ -494,7 +522,10 @@ fun MiniPlayerBar(
                         label = "textAnim"
                     ) { targetSong ->
                         Column(
-                            modifier = Modifier.fillMaxHeight(),
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                // 展开飞行期间文字让位给飞行层
+                                .graphicsLayer { alpha = coverAlpha() },
                             verticalArrangement = Arrangement.Center
                         ) {
                             Text(
@@ -506,7 +537,10 @@ fun MiniPlayerBar(
                                 ),
                                 color = titleColor,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.onGloballyPositioned { c ->
+                                    onTitleTextBounds(if (c.isAttached) c.boundsInRoot() else null)
+                                }
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
@@ -517,7 +551,10 @@ fun MiniPlayerBar(
                                 ),
                                 color = artistColor,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.onGloballyPositioned { c ->
+                                    onSubtitleTextBounds(if (c.isAttached) c.boundsInRoot() else null)
+                                }
                             )
                         }
                     }

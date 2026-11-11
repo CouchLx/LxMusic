@@ -6,6 +6,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -33,7 +34,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
@@ -61,7 +65,19 @@ fun FloatingGlassPlayerCapsule(
     backdrop: Backdrop?,
     modifier: Modifier = Modifier,
     isBlurEnabled: Boolean = true,
-    navBarOpacity: Float = 1f
+    navBarOpacity: Float = 1f,
+    // 纵向跟手拖动（上拉展开播放器）：开始 / 每帧位移（上滑为负）/ 结束 / 取消。
+    // 与 MiniPlayerBar 同一套回调，保证两套主题的播放条手感一致。
+    onVerticalDragStart: () -> Unit = {},
+    onVerticalDrag: (Float) -> Unit = {},
+    onVerticalDragEnd: () -> Unit = {},
+    onVerticalDragCancel: () -> Unit = {},
+    // 上报自身在根坐标系中的矩形（px）：播放页从这里生长出来，不改任何视觉
+    onBoundsChanged: (androidx.compose.ui.geometry.Rect?) -> Unit = {},
+    // 上报封面矩形（px，根坐标）：展开时封面从这里飞向播放页
+    onCoverBounds: (androidx.compose.ui.geometry.Rect?) -> Unit = {},
+    // 飞行期间隐藏真实封面，1=正常显示
+    coverAlpha: () -> Float = { 1f }
 ) {
     val progressState by progress.collectAsStateWithLifecycle()
     val positionMs = progressState.positionMs
@@ -133,11 +149,30 @@ fun FloatingGlassPlayerCapsule(
             .height(64.dp)
             .clip(CircleShape)
             .then(glassModifier)
+            .onGloballyPositioned { coordinates ->
+                onBoundsChanged(if (coordinates.isAttached) coordinates.boundsInRoot() else null)
+            }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick
             )
+            // 上拉跟手展开：纵向拖拽（触摸滑动超过 touchSlop 才接管，点击不受影响）
+            .pointerInput(Unit) {
+                val reportDragStart = onVerticalDragStart
+                val reportDrag = onVerticalDrag
+                val reportDragEnd = onVerticalDragEnd
+                val reportDragCancel = onVerticalDragCancel
+                detectVerticalDragGestures(
+                    onDragStart = { reportDragStart() },
+                    onVerticalDrag = { change, dragAmount ->
+                        change.consume()
+                        reportDrag(dragAmount)
+                    },
+                    onDragEnd = { reportDragEnd() },
+                    onDragCancel = { reportDragCancel() }
+                )
+            }
             .padding(start = 8.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -165,7 +200,15 @@ fun FloatingGlassPlayerCapsule(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(CircleShape)
-                        .graphicsLayer { rotationZ = rotation.value }
+                        .onGloballyPositioned { coordinates ->
+                            onCoverBounds(
+                                if (coordinates.isAttached) coordinates.boundsInRoot() else null
+                            )
+                        }
+                        .graphicsLayer {
+                            rotationZ = rotation.value
+                            alpha = coverAlpha()
+                        }
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
