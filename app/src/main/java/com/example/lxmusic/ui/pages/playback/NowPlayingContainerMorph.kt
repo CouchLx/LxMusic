@@ -98,6 +98,7 @@ internal fun rememberNowPlayingMorphState(
     }
     LaunchedEffect(visible, dragging) {
         val linked = flight
+        android.util.Log.d("LxFlight", "morph effect dragging=" + dragging + " visible=" + visible + " mounted=" + state.mounted)
         if (dragging && !visible && linked != null) {
             // the finger owns the morph; release hands over to the open or close branch
             state.closing = false
@@ -107,6 +108,7 @@ internal fun rememberNowPlayingMorphState(
                 if (dragProgress != null) state.progress.snapTo(dragProgress.coerceIn(0f, 1f))
             }
         } else if (visible) {
+            android.util.Log.d("LxFlight", "morph visible -> open")
             state.closing = false
             state.mounted = true
             if (state.progress.value < 1f) {

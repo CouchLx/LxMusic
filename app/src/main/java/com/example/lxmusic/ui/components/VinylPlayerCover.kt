@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import com.example.lxmusic.ui.animation.sharedCoverTarget
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MusicNote
@@ -368,6 +369,8 @@ fun VinylDisc(
         Box(
             modifier = Modifier
                 .fillMaxSize(coverFraction)
+                // 共享封面飞行的目标端（黑胶风格）：离开/回来时真实盘芯让位给位图飞行
+                .sharedCoverTarget(cornerRadius = 999.dp)
                 .clip(CircleShape)
                 .background(Color(0xFF0A0A0D)),
             contentAlignment = Alignment.Center

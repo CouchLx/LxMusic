@@ -289,6 +289,11 @@ import com.example.lxmusic.ui.animation.SharedCoverFlightState
 import com.example.lxmusic.ui.animation.shouldOpenNowPlayingFromDrag
 import com.example.lxmusic.ui.pages.playback.NowPlayingContainerMorph
 import com.example.lxmusic.ui.pages.playback.rememberNowPlayingMorphState
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.drawable.toBitmap
+import coil.imageLoader
+import coil.request.SuccessResult
 import com.example.lxmusic.ui.pages.SongListPage
 import com.example.lxmusic.ui.pages.PlaylistManagePage
 import com.example.lxmusic.ui.pages.PlaylistPage
@@ -765,12 +770,16 @@ fun AppScaffold(
     // 整页作为一张卡片从播放条矩形缩放到全屏（progress 0..1）；
     // 手指拖动时直接拥有 progress，松手交给 spring/250ms。
     val coverFlight = remember { SharedCoverFlightState() }
+    // 封面位图缓存在根层：迷你条在播放页打开期间会离开组合，
+    // 若把位图放在它内部（remember），收起时来不及重新加载 → 收起就没有封面飞行
+    //（对应 NeriPlayer 的 RetainedPlaybackCoverBitmapCache）
+    var flightArtwork by remember { mutableStateOf<ImageBitmap?>(null) }
     // 播放页内下拉收起的手指进度（0=不动，1=预览到底）
     var pageDownDragFraction by remember { mutableFloatStateOf(0f) }
     val playerMorph = rememberNowPlayingMorphState(
         visible = showPlayerPage,
         flight = coverFlight,
-        artwork = { null },
+        artwork = { flightArtwork },
         backProgress = { pageDownDragFraction }
     )
     // 播放器菜单 → 独立页面（声音设置 / 均衡器）：覆盖在播放器之上，返回键优先关闭
@@ -3120,6 +3129,21 @@ fun AppScaffold(
     if (currentSong != null) lastValidSong.value = currentSong
     val displaySong = lastValidSong.value
 
+    // 共享封面飞行用的封面位图：按当前歌曲预加载（根层缓存，迷你条离开组合也不丢）
+    LaunchedEffect(displaySong?.filePath, displaySong?.albumArtUri) {
+        val s = displaySong ?: return@LaunchedEffect
+        val model: Any = when {
+            s.albumArtUri != null && (s.albumArtUri.startsWith("/") || s.albumArtUri.startsWith("file://")) ->
+                File(s.albumArtUri.removePrefix("file://"))
+            s.albumArtUri != null -> Uri.parse(s.albumArtUri)
+            else -> File(s.filePath)
+        }
+        val request = ImageRequest.Builder(context)
+            .data(model).size(512).allowHardware(false).build()
+        val result = context.imageLoader.execute(request)
+        (result as? SuccessResult)?.drawable?.toBitmap()?.asImageBitmap()?.let { flightArtwork = it }
+    }
+
     // ===== 播放器展开起点几何（两套主题各自的播放条）=====
     // 原生主题：MiniPlayerBar —— 贴底、全宽（左右各 6dp）、58dp 高、顶部 20dp 圆角
     // 悬浮主题：FloatingGlassPlayerCapsule —— 底栏行右侧的 64dp 胶囊（32dp 圆角）
@@ -3307,7 +3331,8 @@ fun AppScaffold(
             morph = playerMorph,
             flight = coverFlight,
             capsuleInWindow = { playerEntryBounds },
-            cardColor = MaterialTheme.colorScheme.surfaceContainerLowest
+            // 播放页是深色 chrome，卡片底色也用深色：p→1 交还给真实背景时不会跳色
+            cardColor = Color(0xFF19191C)
         ) {
         Box(
             modifier = Modifier
