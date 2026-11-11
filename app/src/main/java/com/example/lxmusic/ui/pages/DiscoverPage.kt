@@ -170,7 +170,12 @@ fun DiscoverPage(
     // 顶栏内容高度（不含状态栏）：现代主题 54dp / 原生主题 64dp，与首页、我的保持一致
     topBarContentHeight: Dp = 54.dp,
     // 现代主题：内容按首页胶囊的 42dp 轨道垂直居中；原生主题：按 TopAppBar 中心居中
-    modernTopBar: Boolean = true
+    modernTopBar: Boolean = true,
+    // 底部 tab 切换动画是否已经结束。只有「已经有内容可显示」的后台网络刷新会等这个信号：
+    // 响应回来会整列表重组 + 批量加载封面，正落在动画中间要顶掉几帧。
+    // 缓存读取和各子页的首次加载**不排队**（那些都在 IO 线程），
+    // 排队只会让点「发现」比点「首页」慢半拍。
+    contentReady: Boolean = true
 ) {
     val scope = rememberCoroutineScope()
     val tabs = remember(showYueku) {
@@ -211,18 +216,21 @@ fun DiscoverPage(
             modernTopBar = modernTopBar
         )
 
-        // 子页面内容 Pager（全部页面常驻组合，切 Tab 不重建、不重刷接口）
+        // 子页面内容 Pager：只让「当前页 + 相邻各 1 页」常驻组合。
+        // 原先 beyondViewportPageCount = tabs.size - 1 会让 4 个子页在进场的同一帧里全部组合，
+        // 每个子页都带独立的 LazyColumn/Grid + 首次加载，正好压在切 tab 动画的起手帧上 → 掉帧。
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
-            beyondViewportPageCount = tabs.size - 1
+            beyondViewportPageCount = 1
         ) { page ->
             when (page) {
                 0 -> {
                     // 排行榜子页面（原封不动保留原逻辑）
                     RankTabContent(
                         onRankClick = onRankClick,
-                        listState = listState
+                        listState = listState,
+                        contentReady = contentReady
                     )
                 }
                 1 -> {
@@ -2058,7 +2066,8 @@ private fun ProbeTabContent() {
 @Composable
 fun RankTabContent(
     onRankClick: (RankItem) -> Unit,
-    listState: LazyListState = rememberLazyListState()
+    listState: LazyListState = rememberLazyListState(),
+    contentReady: Boolean = true
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -2077,14 +2086,18 @@ fun RankTabContent(
             discoverRankScrollIndex[platform] = idx
         }
     }
-    var rankList by remember { mutableStateOf<List<RankItem>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    var loadError by remember { mutableStateOf(false) }
+    var rankList by remember(platform) {
+        mutableStateOf(discoverRankCache[platform] ?: emptyList())
+    }
+    var isLoading by remember(platform) { mutableStateOf(rankList.isEmpty()) }
+    var loadError by remember(platform) { mutableStateOf(false) }
 
     fun cacheKey(p: String) = "rank_list_json_$p"
 
     fun preloadCovers(list: List<RankItem>) {
-        list.forEach { rank ->
+        // 只预热首屏那一屏的封面：整列表全量 enqueue 会把 Coil 的解码线程占满，
+        // 正好和进场动画抢 CPU
+        list.take(12).forEach { rank ->
             val url = rank.coverUrl
             if (url.isNotBlank()) {
                 imageLoader.enqueue(
@@ -2139,24 +2152,39 @@ fun RankTabContent(
     }
 
     LaunchedEffect(platform) {
-        // 先展示内存缓存（切换平台不出现空白/闪烁），再后台刷新
+        // 缓存（内存 + 磁盘）**立即**加载：进场首帧就要有内容，不能等进场动画结束。
+        // 只有网络刷新才排队等动画（见下面的 effect）——如果连缓存都推迟，
+        // 点「发现」就会先看到 300ms 骨架，体感比首页慢。
         val mem = discoverRankCache[platform]
-        rankList = mem ?: emptyList()
-        isLoading = mem == null
-        loadError = false
-        if (mem == null) {
-            val cached = prefs.getString(cacheKey(platform), null)
-            if (!cached.isNullOrBlank()) {
-                runCatching {
-                    gson.fromJson<List<RankItem>>(cached, object : TypeToken<List<RankItem>>() {}.type)
-                }.getOrNull()?.takeIf { it.isNotEmpty() }?.let {
-                    rankList = it
-                    discoverRankCache[platform] = it
-                    isLoading = false
-                    preloadCovers(it)
-                }
+        if (mem != null) {
+            rankList = mem
+            isLoading = false
+            loadError = false
+        } else {
+            // 磁盘缓存：SharedPreferences 首次读要解析 XML，Gson 反序列化也是纯 CPU，
+            // 都放到 IO 线程，别在切页动画的主线程上做
+            val cached = withContext(Dispatchers.IO) {
+                prefs.getString(cacheKey(platform), null)
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { raw ->
+                        runCatching {
+                            gson.fromJson<List<RankItem>>(raw, object : TypeToken<List<RankItem>>() {}.type)
+                        }.getOrNull()
+                    }
+            }
+            if (!cached.isNullOrEmpty()) {
+                rankList = cached
+                discoverRankCache[platform] = cached
+                isLoading = false
+                preloadCovers(cached)
             }
         }
+    }
+
+    // 网络刷新：等进场动画跑完再发。响应回来时会整列表重组 + 批量加载封面，
+    // 正落在动画中间就会顶掉几帧，所以这一段必须延后。
+    LaunchedEffect(platform, contentReady) {
+        if (!contentReady) return@LaunchedEffect
         scope.launch(Dispatchers.IO) {
             val items = runCatching { attachPreviews(platform, fetchList(platform)) }
                 .getOrElse { emptyList() }

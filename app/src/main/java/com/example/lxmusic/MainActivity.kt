@@ -301,6 +301,13 @@ import kotlin.math.roundToInt
 
 // ==================== 入口 ====================
 
+/**
+ * 底部 tab 切换动画的时长（ms）。取 transitionSpec 里最长的那个动画：
+ * 顶层 tab 横移 280ms / 普通页面整页滑动 300ms。
+ * 页面入场后的首次数据加载要等这段动画跑完，两者必须一起改。
+ */
+private const val TAB_SWITCH_ANIM_MS = 300L
+
 /** 播放器展开态：舞台共享背景 + 单页面卡片翻页（0=封面卡 1=歌词卡） */
 
 class MainActivity : ComponentActivity() {
@@ -2099,6 +2106,16 @@ fun AppScaffold(
                 contentAlignment = Alignment.Center
             ) {
 
+                // 切 tab 的动画是否已经跑完：动画期间目标页只画骨架，不读缓存/不发请求。
+                // 时长与下面 transitionSpec 里最长的那个动画（300ms）对齐；动画本身只是位移+淡入，
+                // 主线程空出来后就能稳定跑满帧，内容在动画结束后立刻补上（内存缓存同步铺，不会闪空）。
+                var tabSwitchSettled by remember { mutableStateOf(true) }
+                LaunchedEffect(selectedTab) {
+                    tabSwitchSettled = false
+                    kotlinx.coroutines.delay(TAB_SWITCH_ANIM_MS)
+                    tabSwitchSettled = true
+                }
+
                 // 始终显示标签页内容（保持 Composition 不销毁，避免搜索返回后图片闪烁）
                 AnimatedContent(
                     targetState = selectedTab,
@@ -2275,7 +2292,10 @@ fun AppScaffold(
                                         showYueku = !isGuest,
                                         // 顶栏高度与首页/我的统一：胶囊顶栏两主题都是 54dp
                                         topBarContentHeight = 54.dp,
-                                        modernTopBar = true
+                                        modernTopBar = true,
+                                        // 入场动画（位移+淡入）跑完再让子页开始加载，
+                                        // 避免 4 个子页的首次请求/长列表组合压在动画首帧上掉帧
+                                        contentReady = tabSwitchSettled
                                     )
                                 }
                             }

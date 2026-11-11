@@ -1202,40 +1202,46 @@ fun HomePage(
 
     // 首次加载：如果有缓存先显示缓存（一次性恢复 feed），不再自动刷新
     LaunchedEffect(Unit) {
-        val cachedDaily = homePrefs.getString("daily_songs_json", null)
-        val cachedHistory = homePrefs.getString("history_songs_json", null)
-        val cachedVip = homePrefs.getString("vip_songs_json", null)
-        val cachedMillion = homePrefs.getString("million_songs_json", null)
-        val cachedNetwork = homePrefs.getString("network_songs_json", null)
-        val cachedStyle = homePrefs.getString("style_songs_json", null)
-        val cachedSurge = homePrefs.getString("home_surge", null)
-        val cachedHot = homePrefs.getString("home_hot", null)
-        val cachedNew = homePrefs.getString("home_new", null)
-        val cachedCollect = homePrefs.getString("home_collect", null)
-        val cachedNiche = homePrefs.getString("home_niche", null)
-        val cachedPersonal = homePrefs.getString("home_personal", null)
-        val cachedConcept = homePrefs.getString("home_concept", null)
-        val cachedTrend = homePrefs.getString("home_trend", null)
+        // 每次切回首页都会重建本页组合 → 这段"读 14 份缓存 + Gson 反序列化"以前是同步跑在
+        // 主线程上的，正好压在切 tab 动画的起手帧 → 必然掉帧。改成 IO 线程解析，
+        // 主线程只做最后那次 feed 赋值（一次重组）。
+        val cachedFeed = withContext(Dispatchers.IO) {
+            val cachedDaily = homePrefs.getString("daily_songs_json", null)
+            val cachedHistory = homePrefs.getString("history_songs_json", null)
+            val cachedVip = homePrefs.getString("vip_songs_json", null)
+            val cachedMillion = homePrefs.getString("million_songs_json", null)
+            val cachedNetwork = homePrefs.getString("network_songs_json", null)
+            val cachedStyle = homePrefs.getString("style_songs_json", null)
+            val cachedSurge = homePrefs.getString("home_surge", null)
+            val cachedHot = homePrefs.getString("home_hot", null)
+            val cachedNew = homePrefs.getString("home_new", null)
+            val cachedCollect = homePrefs.getString("home_collect", null)
+            val cachedNiche = homePrefs.getString("home_niche", null)
+            val cachedPersonal = homePrefs.getString("home_personal", null)
+            val cachedConcept = homePrefs.getString("home_concept", null)
+            val cachedTrend = homePrefs.getString("home_trend", null)
 
-        val typeDaily = object : TypeToken<List<DailyRecommendSong>>() {}.type
-        val typeSongInfo = object : TypeToken<List<SongInfo>>() {}.type
+            val typeDaily = object : TypeToken<List<DailyRecommendSong>>() {}.type
+            val typeSongInfo = object : TypeToken<List<SongInfo>>() {}.type
 
-        feed = HomeFeedState(
-            dailySongs = cachedDaily?.let { gson.fromJson(it, typeDaily) } ?: emptyList(),
-            historySongs = cachedHistory?.let { gson.fromJson(it, typeDaily) } ?: emptyList(),
-            vipSongs = cachedVip?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
-            millionSongs = cachedMillion?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
-            networkSongs = cachedNetwork?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
-            styleSongs = cachedStyle?.let { gson.fromJson(it, typeDaily) } ?: emptyList(),
-            surgeSongs = cachedSurge?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
-            hotPickSongs = cachedHot?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
-            newSongs = cachedNew?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
-            collectSongs = cachedCollect?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
-            nicheSongs = cachedNiche?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
-            personalSongs = cachedPersonal?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
-            conceptSongs = cachedConcept?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
-            trendSongs = cachedTrend?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList()
-        )
+            HomeFeedState(
+                dailySongs = cachedDaily?.let { gson.fromJson(it, typeDaily) } ?: emptyList(),
+                historySongs = cachedHistory?.let { gson.fromJson(it, typeDaily) } ?: emptyList(),
+                vipSongs = cachedVip?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
+                millionSongs = cachedMillion?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
+                networkSongs = cachedNetwork?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
+                styleSongs = cachedStyle?.let { gson.fromJson(it, typeDaily) } ?: emptyList(),
+                surgeSongs = cachedSurge?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
+                hotPickSongs = cachedHot?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
+                newSongs = cachedNew?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
+                collectSongs = cachedCollect?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
+                nicheSongs = cachedNiche?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
+                personalSongs = cachedPersonal?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
+                conceptSongs = cachedConcept?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList(),
+                trendSongs = cachedTrend?.let { gson.fromJson(it, typeSongInfo) } ?: emptyList()
+            )
+        }
+        feed = cachedFeed
 
         // 进首页消费一次性刷新请求：仅在用户切过背景/歌词开关（或登录/激活成功）后才刷，
         // 无标记时保持原样不刷新。

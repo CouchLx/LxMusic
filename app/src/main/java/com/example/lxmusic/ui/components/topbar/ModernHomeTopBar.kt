@@ -63,7 +63,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -623,8 +623,10 @@ internal fun Modifier.lyricEdgeFadeMask(
     bottomFadePx: Float
 ): Modifier = this
     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-    .drawWithContent {
-        drawContent()
+    // 用 drawWithCache 而不是 drawWithContent：渐变色标（十几个 Pair + Brush）只在尺寸变化时
+    // 构建一次。之前每帧重跑 draw 都要重新建一遍 ArrayList/Array/Brush —— 滚动和切页动画
+    // 期间每帧都在做小对象分配，是隐形掉帧来源。
+    .drawWithCache {
         val h = size.height.coerceAtLeast(1f)
         val stops = ArrayList<Pair<Float, Color>>()
         fun add(pos: Float, alpha: Float) {
@@ -655,7 +657,11 @@ internal fun Modifier.lyricEdgeFadeMask(
         } else {
             add(h, 1f)
         }
-        drawRect(brush = Brush.verticalGradient(*stops.toTypedArray()), blendMode = BlendMode.DstIn)
+        val brush = Brush.verticalGradient(*stops.toTypedArray())
+        onDrawWithContent {
+            drawContent()
+            drawRect(brush = brush, blendMode = BlendMode.DstIn)
+        }
     }
 
 /**
