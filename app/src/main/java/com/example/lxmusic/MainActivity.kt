@@ -793,6 +793,14 @@ fun AppScaffold(
     LaunchedEffect(playerPagerState.currentPage) {
         showLyricsPage = playerPagerState.currentPage == 1
     }
+    // 收起落地后把翻页器复位到封面页：
+    // 否则下次展开会停在歌词页，共享封面的落点（在封面页上）跑到屏外，展开动画就错位了。
+    // 等 morph 完全卸载再复位，收起过程不会突然翻页。
+    LaunchedEffect(showPlayerPage, playerMorph.mounted) {
+        if (!showPlayerPage && !playerMorph.mounted && playerPagerState.currentPage != 0) {
+            playerPagerState.scrollToPage(0)
+        }
+    }
     // 播放器展开/收起共用的屏幕高度
     val configuration = LocalConfiguration.current
     val screenHeightPx = with(LocalDensity.current) { configuration.screenHeightDp.dp.toPx() }
