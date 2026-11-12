@@ -3327,6 +3327,9 @@ fun AppScaffold(
         val bgPainter = rememberAsyncImagePainter(model = backgroundImageUri, placeholder = null)
 
         // ===== 展开/收起：整页作为一张卡片从播放条矩形缩放到全屏（NeriPlayer 容器形变）=====
+        // zIndex 把播放页抬到悬浮底栏之上（对应参考项目里 dock 在 overlay 下面）：
+        // 否则底栏的液态玻璃会去采样“正在长大的卡片”，拖动时底部糊成一条，很难看。
+        Box(Modifier.fillMaxSize().zIndex(2f)) {
         NowPlayingContainerMorph(
             morph = playerMorph,
             flight = coverFlight,
@@ -3572,6 +3575,7 @@ fun AppScaffold(
             }
         }
         }
+        }
 
         // 收起动画进行中：播放条区域盖一层「按下立即反向」的透明热区（对齐 CurrentMusicX）。
         // 否则收缩中的页面会先吃掉这次点击，用户必须等收起动画结束再点第二次才能重新打开。
@@ -3680,15 +3684,10 @@ fun AppScaffold(
             // 否则会浮在播放页上）；收起时同一进度反向滑回。
             // progress 在 draw 阶段读取动画值（不触发组合重组）
             Box(
+                // 展开/收起：只做 alpha 交叉淡出（不做位移）。
+                // 卡片从底栏矩形长出来，两者同一矩形，所以淡出即“底栏变成卡片”
                 modifier = Modifier.graphicsLayer {
-                    val p = revealProgress()
-                    // 滑动距离 = 底栏自身高度（含系统导航条 inset），保证 p=1 时完全离屏；
-                    // 首帧还没测到高度时退回原来的 500px
-                    val travel = if (bottomBarHeightPx > 0) bottomBarHeightPx.toFloat() else 500f
-                    translationY = p * travel
-                    // 淡出节奏对齐 CurrentMusicX 的 dock：前 14%（= 面板完全实心）内消失，
-                    // 否则底栏会作为一层“幽灵”压在已经长开的播放页上
-                    alpha = (1f - p / .14f).coerceIn(0f, 1f)
+                    alpha = (1f - revealProgress() / .14f).coerceIn(0f, 1f)
                 }
             ) {
                 FloatingBottomBar(
@@ -3697,9 +3696,11 @@ fun AppScaffold(
                     tabs = bottomTabs,
                     blurEnabled = blurNavBar,
                     isFloating = floatingBottomBar,
-                    liquidGlass = liquidGlass,
+                    // morph 期间退化为实色：液态玻璃会去采样背景层里正在长大的卡片，
+                    // 拖动时底部糊成一片（这就是“拉起时很难看”的原因）
+                    liquidGlass = liquidGlass && !revealBusy,
                     hasCustomWallpaper = backgroundImageUri != null,
-                    backdrop = glassBackdrop,
+                    backdrop = if (revealBusy) null else glassBackdrop,
                     navBarOpacity = if (floatingBottomBar) floatingBarOpacity else navBarOpacity,
                     followThemeColor = followThemeColor,
                     playerBarWhiteBlend = playerBarWhiteBlend,
