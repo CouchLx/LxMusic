@@ -117,7 +117,6 @@ class SharedCoverFlightState {
         continuousCorners: Boolean = true
     ) {
         sourceBitmap = bitmap
-        android.util.Log.d("LxFlight", "reportSource bmp=" + bitmap + " bounds=" + bounds)
         if (bounds.isEmpty) return
         latestSourceBounds = bounds
         // 展开保留静止起点，关闭时跟随重新入场的 Mini，避免交还时跳到另一个位置
@@ -136,10 +135,11 @@ class SharedCoverFlightState {
 
     internal fun reportTarget(bounds: Rect, cornerPx: Float) {
         if (bounds.isEmpty) return
+        // 传 999dp 之类表示"圆形"：钳到短边一半，避免超大圆角在插值时失真
+        val corner = cornerPx.coerceAtMost(minOf(bounds.width, bounds.height) / 2f)
         targetBounds = bounds
-        targetCornerPx = cornerPx
+        targetCornerPx = corner
         targetAttached = true
-        android.util.Log.d("LxFlight", "reportTarget bounds=" + bounds + " corner=" + cornerPx)
     }
 
     internal fun detachTarget() {
@@ -244,9 +244,6 @@ class SharedCoverFlightState {
         // 固定本轮接管条件，避免图片回调在动画中途切换真实封面与替代封面
         linkedBitmap = preferredBitmap ?: sourceBitmap
         linked = true
-        android.util.Log.d("LxFlight", "beginLinked bitmap=" + linkedBitmap +
-            " source=" + sourceBounds + " targetAttached=" + targetAttached +
-            " target=" + targetCoordinates)
     }
 
     fun endLinked() {
@@ -410,7 +407,6 @@ fun Modifier.sharedCoverSource(
 /** Marks the Now Playing cover as the flight destination and hides it while a flight runs. */
 fun Modifier.sharedCoverTarget(cornerRadius: Dp): Modifier = composed {
     val state = LocalSharedCoverFlight.current
-    android.util.Log.d("LxFlight", "sharedCoverTarget state=" + state)
     if (state == null) return@composed this
     val cornerPx = with(LocalDensity.current) { cornerRadius.toPx() }
     DisposableEffect(state) {

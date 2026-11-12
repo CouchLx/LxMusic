@@ -217,8 +217,6 @@ fun MiniPlayerBar(
             .data(flightModel).size(512).allowHardware(false).build()
         val result = context.imageLoader.execute(request)
         flightBitmap = (result as? SuccessResult)?.drawable?.toBitmap()?.asImageBitmap()
-        android.util.Log.d("LxFlight", "mini bitmap=" + flightBitmap?.width + "x" + flightBitmap?.height +
-            " result=" + result::class.java.simpleName)
     }
 
     // 间距保持固定（不随屏幕变化）

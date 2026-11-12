@@ -64,8 +64,8 @@ private const val OpenCardFadeSpan = 0.14f
 private const val CardColorSpan = 0.5f
 private const val MorphScrimAlpha = 0.16f
 /** Page content fades in over this slice of the morph; the card and artwork lead. */
-private const val ContentFadeStart = 0.06f
-private const val ContentFadeEnd = 0.42f
+private const val ContentFadeStart = 0.45f
+private const val ContentFadeEnd = 0.78f
 private val MorphCardColor = Color(0xFF19191C)
 /** How far a back gesture previews the close morph before the user commits. */
 private const val MorphBackPreviewDepth = 0.4f
@@ -98,7 +98,6 @@ internal fun rememberNowPlayingMorphState(
     }
     LaunchedEffect(visible, dragging) {
         val linked = flight
-        android.util.Log.d("LxFlight", "morph effect dragging=" + dragging + " visible=" + visible + " mounted=" + state.mounted)
         if (dragging && !visible && linked != null) {
             // the finger owns the morph; release hands over to the open or close branch
             state.closing = false
@@ -108,7 +107,6 @@ internal fun rememberNowPlayingMorphState(
                 if (dragProgress != null) state.progress.snapTo(dragProgress.coerceIn(0f, 1f))
             }
         } else if (visible) {
-            android.util.Log.d("LxFlight", "morph visible -> open")
             state.closing = false
             state.mounted = true
             if (state.progress.value < 1f) {
@@ -236,7 +234,12 @@ internal fun NowPlayingContainerMorph(
             val p = progress.value.coerceIn(0f, 1f)
             val bitmap = flight.linkedBitmap ?: return@Canvas
             val from = flight.miniCoverBounds?.translate(-geometry.origin) ?: return@Canvas
-            val to = geometry.pageCover(flight) ?: return@Canvas
+            // 目标 = 封面在页面里的“最终”矩形（页面本地坐标；p=1 时等于屏幕坐标）。
+            // 不跟随页面当前的缩放/位移：否则小尺寸阶段整页被压进播放条时，位于页面中部的
+            // 封面会被压到卡片外、再被钳制压扁 —— 观感就是“折叠”。用最终位置做线性插值，
+            // 封面始终是完整比例，从播放条那个高度匀速长大，不往下掉。
+            val host = geometry.content ?: return@Canvas
+            val to = flight.targetFrameIn(host) ?: return@Canvas
             val rect = lerp(from, to.bounds, p)
             if (rect.width <= 1f || rect.height <= 1f) return@Canvas
             val corner = lerp(flight.miniCoverCornerPx, to.cornerPx, p)
