@@ -3151,6 +3151,8 @@ fun AppScaffold(
         val result = context.imageLoader.execute(request)
         (result as? SuccessResult)?.drawable?.toBitmap()?.asImageBitmap()?.let { flightArtwork = it }
     }
+    // 展开动画进行中切歌：立刻把飞行中的位图换成新封面，避免旧封面飞到终点再跳图
+    LaunchedEffect(flightArtwork) { coverFlight.refreshLinkedArtwork(flightArtwork) }
 
     // ===== 播放器展开起点几何（两套主题各自的播放条）=====
     // 原生主题：MiniPlayerBar —— 贴底、全宽（左右各 6dp）、58dp 高、顶部 20dp 圆角

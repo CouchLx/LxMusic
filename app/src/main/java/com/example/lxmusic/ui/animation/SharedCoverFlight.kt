@@ -246,6 +246,16 @@ class SharedCoverFlightState {
         linked = true
     }
 
+    /**
+     * 飞行途中切歌：把飞行中的位图换成新封面。
+     * 飞行开始时 [beginLinked] 会固定一张图（避免中途抖动），但用户切歌时那张图已经过期，
+     * 继续用它落地会看到“旧封面飞过去、然后跳成新封面”。
+     */
+    fun refreshLinkedArtwork(bitmap: ImageBitmap?) {
+        if (!linked || bitmap == null) return
+        if (linkedBitmap !== bitmap) linkedBitmap = bitmap
+    }
+
     fun endLinked() {
         linked = false
         linkedBitmap = null
