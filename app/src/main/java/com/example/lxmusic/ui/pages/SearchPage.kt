@@ -114,10 +114,13 @@ import com.example.lxmusic.SearchPlaylistItem
 import com.example.lxmusic.SearchSuggestItem
 import com.example.lxmusic.ui.components.SongContextMenuActions
 import com.example.lxmusic.model.SongInfo
+import com.example.lxmusic.ui.shelf.RecordShelfEntry
 import com.example.lxmusic.toSongInfo
 import com.example.lxmusic.ui.components.IOLoadingIndicator
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -494,9 +497,8 @@ fun SearchPage(
 
     // 音源：kugou / netease / local / plugin:<id>（持久化到 settings 的 music_source，启动时由 MainActivity 传入）
     var searchSource by remember { mutableStateOf(initialSource) }
-    LaunchedEffect(initialSource) {
-        searchSource = initialSource
-    }
+    // 当前这次搜索的协程：切音源/改关键词时取消旧的，避免旧平台的结果晚到把新结果盖掉
+    var searchJob by remember { mutableStateOf<Job?>(null) }
     // 音源合法性：切模式后旧保存值可能不在当前列表（如激活后用过的 plugin/local），回落到默认源
     LaunchedEffect(sources) {
         if (sources.none { it.key == searchSource }) {
@@ -584,7 +586,8 @@ fun SearchPage(
         currentPage = 1
         noMoreData = false
         onQueryChange(keywords)
-        scope.launch(Dispatchers.IO) {
+        searchJob?.cancel()
+        searchJob = scope.launch(Dispatchers.IO) {
             try {
                 // 清空所有结果
                 searchResults = emptyList()
@@ -648,10 +651,13 @@ fun SearchPage(
                 albumResults = emptyList()
                 mvResults = emptyList()
             } finally {
-                isSearching = false
-                withContext(Dispatchers.Main) {
-                    focusManager.clearFocus(force = true)
-                    keyboardController?.hide()
+                // 被新一次搜索取消时不要收掉加载态：新的那次还在跑，提前收起会闪一下空结果
+                if (isActive) {
+                    isSearching = false
+                    withContext(Dispatchers.Main) {
+                        focusManager.clearFocus(force = true)
+                        keyboardController?.hide()
+                    }
                 }
             }
         }
@@ -768,18 +774,29 @@ fun SearchPage(
         }
     }
 
-    // 切换音源：保存状态，非酷狗模式只支持单曲，已有搜索词则立即用新音源重搜
-    fun switchSource(source: String) {
-        if (source == searchSource) return
-        searchSource = source
-        onSourceChange(source)
-        if (source != "kugou" && selectedType != "song") {
-            selectedType = "song"
-            onSelectedTypeChange("song")
+    // 顶栏切换音源 → 立刻用新音源重搜。
+    // 结果区里不再放第二个切换器，所有切换都收敛到这一条通道，
+    // 避免出现「音源切了、结果还是上一个平台」的中间态。
+    LaunchedEffect(initialSource) {
+        if (initialSource == searchSource) return@LaunchedEffect
+        searchSource = initialSource
+        // 各音源支持的搜索类型（与下方 Tab 列表口径一致）
+        val allowed = when {
+            guestMode || initialSource == "local" || initialSource.startsWith("plugin:") ->
+                setOf("song")
+            initialSource == "kugou" -> setOf("song", "special", "album")
+            initialSource == "netease" || initialSource == "tx" -> setOf("song", "special")
+            else -> setOf("song")
+        }
+        val targetType = if (selectedType in allowed) selectedType else "song"
+        if (targetType != selectedType) {
+            selectedType = targetType
+            onSelectedTypeChange(targetType)
         }
         if (currentQuery.isNotBlank()) {
-            doSearch(currentQuery, "song")
+            doSearch(currentQuery, targetType)
         } else {
+            // 还没搜过：清掉可能是上一个音源留下的搜索态
             searchResults = emptyList()
             playlistResults = emptyList()
             authorResults = emptyList()
@@ -833,13 +850,6 @@ fun SearchPage(
                             text = { Text(label, fontSize = 13.sp) }
                         )
                     }
-                }
-                Box(modifier = Modifier.padding(end = 12.dp)) {
-                    MusicSourceSwitcher(
-                        searchSource = searchSource,
-                        onSourceChange = { switchSource(it) },
-                        sources = sources
-                    )
                 }
             }
         }
@@ -1259,12 +1269,27 @@ fun SearchPage(
                         contentPadding = PaddingValues(bottom = 100.dp)
                     ) {
                         item {
-                            Text(
-                                text = if (totalResults > 0) "共 $totalResults 首，已加载 ${searchResults.size} 首" else "已加载 ${searchResults.size} 首",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (totalResults > 0) "共 $totalResults 首，已加载 ${searchResults.size} 首" else "已加载 ${searchResults.size} 首",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                RecordShelfEntry(
+                                    songs = searchResults,
+                                    onPlaySong = onPlaySong,
+                                    currentPlayingPath = currentPlayingPath,
+                                    isPlaying = isPlaying,
+                                    collectionKey = "搜索结果",
+                                    compact = true
+                                )
+                            }
                         }
                         itemsIndexed(searchResults, key = { _, song -> song.filePath }) { index, song ->
                             var showSheet by remember { mutableStateOf(false) }

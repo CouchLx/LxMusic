@@ -82,6 +82,7 @@ import com.example.lxmusic.toSongInfo
 import com.example.lxmusic.RankItem
 import com.example.lxmusic.RankSong
 import com.example.lxmusic.model.SongInfo
+import com.example.lxmusic.ui.shelf.RecordShelfEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -366,6 +367,15 @@ fun RankDetailPage(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(if (isLoadingAll) "加载中..." else "播放全部")
                         }
+                        Spacer(modifier = Modifier.width(6.dp))
+                        RecordShelfEntry(
+                            songs = songs,
+                            onPlaySong = onPlaySong,
+                            currentPlayingPath = currentPlayingPath,
+                            isPlaying = isPlaying,
+                            collectionKey = rank.rankname.orEmpty(),
+                            compact = true
+                        )
                         Spacer(modifier = Modifier.weight(1f))
                         IconButton(onClick = {
                             showRankNumbers = !showRankNumbers

@@ -9,6 +9,15 @@ import android.util.Log
 import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -93,6 +102,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -312,49 +322,89 @@ private fun DiscoverTopTabBar(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // 左侧：子 tab 选栏（左对齐；可横向滚动，平台切换按钮固定在右侧不参与滚动）
-            LazyRow(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(22.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                items(tabs.size) { index ->
-                    val tab = tabs[index]
-                    val isSelected = selectedIndex == index
-                    val textColor by animateColorAsState(
-                        targetValue = if (isSelected) MaterialTheme.colorScheme.onSurface
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        animationSpec = tween(200),
-                        label = "tab_text"
-                    )
-                    val underlineColor by animateColorAsState(
-                        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                        animationSpec = tween(200),
-                        label = "tab_line"
-                    )
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) { onTabSelected(index) }
-                            .padding(vertical = 6.dp)
-                    ) {
-                        Text(
-                            text = tab.title,
-                            fontSize = 15.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = textColor
+            // 指示条改为"整条滑动"的胶囊：跟随选中项平移，宽度按各 tab 宽度自适应。
+            val tabDensity = LocalDensity.current
+            val tabBounds = remember { mutableStateMapOf<Int, Rect>() }
+            val selectedBounds = tabBounds[selectedIndex]
+            val indicatorHeightPx = with(tabDensity) { 4.dp.toPx() }
+            // 目标：水平居中于选中 tab，宽度取 tab 宽的一半并夹在 18~40dp
+            val targetCenter = selectedBounds?.let { it.left + it.width / 2f } ?: 0f
+            val targetWidth = selectedBounds?.let {
+                (it.width * 0.5f).coerceIn(
+                    with(tabDensity) { 18.dp.toPx() },
+                    with(tabDensity) { 40.dp.toPx() }
+                )
+            } ?: 0f
+            val indicatorCenter by animateFloatAsState(
+                targetValue = targetCenter,
+                animationSpec = spring(dampingRatio = 0.78f, stiffness = 520f),
+                label = "tab_indicator_center"
+            )
+            val indicatorWidth by animateFloatAsState(
+                targetValue = targetWidth,
+                animationSpec = spring(dampingRatio = 0.82f, stiffness = 620f),
+                label = "tab_indicator_width"
+            )
+            Box(modifier = Modifier.weight(1f)) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(22.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    items(tabs.size) { index ->
+                        val tab = tabs[index]
+                        val isSelected = selectedIndex == index
+                        val textColor by animateColorAsState(
+                            targetValue = if (isSelected) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            animationSpec = tween(200),
+                            label = "tab_text"
                         )
-                        Spacer(modifier = Modifier.height(5.dp))
-                        Box(
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
-                                .width(18.dp)
-                                .height(3.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(underlineColor)
-                        )
+                                .onGloballyPositioned { coordinates ->
+                                    tabBounds[index] = Rect(
+                                        left = coordinates.positionInParent().x,
+                                        top = coordinates.positionInParent().y,
+                                        right = coordinates.positionInParent().x +
+                                            coordinates.size.width,
+                                        bottom = coordinates.positionInParent().y +
+                                            coordinates.size.height
+                                    )
+                                }
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) { onTabSelected(index) }
+                                .padding(vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = tab.title,
+                                fontSize = 15.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = textColor
+                            )
+                            // 占位：保持原来的行高（指示条已经移到外层统一绘制）
+                            Spacer(modifier = Modifier.height(5.dp + 4.dp))
+                        }
                     }
+                }
+                if (selectedBounds != null) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .offset {
+                                IntOffset(
+                                    (indicatorCenter - indicatorWidth / 2f).roundToInt(),
+                                    -(with(tabDensity) { 2.dp.toPx() }).roundToInt()
+                                )
+                            }
+                            .width(with(tabDensity) { indicatorWidth.toDp() })
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(MaterialTheme.colorScheme.primary)
+                    )
                 }
             }
 

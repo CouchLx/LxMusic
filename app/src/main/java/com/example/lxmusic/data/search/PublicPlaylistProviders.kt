@@ -3,6 +3,8 @@ package com.example.lxmusic.data.search
 import android.util.Log
 import com.example.lxmusic.BffApi
 import com.example.lxmusic.KuGouApi
+import com.example.lxmusic.NeteaseApi
+import com.example.lxmusic.toSongInfo
 import com.example.lxmusic.model.SongInfo
 import com.google.gson.Gson
 import com.google.gson.JsonObject
@@ -438,7 +440,24 @@ object PublicPlaylistProviders {
         return ids.mapNotNull { byId[it] }
     }
 
-    private fun neteaseSongsPage(id: String, page: Int, pageSize: Int): SongPage {
+    private suspend fun neteaseSongsPage(id: String, page: Int, pageSize: Int): SongPage {
+        // 登录态优先走官方歌单接口：私密/自建歌单走公开 CDN 拿不到
+        val pid = id.toLongOrNull()
+        if (NeteaseApi.isLoggedIn && pid != null) {
+            val offset = ((page - 1).coerceAtLeast(0)) * pageSize
+            val resp = runCatching {
+                NeteaseApi.service.playlistTracks(
+                    id = pid,
+                    limit = pageSize,
+                    offset = offset,
+                    timestamp = System.currentTimeMillis()
+                )
+            }.getOrNull()
+            if (resp != null && resp.code == 200) {
+                // 官方接口不返回总数，total 交 0：详情页会用 playlist.trackCount 兜底
+                return SongPage(resp.songs.orEmpty().map { it.toSongInfo() }, 0)
+            }
+        }
         val ids = neteaseTrackIds(id)
         if (ids.isEmpty()) return SongPage(emptyList(), 0)
         val from = ((page - 1).coerceAtLeast(0)) * pageSize
@@ -447,7 +466,32 @@ object PublicPlaylistProviders {
         return SongPage(fetchNeteaseDetails(slice), ids.size)
     }
 
-    private fun neteaseSongs(id: String): List<SongInfo> {
+    private suspend fun neteaseSongs(id: String): List<SongInfo> {
+        // 登录态优先走官方歌单接口（分页拉完，最多 20000 首）
+        val pid = id.toLongOrNull()
+        if (NeteaseApi.isLoggedIn && pid != null) {
+            val all = mutableListOf<SongInfo>()
+            var offset = 0
+            var reached = false
+            while (offset < 20_000) {
+                val resp = runCatching {
+                    NeteaseApi.service.playlistTracks(
+                        id = pid,
+                        limit = 1000,
+                        offset = offset,
+                        timestamp = System.currentTimeMillis()
+                    )
+                }.getOrNull()
+                if (resp == null || resp.code != 200) break
+                reached = true
+                val pageSongs = resp.songs.orEmpty()
+                if (pageSongs.isEmpty()) break
+                all += pageSongs.map { it.toSongInfo() }
+                if (pageSongs.size < 1000) break
+                offset += pageSongs.size
+            }
+            if (reached && all.isNotEmpty()) return all.distinctBy { it.filePath }
+        }
         val ids = neteaseTrackIds(id)
         if (ids.isNotEmpty()) {
             val result = fetchNeteaseDetails(ids)

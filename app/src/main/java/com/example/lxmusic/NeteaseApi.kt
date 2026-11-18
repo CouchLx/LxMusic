@@ -22,19 +22,34 @@ data class NeteaseSearchResult(
     val songCount: Int = 0
 )
 
-/** 搜索结果中的单曲 */
+/**
+ * 单曲。
+ *
+ * 网易云有两套歌曲结构：新版是 `ar`/`al`/`dt`（搜索、每日推荐），
+ * 私人漫游 `/personal/fm/mode` 返回的是旧版 `artists`/`album`/`duration`，
+ * 所以两个字段名都收（alternate 是 Gson 的备用名）。
+ */
 data class NeteaseSong(
     val id: Long = 0,
     val name: String? = null,
+    @com.google.gson.annotations.SerializedName(value = "ar", alternate = ["artists"])
     val ar: List<NeteaseArtist>? = null,
+    @com.google.gson.annotations.SerializedName(value = "al", alternate = ["album", "albumInfo"])
     val al: NeteaseAlbum? = null,
+    @com.google.gson.annotations.SerializedName(value = "dt", alternate = ["duration"])
     val dt: Long = 0,               // 时长（毫秒）
-    val fee: Int = 0                // 0=免费 1=单曲收费 8=会员
+    val fee: Int = 0,               // 0=免费 1=单曲收费 8=会员
+    // 少数推荐接口把封面挂在顶层
+    val picUrl: String? = null
 ) {
     val artist: String
         get() = ar?.joinToString("/") { it.name ?: "" }.orEmpty().ifBlank { "未知艺术家" }
     val coverUrl: String
-        get() = al?.picUrl?.let { if (it.contains("?")) it else "$it?param=300y300" } ?: ""
+        get() = (al?.picUrl ?: picUrl)?.trim()?.takeIf { it.isNotBlank() }?.let { raw ->
+            // 旧接口常给 http://，Android 9+ 默认禁明文，统一升到 https
+            val url = if (raw.startsWith("http://")) "https://" + raw.removePrefix("http://") else raw
+            if (url.contains("?")) url else "$url?param=300y300"
+        } ?: ""
 }
 
 data class NeteaseArtist(val name: String? = null)
@@ -43,6 +58,66 @@ data class NeteaseAlbum(
     val picUrl: String? = null,
     val name: String? = null
 )
+
+/** /recommend/songs 每日推荐歌曲响应（需登录），歌曲结构复用 NeteaseSong */
+data class NeteaseRecommendResponse(
+    val code: Int = 0,
+    val data: NeteaseRecommendData? = null
+)
+
+data class NeteaseRecommendData(
+    @com.google.gson.annotations.SerializedName("dailySongs")
+    val dailySongs: List<NeteaseSong>? = null
+)
+
+/**
+ * /personal/fm/mode 私人漫游响应。
+ *
+ * 服务端把歌曲数组放在 data 里，但不同版本可能再包一层，所以用 JsonElement 收，
+ * 由 [NeteasePersonalFmResponse.songs] 容错解析。
+ */
+data class NeteasePersonalFmResponse(
+    val code: Int = 0,
+    val data: com.google.gson.JsonElement? = null
+) {
+    fun songs(): List<NeteaseSong> {
+        val element = data ?: return emptyList()
+        val gson = com.google.gson.Gson()
+        val array: com.google.gson.JsonArray = when {
+            element.isJsonArray -> element.asJsonArray
+            element.isJsonObject -> {
+                // 不同模式下歌曲数组的键不一样：data / songs / recommends / tracks / resources
+                val obj = element.asJsonObject
+                listOf("data", "songs", "recommends", "tracks", "resources", "songList")
+                    .asSequence()
+                    .mapNotNull { key -> obj.get(key)?.takeIf { it.isJsonArray }?.asJsonArray }
+                    .firstOrNull() ?: return emptyList()
+            }
+            else -> return emptyList()
+        }
+        return array.mapNotNull { item ->
+            runCatching { gson.fromJson(unwrapSongItem(item), NeteaseSong::class.java) }.getOrNull()
+        }.filter { it.id > 0L || !it.name.isNullOrBlank() }
+    }
+
+    /**
+     * 有些推荐/漫游接口把单曲再包一层：[{ song: {...} }] / [{ track: {...} }] / [{ data: {...} }]。
+     * 直接按 NeteaseSong 解析会得到一堆空对象（歌名/歌手/封面全空 → 外部播放条显示不对），
+     * 所以先剥一层。
+     */
+    private fun unwrapSongItem(item: com.google.gson.JsonElement): com.google.gson.JsonElement {
+        if (!item.isJsonObject) return item
+        val obj = item.asJsonObject
+        for (key in listOf("song", "track", "data", "songInfo", "resource")) {
+            val inner = obj.get(key)
+            if (inner != null && inner.isJsonObject) {
+                val innerObj = inner.asJsonObject
+                if (innerObj.get("id") != null || innerObj.get("name") != null) return inner
+            }
+        }
+        return item
+    }
+}
 
 /** /song/url/v1 播放地址响应 */
 data class NeteaseSongUrlResponse(
@@ -171,6 +246,37 @@ data class NeteaseLoginStatusData(
     val profile: NeteaseProfile? = null
 )
 
+// ==================== 歌单 DTO ====================
+
+/** /user/playlist 响应（登录后拉自己的歌单） */
+data class NeteaseUserPlaylistResponse(
+    val code: Int = 0,
+    val more: Boolean = false,
+    val playlist: List<NeteasePlaylist>? = null
+)
+
+data class NeteasePlaylist(
+    val id: Long = 0,
+    val name: String? = null,
+    val coverImgUrl: String? = null,
+    val trackCount: Int = 0,
+    val playCount: Long = 0,
+    val subscribed: Boolean = false,
+    val specialType: Int = 0,
+    val creator: NeteasePlaylistCreator? = null
+)
+
+data class NeteasePlaylistCreator(
+    val userId: Long = 0,
+    val nickname: String? = null
+)
+
+/** /playlist/track/all 响应（需登录，私密歌单也能读） */
+data class NeteasePlaylistTracksResponse(
+    val code: Int = 0,
+    val songs: List<NeteaseSong>? = null
+)
+
 // ==================== Retrofit 接口 ====================
 // 单曲搜索/取流/歌词 + 登录/账号；歌单与推荐按后续轮次接入
 
@@ -198,6 +304,24 @@ interface NeteaseService {
     suspend fun getLyric(
         @Query("id") id: Long
     ): NeteaseLyricResponse
+
+    /** 每日推荐歌曲（需登录），歌曲在 data.dailySongs */
+    @GET("recommend/songs")
+    suspend fun recommendSongs(
+        @Query("timestamp") timestamp: Long = 0
+    ): NeteaseRecommendResponse
+
+    /**
+     * 私人漫游（需登录）。
+     * mode: DEFAULT/FAMILIAR/EXPLORE/PUZZLE_MODE_RCMD/SCENE_RCMD
+     * submode: mode=SCENE_RCMD 时传场景码（EXERCISE/FOCUS/NIGHT_EMO/SLEEP_HELP/...）
+     */
+    @GET("personal/fm/mode")
+    suspend fun personalFmMode(
+        @Query("mode") mode: String,
+        @Query("submode") subMode: String? = null,
+        @Query("timestamp") timestamp: Long = 0
+    ): NeteasePersonalFmResponse
 
     // ========== 登录 / 账号 ==========
 
@@ -247,6 +371,26 @@ interface NeteaseService {
     /** 退出登录（尽力调用，失败也不该阻断本地清理） */
     @GET("logout")
     suspend fun logout(@Query("timestamp") timestamp: Long): NeteaseBaseResponse
+
+    // ========== 歌单 ==========
+
+    /** 用户歌单列表（uid=自己时含「我喜欢的音乐」与私密歌单） */
+    @GET("user/playlist")
+    suspend fun userPlaylists(
+        @Query("uid") uid: Long,
+        @Query("limit") limit: Int,
+        @Query("offset") offset: Int,
+        @Query("timestamp") timestamp: Long
+    ): NeteaseUserPlaylistResponse
+
+    /** 歌单歌曲（需登录；支持分页，私密歌单也可读） */
+    @GET("playlist/track/all")
+    suspend fun playlistTracks(
+        @Query("id") id: Long,
+        @Query("limit") limit: Int,
+        @Query("offset") offset: Int,
+        @Query("timestamp") timestamp: Long
+    ): NeteasePlaylistTracksResponse
 }
 
 // ==================== 单例 ====================
@@ -383,6 +527,10 @@ object NeteaseApi {
 
     /** 从 netease://<songId> 提取歌曲 id */
     fun neteaseSongIdOf(path: String): Long? = path.removePrefix("netease://").toLongOrNull()
+
+    /** 是否持有网易云登录态（登录成功后 cookie 里一定带 MUSIC_U） */
+    val isLoggedIn: Boolean
+        get() = authCookie.contains("MUSIC_U=")
 
     /** 酷狗音质设置 → 网易云 level 降级链（flac→lossless, 320→exhigh, 128→higher, high→lossless） */
     fun qualityLevels(): List<String> {

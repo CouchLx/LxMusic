@@ -204,13 +204,6 @@ class SharedCoverFlightState {
     val miniCoverBitmap: ImageBitmap?
         get() = sourceBitmap
 
-    /**
-     * Hands progress to an external driver (the clean container morph): covers stay hidden
-     * and the driver draws the artwork itself until [endLinked].
-     */
-    /** Upward drag on the mini player, 0..1; non-null while the finger is down. */
-    var dragOpenProgress: Float? by mutableStateOf(null)
-
     /** Resting fill of the mini player capsule, so the morph card can start from the same color. */
     var miniPlayerContainerColor: Color by mutableStateOf(Color.Unspecified)
 
@@ -380,7 +373,7 @@ private fun Rect.isFiniteBounds(): Boolean = isFinite && !isEmpty
 
 val LocalSharedCoverFlight = staticCompositionLocalOf<SharedCoverFlightState?> { null }
 
-private const val DragOpenProgressThreshold = 0.3f
+private const val DragOpenProgressThreshold = 0.14f  // 与参考项目一致（分母已改为播放条顶边距离）
 private const val DragOpenFlingVelocity = -900f
 private const val DragCancelFlingVelocity = 600f
 

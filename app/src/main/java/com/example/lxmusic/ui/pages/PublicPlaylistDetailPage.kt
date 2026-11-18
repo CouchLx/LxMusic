@@ -1,6 +1,5 @@
 package com.example.lxmusic.ui.pages
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -58,6 +57,7 @@ import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.example.lxmusic.data.search.PublicPlaylistProviders
 import com.example.lxmusic.model.SongInfo
+import com.example.lxmusic.ui.shelf.RecordShelfEntry
 import com.example.lxmusic.ui.components.SongContextMenuActions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -85,14 +85,15 @@ fun PublicPlaylistDetailPage(
     var loadMoreFailed by remember(playlist.platform, playlist.id) { mutableStateOf(false) }
     var noMore by remember(playlist.platform, playlist.id) { mutableStateOf(false) }
     var loadedPage by remember(playlist.platform, playlist.id) { mutableIntStateOf(0) }
-    var totalSongs by remember(playlist.platform, playlist.id) { mutableIntStateOf(0) }
+    var totalSongs by remember(playlist.platform, playlist.id) { mutableIntStateOf(playlist.trackCount) }
     var preparingAll by remember(playlist.platform, playlist.id) { mutableStateOf(false) }
     val listState = rememberLazyListState()
     // 与榜单详情共用同一个「显示序号」开关
     val prefs = remember { context.getSharedPreferences("rank_cache", android.content.Context.MODE_PRIVATE) }
     var showRankNumbers by remember { mutableStateOf(prefs.getBoolean("show_rank_numbers", true)) }
 
-    BackHandler { onBack() }
+    // 返回键统一交给 MainActivity 的全局 BackHandler（与榜单详情一致）：
+    // 页面自己再注册会抢在全局之前触发，导致播放器盖在上面时按返回先把本页关掉。
 
     fun load(page: Int, append: Boolean) {
         if (append) {
@@ -121,7 +122,7 @@ fun PublicPlaylistDetailPage(
                 result.songs.distinctBy { it.filePath }
             }
             songs = merged
-            totalSongs = if (result.total > 0) result.total else merged.size
+            totalSongs = if (result.total > 0) result.total else maxOf(merged.size, playlist.trackCount)
             loadedPage = page
             noMore = result.songs.isEmpty() || merged.size >= totalSongs ||
                 (playlist.platform == "kg" && result.songs.size < pageSize)
@@ -274,6 +275,14 @@ fun PublicPlaylistDetailPage(
                         Text(if (preparingAll) "加载全部…" else "播放全部", fontSize = 13.sp)
                     }
                     Spacer(modifier = Modifier.width(6.dp))
+                    RecordShelfEntry(
+                        songs = songs,
+                        onPlaySong = onPlaySong,
+                        currentPlayingPath = currentPlayingPath,
+                        isPlaying = isPlaying,
+                        collectionKey = playlist.name,
+                        compact = true
+                    )
                     // 与榜单详情同款：序号可开关
                     IconButton(onClick = {
                         showRankNumbers = !showRankNumbers

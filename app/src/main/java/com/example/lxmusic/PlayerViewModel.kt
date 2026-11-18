@@ -289,7 +289,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     // ==================== 播放操作 ====================
 
-    fun play(songs: List<SongInfo>, index: Int) {
+    fun play(songs: List<SongInfo>, index: Int, startPositionMs: Long = 0L) {
         val c = controller ?: run {
             pendingPlay = PendingPlay(songs, index)
             return
@@ -302,7 +302,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 currentPlayingPath = songs.getOrNull(safeIndex)?.filePath
             )
         }
-        c.setMediaItems(songs.map { it.toMediaItem() }, safeIndex, 0)
+        // startPositionMs：唱片架试听后「继续播放」，直接落到试听到的位置
+        c.setMediaItems(songs.map { it.toMediaItem() }, safeIndex, startPositionMs.coerceAtLeast(0L))
         c.prepare()
         c.play()
         saveFullState()
@@ -315,9 +316,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun playOnline(songs: List<SongInfo>, index: Int) {
+    fun playOnline(songs: List<SongInfo>, index: Int, startPositionMs: Long = 0L) {
         if (apiReady) {
-            play(songs, index)
+            play(songs, index, startPositionMs)
             return
         }
         val safeIndex = index.coerceIn(0, songs.lastIndex.coerceAtLeast(0))
@@ -333,7 +334,39 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 while (!apiReady) delay(100)
                 true
             } ?: false
-            if (ready) play(songs, index)
+            if (ready) play(songs, index, startPositionMs)
+        }
+    }
+
+    /**
+     * 只恢复队列与进度，不自动播放（私人漫游结束后回到原队列，保持暂停）。
+     */
+    fun restoreQueue(songs: List<SongInfo>, index: Int, positionMs: Long) {
+        val c = controller ?: return
+        if (songs.isEmpty()) return
+        val safeIndex = index.coerceIn(0, songs.lastIndex)
+        _uiState.update {
+            it.copy(
+                queue = songs,
+                currentIndex = safeIndex,
+                currentPlayingPath = songs.getOrNull(safeIndex)?.filePath
+            )
+        }
+        c.setMediaItems(songs.map { it.toMediaItem() }, safeIndex, positionMs.coerceAtLeast(0L))
+        c.prepare()
+        c.pause()
+        _progress.update { it.copy(positionMs = positionMs.coerceAtLeast(0L)) }
+    }
+
+    /** 在当前队列里直接切到第 index 首并从指定位置播放（唱片墙选中队列歌曲用，不重建队列） */
+    fun playQueueIndex(index: Int, startPositionMs: Long = 0L) {
+        val c = controller ?: return
+        val q = _uiState.value.queue
+        if (index !in q.indices) return
+        c.seekTo(index, startPositionMs.coerceAtLeast(0L))
+        c.play()
+        _uiState.update {
+            it.copy(currentIndex = index, currentPlayingPath = q.getOrNull(index)?.filePath)
         }
     }
 
@@ -477,6 +510,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         runCatching { controller?.playbackParameters = params }
     }
 
+    /** 只恢复播放，不做播放/暂停切换（唱片架关闭后回到原状态用） */
+    fun resumePlayback() {
+        val c = controller ?: return
+        if (!c.isPlaying) c.play()
+    }
+
     fun seekTo(positionMs: Long) {
         val c = controller ?: return
         c.seekTo(positionMs)
@@ -535,6 +574,16 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         c.removeMediaItem(removeIndex)
+    }
+
+    /** 私人漫游补货：把新一批推荐追加到队尾（已在队列里的跳过） */
+    fun appendToQueue(songs: List<SongInfo>) {
+        if (songs.isEmpty()) return
+        val existing = _uiState.value.queue.map { it.filePath }.toHashSet()
+        val toAdd = songs.filter { existing.add(it.filePath) }
+        if (toAdd.isEmpty()) return
+        _uiState.update { it.copy(queue = it.queue + toAdd) }
+        controller?.addMediaItems(toAdd.map { it.toMediaItem() })
     }
 
     fun addToQueueNext(song: SongInfo) {

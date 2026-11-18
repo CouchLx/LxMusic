@@ -1,6 +1,5 @@
 package com.example.lxmusic.ui.pages
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -56,6 +55,7 @@ import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.example.lxmusic.data.search.PublicAlbumProviders
 import com.example.lxmusic.model.SongInfo
+import com.example.lxmusic.ui.shelf.RecordShelfEntry
 import com.example.lxmusic.ui.components.SongContextMenuActions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -109,7 +109,8 @@ fun PublicAlbumDetailPage(
         }
     }
 
-    BackHandler { onBack() }
+    // 返回键统一交给 MainActivity 的全局 BackHandler（与榜单详情一致）：
+    // 页面自己再注册会抢在全局之前触发，导致播放器盖在上面时按返回先把本页关掉。
 
     fun load(targetPage: Int, append: Boolean) {
         if (append) {
@@ -296,6 +297,14 @@ fun PublicAlbumDetailPage(
                         Text(if (preparingAll) "加载全部…" else "播放全部", fontSize = 13.sp)
                     }
                     Spacer(modifier = Modifier.width(6.dp))
+                    RecordShelfEntry(
+                        songs = songs,
+                        onPlaySong = onPlaySong,
+                        currentPlayingPath = currentPlayingPath,
+                        isPlaying = isPlaying,
+                        collectionKey = albumName,
+                        compact = true
+                    )
                     IconButton(onClick = {
                         showRankNumbers = !showRankNumbers
                         prefs.edit().putBoolean("show_rank_numbers", showRankNumbers).apply()

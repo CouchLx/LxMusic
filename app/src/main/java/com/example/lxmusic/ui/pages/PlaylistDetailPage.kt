@@ -115,6 +115,7 @@ import com.example.lxmusic.UserPlaylistEntity
 import com.example.lxmusic.UserPlaylistItem
 import com.example.lxmusic.model.SongInfo
 import com.example.lxmusic.ui.components.SongContextMenuActions
+import com.example.lxmusic.ui.shelf.RecordShelfEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -508,6 +509,15 @@ fun PlaylistDetailPage(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(if (isLoadingAll) "加载中..." else "播放全部", fontWeight = FontWeight.SemiBold)
                                 }
+
+                                RecordShelfEntry(
+                                    songs = songs,
+                                    onPlaySong = onPlaySong,
+                                    currentPlayingPath = currentPlayingPath,
+                                    isPlaying = isPlaying,
+                                    collectionKey = playlist.listname.orEmpty(),
+                                    compact = true
+                                )
 
                                 FilledTonalIconButton(
                                     onClick = { selectMode = true },
@@ -1315,6 +1325,15 @@ fun SearchPlaylistDetailPage(
                                     Text(if (isLoadingAll) "加载中..." else "播放全部", fontWeight = FontWeight.SemiBold)
                                 }
 
+                                RecordShelfEntry(
+                                    songs = songs,
+                                    onPlaySong = onPlaySong,
+                                    currentPlayingPath = currentPlayingPath,
+                                    isPlaying = isPlaying,
+                                    collectionKey = playlistName,
+                                    compact = true
+                                )
+
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     // 收藏歌单（与播放器同款 ❤）
                                     IconButton(
@@ -2019,6 +2038,15 @@ fun CollectionDetailPage(
                                     Spacer(Modifier.width(6.dp))
                                     Text("播放全部", fontWeight = FontWeight.SemiBold)
                                 }
+
+                                RecordShelfEntry(
+                                    songs = songs,
+                                    onPlaySong = onPlaySong,
+                                    currentPlayingPath = currentPlayingPath,
+                                    isPlaying = isPlaying,
+                                    collectionKey = playlistName,
+                                    compact = true
+                                )
 
                                 // 批量管理入口（纯图标按键）
                                 FilledTonalIconButton(

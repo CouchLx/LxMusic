@@ -214,7 +214,7 @@ fun MiniPlayerBar(
     var flightBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(flightModel) {
         val request = ImageRequest.Builder(context)
-            .data(flightModel).size(512).allowHardware(false).build()
+            .data(flightModel).size(800).allowHardware(false).build()
         val result = context.imageLoader.execute(request)
         flightBitmap = (result as? SuccessResult)?.drawable?.toBitmap()?.asImageBitmap()
     }

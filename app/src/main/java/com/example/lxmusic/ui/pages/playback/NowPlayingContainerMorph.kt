@@ -11,11 +11,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -49,6 +51,9 @@ import androidx.compose.ui.unit.dp
 import com.example.lxmusic.ui.animation.SharedCoverFlightState
 import com.example.lxmusic.ui.animation.CoverFlightFrame
 import com.example.lxmusic.ui.theme.addSmoothedRoundRect
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -64,19 +69,64 @@ private const val OpenCardFadeSpan = 0.14f
 private const val CardColorSpan = 0.5f
 private const val MorphScrimAlpha = 0.16f
 /** Page content fades in over this slice of the morph; the card and artwork lead. */
-private const val ContentFadeStart = 0.45f
-private const val ContentFadeEnd = 0.78f
+private const val ContentFadeStart = 0.16f
+private const val ContentFadeEnd = 0.76f
 private val MorphCardColor = Color(0xFF19191C)
-/** How far a back gesture previews the close morph before the user commits. */
-private const val MorphBackPreviewDepth = 0.4f
+/** 圆角保持入口半径，直到最后 6% 才收成直角（参考项目同款） */
+private const val CornerHoldUntil = 0.94f
 
+/**
+ * 展开/收起唯一的进度来源。
+ *
+ * 拖动期间读手指值（[dragged]），松手后交给 [progress] 动画；渲染层统一读 [value]，
+ * MainActivity 的上拉/下拉都只调 [beginDrag]/[drag]/[finishDrag]，不再各自维护一份进度。
+ */
 @Stable
-internal class NowPlayingMorphState(initiallyVisible: Boolean) {
+internal class NowPlayingMorphState(
+    initiallyVisible: Boolean,
+    private val scope: CoroutineScope
+) {
     val progress = Animatable(if (initiallyVisible) 1f else 0f)
     var mounted by mutableStateOf(initiallyVisible)
         internal set
     var closing by mutableStateOf(false)
         internal set
+
+    private var dragged by mutableStateOf<Float?>(null)
+    /**
+     * 松手后的意向落脚（true=展开/弹回，false=收起）。
+     * showPlayerPage 是异步提交的，同帧内可能还没落定；有它就不依赖提交先后。
+     */
+    var keepOpen by mutableStateOf(initiallyVisible)
+        internal set
+    val dragging: Boolean get() = dragged != null
+    val value: Float get() = dragged ?: progress.value
+    val valueState: State<Float> = derivedStateOf { value }
+
+    fun beginDrag() {
+        if (dragged != null) return
+        closing = false
+        mounted = true
+        dragged = progress.value
+        scope.launch(start = CoroutineStart.UNDISPATCHED) { progress.stop() }
+    }
+
+    fun drag(delta: Float) {
+        dragged?.let { dragged = (it + delta).coerceIn(0f, 1f) }
+    }
+
+    /**
+     * 松手：把手指值写回 Animatable 再交回动画，目标（开/关）由 [keepOpen] 决定。
+     * UNDISPATCHED 保证在重组触发 effect 之前就写完，动画从手指位置接着走。
+     */
+    fun finishDrag(open: Boolean) {
+        val from = dragged ?: return
+        keepOpen = open
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            progress.snapTo(from)
+            dragged = null
+        }
+    }
 }
 
 /**
@@ -88,40 +138,30 @@ internal class NowPlayingMorphState(initiallyVisible: Boolean) {
 internal fun rememberNowPlayingMorphState(
     visible: Boolean,
     flight: SharedCoverFlightState?,
-    artwork: () -> ImageBitmap? = { null },
-    backProgress: () -> Float = { 0f }
+    artwork: () -> ImageBitmap? = { null }
 ): NowPlayingMorphState {
-    val state = remember { NowPlayingMorphState(initiallyVisible = visible) }
+    val scope = rememberCoroutineScope()
+    val state = remember { NowPlayingMorphState(initiallyVisible = visible, scope = scope) }
     val latestArtwork by rememberUpdatedState(artwork)
-    val dragging by remember(flight) {
-        derivedStateOf { flight?.dragOpenProgress != null }
-    }
-    LaunchedEffect(visible, dragging) {
+    LaunchedEffect(visible, state.dragging) {
         val linked = flight
-        if (dragging && !visible && linked != null) {
-            // the finger owns the morph; release hands over to the open or close branch
+        if (state.dragging) {
+            // 手指接管进度：挂载 + 交接封面，等松手再决定落脚
             state.closing = false
             state.mounted = true
-            linked.beginLinked(latestArtwork())
-            snapshotFlow { linked.dragOpenProgress }.collect { dragProgress ->
-                if (dragProgress != null) state.progress.snapTo(dragProgress.coerceIn(0f, 1f))
-            }
-        } else if (visible) {
+            linked?.beginLinked(latestArtwork())
+            return@LaunchedEffect
+        }
+        if (visible || state.keepOpen) {
             state.closing = false
             state.mounted = true
+            state.keepOpen = true
             if (state.progress.value < 1f) {
                 linked?.beginLinked(latestArtwork())
                 if (state.progress.value <= 0f) repeat(MorphSettleFrames) { withFrameNanos { } }
                 state.progress.animateTo(1f, spring(MorphOpenDamping, MorphOpenStiffness, 0.001f))
             }
             linked?.endLinked()
-            // a back gesture scrubs the close morph; commit continues it, cancel springs back
-            snapshotFlow { backProgress().coerceIn(0f, 1f) }.collect { back ->
-                if (back > 0f) {
-                    linked?.beginLinked(latestArtwork(), followMiniPlayerGeometry = true)
-                } else linked?.endLinked()
-                state.progress.snapTo(1f - back * MorphBackPreviewDepth)
-            }
         } else if (state.mounted) {
             state.closing = true
             linked?.beginLinked(latestArtwork(), followMiniPlayerGeometry = true)
@@ -148,13 +188,24 @@ internal fun NowPlayingContainerMorph(
     flight: SharedCoverFlightState?,
     capsuleInWindow: () -> Rect?,
     cardColor: Color = MorphCardColor,
+    // 播放条真实圆角（原生 20dp / 悬浮胶囊 32dp），由 MainActivity 传入
+    entryCornerPx: Float? = null,
+    /** 卡片底色要不要从播放条自身的填充色过渡（悬浮胶囊的玻璃色会让卡片先灰一下） */
+    useEntryColor: Boolean = true,
+    /**
+     * 共享封面走直线插值而不是弧线。
+     * 直线插值时「封面矩形」始终是「卡片矩形」的凸组合 → 永远完整地待在卡片内（用户要的「完整缩放」）；
+     * 弧线的横向 ease-out 会比卡片长得快，封面会戳到卡片外面。
+     */
+    linearCover: Boolean = false,
+    /** 内容显影起点（默认 ContentFadeStart）。黑胶/唱片机页面整页是圆盘，小卡片里裁切很难看，传更大的值让它晚点显影 */
+    contentFadeStart: Float? = null,
     content: @Composable () -> Unit
 ) {
-    val progress = morph.progress
-    val progressState = remember(progress) { progress.asState() }
-    val startColor = { flight?.miniPlayerContainerColor ?: Color.Unspecified }
+    val progressState = morph.valueState
+    val startColor = { if (useEntryColor) flight?.miniPlayerContainerColor ?: Color.Unspecified else Color.Unspecified }
     LaunchedEffect(flight) {
-        snapshotFlow { progress.value }.collect { flight?.nowPlayingMorphProgress = it }
+        snapshotFlow { progressState.value }.collect { flight?.nowPlayingMorphProgress = it }
     }
     DisposableEffect(flight, progressState) {
         val owner = flight
@@ -167,8 +218,7 @@ internal fun NowPlayingContainerMorph(
         }
     }
     val density = LocalDensity.current
-    val capsuleCornerPx = with(density) { 22.dp.toPx() }
-    val cardCornerPx = with(density) { 40.dp.toPx() }
+    val cornerStartPx = entryCornerPx ?: with(density) { 22.dp.toPx() }
     val geometry = remember { MorphGeometry() }
     val coverPath = remember { Path() }
     Box(
@@ -176,12 +226,12 @@ internal fun NowPlayingContainerMorph(
             .fillMaxSize()
             .onGloballyPositioned { geometry.origin = it.positionInWindow() }
             .drawBehind {
-                val p = progress.value.coerceIn(0f, 1f)
+                val p = morph.value.coerceIn(0f, 1f)
                 if (p >= 0.999f) return@drawBehind
                 val scrim = MorphScrimAlpha * p
                 if (scrim > 0f) drawRect(Color.Black.copy(alpha = scrim))
                 val card = geometry.card(p, size, capsuleInWindow())
-                val corner = morphCorner(p, capsuleCornerPx, cardCornerPx)
+                val corner = morphCorner(p, cornerStartPx)
                 val fadeSpan = if (morph.closing) CloseCardFadeSpan else OpenCardFadeSpan
                 val cardAlpha = smoothStep(p / fadeSpan)
                 val color = startColor().let { start ->
@@ -203,26 +253,24 @@ internal fun NowPlayingContainerMorph(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    val p = progress.value.coerceIn(0f, 1f)
+                    val p = morph.value.coerceIn(0f, 1f)
                     if (p >= 0.999f) {
-                        geometry.scale = 1f
                         geometry.translation = Offset.Zero
                         return@graphicsLayer
                     }
                     val card = geometry.card(p, size, capsuleInWindow())
-                    val scale = (card.width / size.width).coerceAtLeast(0.01f)
-                    transformOrigin = TransformOrigin(0f, 0f)
-                    scaleX = scale
-                    scaleY = scale
+                    // 参考项目做法：内容按整屏布局一次不缩放，只移动/裁剪窗口。
+                    // 这样文字、歌词、AndroidView 背景都不会被压成缩略图。
                     translationX = card.left
                     translationY = card.top
-                    alpha = ((p - ContentFadeStart) / (ContentFadeEnd - ContentFadeStart)).coerceIn(0f, 1f)
+                    val fadeStart = contentFadeStart ?: ContentFadeStart
+                    alpha = ((p - fadeStart) / (ContentFadeEnd - fadeStart)).coerceIn(0f, 1f)
                     shape = MorphCardShape(
-                        bottom = card.height / scale,
-                        cornerPx = morphCorner(p, capsuleCornerPx, cardCornerPx) / scale
+                        width = card.width,
+                        height = card.height,
+                        cornerPx = morphCorner(p, cornerStartPx)
                     )
                     clip = true
-                    geometry.scale = scale
                     geometry.translation = Offset(card.left, card.top)
                 }
                 .onPlaced { geometry.content = it }
@@ -231,7 +279,7 @@ internal fun NowPlayingContainerMorph(
         }
         Canvas(Modifier.fillMaxSize()) {
             if (flight?.linked != true || !flight.hidesCovers) return@Canvas
-            val p = progress.value.coerceIn(0f, 1f)
+            val p = morph.value.coerceIn(0f, 1f)
             val bitmap = flight.linkedBitmap ?: return@Canvas
             val from = flight.miniCoverBounds?.translate(-geometry.origin) ?: return@Canvas
             // 目标 = 封面在页面里的“最终”矩形（页面本地坐标；p=1 时等于屏幕坐标）。
@@ -240,10 +288,17 @@ internal fun NowPlayingContainerMorph(
             // 封面始终是完整比例，从播放条那个高度匀速长大，不往下掉。
             val host = geometry.content ?: return@Canvas
             val to = flight.targetFrameIn(host) ?: return@Canvas
-            val rect = lerp(from, to.bounds, p)
+            // 参考项目的共享元素轨迹：横向先快后慢（ease-out），纵向与尺寸先慢后快（ease-in），
+            // 观感是「先往里收一点，再抬起来」，不是简单的直线插值。
+            // 悬浮胶囊例外：走直线插值，保证封面矩形始终在卡片矩形内（完整缩放、不被裁掉）。
+            val rect = if (linearCover) lerp(from, to.bounds, p) else sheetElementArc(from, to.bounds, p)
             if (rect.width <= 1f || rect.height <= 1f) return@Canvas
-            val corner = lerp(flight.miniCoverCornerPx, to.cornerPx, p)
-            val smoothing = lerp(flight.miniCoverCornerSmoothing, to.cornerSmoothing, p)
+            // 目标端是圆（圆盘盘芯 / 圆形专辑）：全程按圆画，别让中间阶段是个圆角方块
+            val targetCircular = to.cornerPx >= minOf(to.bounds.width, to.bounds.height) / 2f - 1f
+            val corner = if (targetCircular) minOf(rect.width, rect.height) / 2f
+            else lerp(flight.miniCoverCornerPx, to.cornerPx, p)
+            val smoothing = if (targetCircular) 1f
+            else lerp(flight.miniCoverCornerSmoothing, to.cornerSmoothing, p)
             coverPath.reset()
             coverPath.addSmoothedRoundRect(rect.width, rect.height, corner, smoothing)
             translate(rect.left, rect.top) {
@@ -262,20 +317,15 @@ internal fun NowPlayingContainerMorph(
     }
 }
 
-private const val CornerTaperStart = 0.8f
-
 private fun smoothStep(t: Float): Float {
     val x = t.coerceIn(0f, 1f)
     return x * x * (3f - 2f * x)
 }
 
-/** Grows from the capsule radius, then tapers to square so the hand-off to the page is seamless. */
-private fun morphCorner(p: Float, capsulePx: Float, cardPx: Float): Float =
-    if (p < CornerTaperStart) {
-        lerp(capsulePx, cardPx, p / CornerTaperStart)
-    } else {
-        lerp(cardPx, 0f, (p - CornerTaperStart) / (1f - CornerTaperStart))
-    }
+/** 保持入口圆角直到 [CornerHoldUntil]，最后收成直角，交还给页面时不跳变。 */
+private fun morphCorner(p: Float, entryPx: Float): Float =
+    if (p < CornerHoldUntil) entryPx
+    else lerp(entryPx, 0f, (p - CornerHoldUntil) / (1f - CornerHoldUntil))
 
 /** Card tint from the cover seed, kept dark so white chrome and text read on it immediately. */
 internal fun nowPlayingMorphCardColor(seedHex: String?): Color {
@@ -296,8 +346,13 @@ private class MorphGeometry {
 
     fun card(p: Float, size: Size, capsuleInWindow: Rect?): Rect {
         val capsule = capsuleInWindow?.translate(-origin)
-            // a recreated player has no capsule in this viewport, so fade without inventing one
-            ?: Rect(Offset.Zero, size)
+            // 重建场景没有播放条可参考：从底部一条小卡长出来，而不是整屏淡入
+            ?: Rect(
+                left = 26.dp.value * (size.width / 393f),
+                top = size.height - 64.dp.value * (size.width / 393f),
+                right = size.width - 26.dp.value * (size.width / 393f),
+                bottom = size.height
+            )
         return Rect(
             left = lerp(capsule.left, 0f, p),
             top = lerp(capsule.top, 0f, p),
@@ -323,12 +378,15 @@ private class MorphGeometry {
 }
 
 private class MorphCardShape(
-    private val bottom: Float,
+    private val width: Float,
+    private val height: Float,
     private val cornerPx: Float
 ) : Shape {
     override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
-        val rect = Rect(0f, 0f, size.width, bottom.coerceIn(1f, size.height))
-        val corner = cornerPx.coerceAtMost(minOf(rect.width, rect.height) / 2f)
+        val w = width.coerceIn(1f, size.width)
+        val h = height.coerceIn(1f, size.height)
+        val rect = Rect(0f, 0f, w, h)
+        val corner = cornerPx.coerceAtMost(minOf(w, h) / 2f)
         return Outline.Rounded(RoundRect(rect, CornerRadius(corner)))
     }
 }
@@ -346,5 +404,20 @@ private fun lerp(start: Rect, stop: Rect, fraction: Float): Rect = Rect(
     right = lerp(start.right, stop.right, fraction),
     bottom = lerp(start.bottom, stop.bottom, fraction)
 )
+
+/**
+ * 共享元素弧线（移植参考项目 playerSheetElementArc）：
+ * 横向 ease-out（先快后慢），纵向与尺寸 ease-in（先慢后快）。
+ */
+private fun sheetElementArc(start: Rect, end: Rect, progress: Float): Rect {
+    val p = progress.coerceIn(0f, 1f)
+    val horizontal = 1f - (1f - p) * (1f - p)
+    val vertical = p * p
+    val left = lerp(start.left, end.left, horizontal)
+    val top = lerp(start.top, end.top, vertical)
+    val width = lerp(start.width, end.width, vertical)
+    val height = lerp(start.height, end.height, vertical)
+    return Rect(left, top, left + width, top + height)
+}
 
 private fun lerp(start: Float, stop: Float, fraction: Float): Float = start + (stop - start) * fraction

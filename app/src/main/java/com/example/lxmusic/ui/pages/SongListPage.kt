@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import com.example.lxmusic.ui.components.SongContextMenuActions
+import com.example.lxmusic.ui.shelf.RecordShelfEntry
 import com.example.lxmusic.model.SongInfo
 import kotlinx.coroutines.launch
 
@@ -61,7 +62,9 @@ fun SongListPage(
     currentPlayingPath: String? = null,
     isPlaying: Boolean = false,
     onLocateReady: (() -> Unit) -> Unit = {},
-    onAddToQueueNext: (SongInfo) -> Unit = {}
+    onAddToQueueNext: (SongInfo) -> Unit = {},
+    onToggleLike: ((SongInfo) -> Unit)? = null,
+    isLiked: (SongInfo) -> Boolean = { false }
 ) {
     val scope = rememberCoroutineScope()
 
@@ -170,6 +173,17 @@ fun SongListPage(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("播放全部")
                         }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        // CD 唱片架：全屏 3D 唱片架，浏览时可试听，确认后进主播放队列
+                        RecordShelfEntry(
+                            songs = songs,
+                            onPlaySong = onPlaySong,
+                            currentPlayingPath = currentPlayingPath,
+                            isPlaying = isPlaying,
+                            onToggleLike = onToggleLike,
+                            isLiked = isLiked,
+                            collectionKey = title
+                        )
                     }
                 }
                 itemsIndexed(songs, key = { _, song -> song.filePath }) { index, song ->
@@ -225,4 +239,5 @@ fun SongListPage(
             }
         }
     }
+
 }

@@ -110,6 +110,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CalendarToday
@@ -120,13 +121,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.outlined.Explore
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Person
-import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Repeat
@@ -138,7 +133,6 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicOff
 import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -156,6 +150,7 @@ import androidx.compose.material.icons.filled.Cloud
 import com.example.lxmusic.ui.components.ThemeModeToggleButton
 import com.example.lxmusic.ui.components.ThemeRevealOverlay
 import com.example.lxmusic.ui.components.AppUpdateDialog
+import com.example.lxmusic.ui.components.ACCOUNT_PLATFORM_NETEASE
 import com.example.lxmusic.ui.components.topbar.ModernHomeTopBar
 import com.example.lxmusic.ui.components.topbar.ModernMineTopBar
 import com.example.lxmusic.ui.components.topbar.TopBarFadeTailHeight
@@ -265,6 +260,7 @@ import com.example.lxmusic.ui.theme.LxMusicTheme
 import com.example.lxmusic.model.SongInfo
 import com.example.lxmusic.ui.components.FloatingBottomBar
 import com.example.lxmusic.ui.components.BottomBarTab
+import com.example.lxmusic.ui.icons.NavIcons
 import com.example.lxmusic.data.LiquidGlassSettings
 import com.example.lxmusic.data.SettingsRepository
 import com.example.lxmusic.ui.components.LocalMusicSidePanel
@@ -276,6 +272,8 @@ import com.kyant.backdrop.backdrops.layerBackdrop
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import com.example.lxmusic.ui.pages.HomePage
+import com.example.lxmusic.ui.pages.NeteaseHomePage
+import com.example.lxmusic.data.roaming.PersonalRoamingController
 import com.example.lxmusic.ui.pages.DiscoverPage
 import com.example.lxmusic.ui.pages.RankDetailPage
 import com.example.lxmusic.ui.pages.SearchPage
@@ -289,6 +287,7 @@ import com.example.lxmusic.ui.animation.SharedCoverFlightState
 import com.example.lxmusic.ui.animation.shouldOpenNowPlayingFromDrag
 import com.example.lxmusic.ui.pages.playback.NowPlayingContainerMorph
 import com.example.lxmusic.ui.pages.playback.rememberNowPlayingMorphState
+import com.example.lxmusic.ui.shelf.ShelfPlaybackBridge
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
@@ -718,6 +717,8 @@ fun AppScaffold(
     val isLandscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
         android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val playerViewModel: PlayerViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    // 私人漫游：会话级控制器，切 tab 不中断漫游
+    val roamingController = remember { PersonalRoamingController(context.applicationContext, playerViewModel, scope) }
     val uiState by playerViewModel.uiState.collectAsState()
     val audioFormat by playerViewModel.audioFormat.collectAsState()
     // 未激活 = 「本地/插件模式」：有在线服务（BFF）但未激活时启用精简界面。
@@ -749,13 +750,13 @@ fun AppScaffold(
         }
     } else null
     val bottomTabs = if (isGuest) listOf(
-        BottomBarTab(11, Icons.Filled.Search, Icons.Outlined.Search, stringResource(R.string.title_search)),
-        BottomBarTab(1, Icons.Filled.Explore, Icons.Outlined.Explore, stringResource(R.string.nav_discover)),
-        BottomBarTab(2, Icons.Filled.Person, Icons.Outlined.Person, stringResource(R.string.nav_mine))
+        BottomBarTab(11, NavIcons.SearchFilled, NavIcons.SearchOutline, stringResource(R.string.title_search)),
+        BottomBarTab(1, NavIcons.DiscoverFilled, NavIcons.DiscoverOutline, stringResource(R.string.nav_discover)),
+        BottomBarTab(2, NavIcons.MineFilled, NavIcons.MineOutline, stringResource(R.string.nav_mine))
     ) else listOf(
-        BottomBarTab(0, Icons.Filled.Home, Icons.Outlined.Home, stringResource(R.string.nav_home)),
-        BottomBarTab(1, Icons.Filled.Search, Icons.Outlined.Search, stringResource(R.string.nav_discover)),
-        BottomBarTab(2, Icons.Filled.Person, Icons.Outlined.Person, stringResource(R.string.nav_mine))
+        BottomBarTab(0, NavIcons.HomeFilled, NavIcons.HomeOutline, stringResource(R.string.nav_home)),
+        BottomBarTab(1, NavIcons.DiscoverFilled, NavIcons.DiscoverOutline, stringResource(R.string.nav_discover)),
+        BottomBarTab(2, NavIcons.MineFilled, NavIcons.MineOutline, stringResource(R.string.nav_mine))
     )
     var settingsSubPage by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(selectedTab) { if (selectedTab != 12) settingsSubPage = null }
@@ -774,63 +775,87 @@ fun AppScaffold(
     // 若把位图放在它内部（remember），收起时来不及重新加载 → 收起就没有封面飞行
     //（对应 NeriPlayer 的 RetainedPlaybackCoverBitmapCache）
     var flightArtwork by remember { mutableStateOf<ImageBitmap?>(null) }
-    // 播放页内下拉收起的手指进度（0=不动，1=预览到底）
-    var pageDownDragFraction by remember { mutableFloatStateOf(0f) }
+    // 歌词页状态：由播放器翻页器驱动，此处仅作进程重建时的持久化镜像
+    var showLyricsPage by rememberSaveable { mutableStateOf(false) }
+    // 播放器翻页器：封面 0 / 歌词 1。私人漫游是封面页右滑拉出的侧页，不占页码。
+    val playerCoverPageIndex = 0
+    val playerLyricsPageIndex = 1
+    val playerPagerState = rememberPagerState(
+        initialPage = if (showLyricsPage) playerLyricsPageIndex else playerCoverPageIndex
+    ) { 2 }
+    // 展开/收起唯一进度源：拖动时读手指值、松手交给 spring / 250ms；
+    // 上拉展开、下拉收起、返回键收起全部走这一个状态机。
+    // 现代悬浮胶囊（右下角圆形胶囊）：封面**完整缩放**（直线插值保证不飞出卡片），
+    // 卡面直接用深色纸面（胶囊的玻璃色会让卡片先灰一下）。原生主题保持原有表现不变。
+    val settingsRepository = remember { SettingsRepository(context) }
+    val capsuleMorphEntry = settingsRepository.floatingBottomBar
+    // 歌词页收起时封面页在翻页器左边、并不在屏幕上，
+    // 共享封面的落点会跑到屏幕外（就是「专辑图飞在卡片外面」）——胶囊模式下这一程不飞。
+    val lyricsPageActive = playerPagerState.currentPage != playerCoverPageIndex
+    val morphFlight = if (capsuleMorphEntry && lyricsPageActive) null else coverFlight
     val playerMorph = rememberNowPlayingMorphState(
         visible = showPlayerPage,
-        flight = coverFlight,
-        artwork = { flightArtwork },
-        backProgress = { pageDownDragFraction }
+        flight = morphFlight,
+        artwork = { flightArtwork }
     )
+    // 重背景（GL 网格）：胶囊展开时等动画落地再挂，否则 GL 首帧会把展开动画堵住（点了半天才动）
+    var heavyEffectsReady by remember { mutableStateOf(!capsuleMorphEntry) }
+    LaunchedEffect(capsuleMorphEntry) {
+        if (!capsuleMorphEntry) {
+            heavyEffectsReady = true
+            return@LaunchedEffect
+        }
+        // 迟滞：展开动画落地后才挂 GL 网格；收起要等几乎完全闭合才拆，
+        // 否则收起过程中背景会在「网格↔渐变」之间切一次，看起来又是一次闪烁。
+        androidx.compose.runtime.snapshotFlow { playerMorph.value }.collect { v ->
+            val ready = when {
+                v >= .995f -> true
+                v <= .05f -> false
+                else -> heavyEffectsReady
+            }
+            if (heavyEffectsReady != ready) heavyEffectsReady = ready
+        }
+    }
     // 播放器菜单 → 独立页面（声音设置 / 均衡器）：覆盖在播放器之上，返回键优先关闭
     var showSoundSettingsPage by rememberSaveable { mutableStateOf(false) }
     var showEqualizerPage by rememberSaveable { mutableStateOf(false) }
-    // 歌词页状态：由播放器翻页器驱动，此处仅作进程重建时的持久化镜像
-    var showLyricsPage by rememberSaveable { mutableStateOf(false) }
-    // 播放器 ↔ 歌词页翻页器（0=播放页 1=歌词页）。hoist 到 MainActivity 层：
-    // 收起再展开、进程重建（rememberPagerState 自带 Saver）都恢复上次所在页
-    val playerPagerState = rememberPagerState(initialPage = if (showLyricsPage) 1 else 0) { 2 }
-    LaunchedEffect(playerPagerState.currentPage) {
-        showLyricsPage = playerPagerState.currentPage == 1
+    // 「我的」账号卡当前平台（kugou / netease）：顶栏切换胶囊与卡片共用同一个状态，
+    // 持久化在 mine_state/account_card_selected，重启后保持上次选择。
+    // 声明放在播放器页索引之前：页数/页码都由它直接推导，切平台当帧就是新值，
+    // 不会再出现「先按旧页数滚一次、下一帧页数才变」导致停在漫游/歌词页的问题。
+    var mineAccountPlatform by rememberSaveable {
+        mutableStateOf(
+            context.getSharedPreferences("mine_state", android.content.Context.MODE_PRIVATE)
+                .getString("account_card_selected", "kugou") ?: "kugou"
+        )
+    }
+    fun setMineAccountPlatform(platform: String) {
+        if (platform == mineAccountPlatform) return
+        mineAccountPlatform = platform
+        context.getSharedPreferences("mine_state", android.content.Context.MODE_PRIVATE)
+            .edit().putString("account_card_selected", platform).apply()
+    }
+    // 切平台：回到封面页，避免下次打开播放器停在歌词页
+    LaunchedEffect(mineAccountPlatform) {
+        if (playerPagerState.currentPage != playerCoverPageIndex) {
+            playerPagerState.scrollToPage(playerCoverPageIndex)
+        }
+    }
+    LaunchedEffect(playerPagerState.currentPage, playerLyricsPageIndex) {
+        showLyricsPage = playerPagerState.currentPage == playerLyricsPageIndex
     }
     // 收起落地后把翻页器复位到封面页：
     // 否则下次展开会停在歌词页，共享封面的落点（在封面页上）跑到屏外，展开动画就错位了。
     // 等 morph 完全卸载再复位，收起过程不会突然翻页。
     LaunchedEffect(showPlayerPage, playerMorph.mounted) {
-        if (!showPlayerPage && !playerMorph.mounted && playerPagerState.currentPage != 0) {
-            playerPagerState.scrollToPage(0)
+        if (!showPlayerPage && !playerMorph.mounted && playerPagerState.currentPage != playerCoverPageIndex) {
+            playerPagerState.scrollToPage(playerCoverPageIndex)
         }
     }
     // 播放器展开/收起共用的屏幕高度
     val configuration = LocalConfiguration.current
     val screenHeightPx = with(LocalDensity.current) { configuration.screenHeightDp.dp.toPx() }
     val screenWidthPx = with(LocalDensity.current) { configuration.screenWidthDp.dp.toPx() }
-    // 播放器展开/收起统一偏移（0=完全展开，screenHeightPx=完全收起）：
-    // mini 播放条上拉跟手展开 / 播放器内下拉跟手收起共用同一状态。
-    // 初始为收起态（打开软件不展开播放器）
-    val playerRevealY = remember { Animatable(screenHeightPx) }
-    // 跟手期间直接写这里（同步、零协程），松手后再提交给 Animatable。
-    // 原来每个 pointer delta 都 launch 一个 snapTo 协程，高刷屏快速拖动时会排队滞后，
-    // 表现为“手指和面板之间有一点点延迟”，按住时不够自由。
-    var draggedRevealY by remember { mutableStateOf<Float?>(null) }
-    fun currentRevealY(): Float = draggedRevealY ?: playerRevealY.value
-    var isMiniBarDragging by remember { mutableStateOf(false) }
-    // 播放页内向下拖动收起（与上拉展开是两个手势入口，必须都算“进行中”）
-    var isPlayerDownDragging by remember { mutableStateOf(false) }
-    // 页面展开/收起动画进行中（组合条件用布尔驱动，避免每帧读取动画值导致整树重组）
-    var isRevealAnimating by remember { mutableStateOf(false) }
-
-    // 旋转（横竖屏切换）时校正收起态偏移：
-    // playerRevealY 是 remember 缓存的 Animatable，旋转后仍保留旧方向的屏幕高度
-    // （竖屏 2670 ↔ 横屏 900），使收起态偏移 ≠ 新屏高 → 底栏的 translationY 计算出
-    // 非 0 值被推出屏幕（表现为旋转后底栏消失）。这里在屏幕高度变化、且处于静止
-    // 收起态时立即 snap 到新屏高，从数据层面根治。
-    LaunchedEffect(screenHeightPx) {
-        if (!showPlayerPage && !isMiniBarDragging && !isRevealAnimating) {
-            draggedRevealY = null
-            playerRevealY.snapTo(screenHeightPx)
-        }
-    }
     var previousTab by rememberSaveable { mutableIntStateOf(0) }
 
     // 进程重建后，依赖非持久化数据的子页面（4-7 每日/历史/风格列表、8-10 歌单详情）
@@ -867,6 +892,8 @@ fun AppScaffold(
     val playMode = uiState.playMode
 
     var showPlaylistSheet by remember { mutableStateOf(false) }
+    // 播放队列的 CD 唱片墙（从播放列表面板顶栏进入）
+    var showQueueShelf by remember { mutableStateOf(false) }
     // 在线歌词（播放页与全屏歌词页共享）
     // 关键优化：使用 remember(currentSong?.filePath) 同步命中内存与磁盘缓存（0ms 响应，首帧即有歌词，彻底告别“正在加载”卡顿）
     val initialCachedLyric = remember(currentSong?.filePath) {
@@ -999,6 +1026,8 @@ fun AppScaffold(
     var searchPlaylistAuthor by rememberSaveable { mutableStateOf("") }
     var searchPlaylistGid by rememberSaveable { mutableStateOf("") }
     var dailySongsForList by remember { mutableStateOf<List<DailyRecommendSong>>(emptyList()) }
+    // 网易云每日推荐的列表页数据（非空时 tab 4 优先展示它，酷狗入口会把它清空）
+    var neteaseDailyForList by remember { mutableStateOf<List<SongInfo>?>(null) }
     var vipSongsForList by remember { mutableStateOf<List<SongInfo>>(emptyList()) }
     var millionSongsForList by remember { mutableStateOf<List<SongInfo>>(emptyList()) }
     var networkSongsForList by remember { mutableStateOf<List<SongInfo>>(emptyList()) }
@@ -1030,6 +1059,16 @@ fun AppScaffold(
     LaunchedEffect(mineListState.firstVisibleItemScrollOffset) {
         mineScrollY = mineListState.firstVisibleItemScrollOffset
     }
+    val neteaseLoggedIn = remember(neteaseVersion, mineAccountPlatform) {
+        NeteaseAuth.isLoggedIn(context)
+    }
+    // 切换平台会改变播放器页数与页码顺序（网易云多一页漫游），
+    // 统一回到封面页，否则下次打开播放器会停在漫游/歌词页
+    LaunchedEffect(mineAccountPlatform) {
+        if (playerPagerState.currentPage != playerCoverPageIndex) {
+            playerPagerState.scrollToPage(playerCoverPageIndex)
+        }
+    }
     // 歌单详情列表滚动保留（返回重进同歌单不丢位置；换歌单回到顶部）
     var playlistDetailScrollIndex by rememberSaveable { mutableIntStateOf(0) }
     var playlistDetailScrollOffset by rememberSaveable { mutableIntStateOf(0) }
@@ -1056,7 +1095,6 @@ fun AppScaffold(
     }
     var selectedCollectionPlaylistId by rememberSaveable { mutableLongStateOf(0L) }
     var onlineSongList by remember { mutableStateOf<List<SongInfo>>(emptyList()) }
-    val settingsRepository = remember { SettingsRepository(context) }
     val settingsPrefs = remember { context.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE) }
     val authPrefs = remember { context.getSharedPreferences("auth", android.content.Context.MODE_PRIVATE) }
     var blurNavBar by remember { mutableStateOf(settingsRepository.blurNavBar) }
@@ -1357,30 +1395,22 @@ fun AppScaffold(
     // 未激活时搜索是顶层 tab：不拦截系统返回，直接退出应用
     val backEnabled = showLoginPage || showNeteaseLoginPage || showRankDetail != null || showPublicPlaylist != null ||
         showPublicAlbum != null || showPlayerPage ||
+        // morph 已挂载但 showPlayerPage 还没落定（动画态/状态恢复）时也要接管返回键，
+        // 否则播放器可见却没人处理返回，会直接退出到桌面
+        playerMorph.mounted ||
         showSoundSettingsPage || showEqualizerPage ||
         selectedTab == 3 || selectedTab in 4..7 || selectedTab in 8..10 ||
         (selectedTab == 11 && !isGuest) ||
         selectedTab == 12 || selectedTab == 13 || selectedTab == 14 ||
         selectedTab == 15 || selectedTab == 16 || selectedTab == 17 || selectedTab == 18
-    // 展开/收起播放器：页面状态在清动画标记之前提交（同一帧），
-    // 避免动画结束到 showPlayerPage 生效之间闪出底栏/迷你播放条
-    // 动画令牌：新的展开/收起/回弹会取消旧的 animateTo（CancellationException 会走 finally），
-    // 用令牌保证被取消的旧动画不会把 isRevealAnimating 提前清掉 ——
-    // 否则动画中途反打断时底栏/播放条会提前退出组合（表现为闪一下）
-    var revealAnimToken by remember { mutableIntStateOf(0) }
-    // 把手势期间累积的位移提交给 Animatable（松手时调用一次）
-    suspend fun commitDraggedReveal() {
-        val v = draggedRevealY ?: return
-        playerRevealY.snapTo(v)
-        draggedRevealY = null
-    }
-
     // 展开/收起只切状态：动画由 morph 自己跑（spring / 250ms）
     suspend fun expandPlayer(@Suppress("UNUSED_PARAMETER") fromY: Float? = null) {
+        playerMorph.keepOpen = true
         showPlayerPage = true
     }
 
     suspend fun collapsePlayer() {
+        playerMorph.keepOpen = false
         showPlayerPage = false
     }
 
@@ -1392,10 +1422,10 @@ fun AppScaffold(
             showEqualizerPage -> showEqualizerPage = false
             showSoundSettingsPage -> showSoundSettingsPage = false
             // 播放器在最上层：先处理播放器，避免一次返回先把下层榜单/歌单关掉
-            showPlayerPage -> {
-                // 返回键两级：歌词页先回播放页，播放页再收起（带滑出动画）
-                if (playerPagerState.currentPage == 1) {
-                    scope.launch { playerPagerState.animateScrollToPage(0) }
+            showPlayerPage || playerMorph.mounted -> {
+                // 返回键两级：非封面页（歌词/漫游）先回封面页，封面页再收起（带滑出动画）
+                if (playerPagerState.currentPage != playerCoverPageIndex) {
+                    scope.launch { playerPagerState.animateScrollToPage(playerCoverPageIndex) }
                 } else {
                     scope.launch { collapsePlayer() }
                 }
@@ -1458,6 +1488,23 @@ fun AppScaffold(
 
     // 播放在线歌曲 - 设置完整播放列表
     fun playOnlineSong(songs: List<SongInfo>, index: Int) = playerViewModel.playOnline(songs, index)
+
+    // 唱片架试听：浏览时临时压住主播放器，关闭架子后恢复，不改变队列。
+    // 入口分布在歌单/榜单/本地等多个页面，这里注册一次全局桥，页面不必逐层传回调。
+    // pauseMain 返回「是否真的暂停了」：没在播就返回 false，关闭架子不会去"恢复"一首本来没放的歌。
+    ShelfPlaybackBridge.pauseMain = {
+        if (playerViewModel.uiState.value.isPlaying) {
+            playerViewModel.playPause()
+            true
+        } else false
+    }
+    ShelfPlaybackBridge.resumeMain = {
+        playerViewModel.resumePlayback()
+    }
+    // 试听确认后从试听到的位置继续，而不是从头播
+    ShelfPlaybackBridge.playSongAt = { songs, index, startPositionMs ->
+        playerViewModel.playOnline(songs, index, startPositionMs)
+    }
 
     // 添加到下一首播放
     fun addToQueueNext(song: SongInfo) = playerViewModel.addToQueueNext(song)
@@ -1891,14 +1938,16 @@ fun AppScaffold(
                                     }
                                 }
                             },
-                            onRefresh = { homeClickRefresh?.invoke() },
-                            isRefreshing = isHomeRefreshing,
                             onSearch = {
                                 previousTab = selectedTab
                                 searchQuery = ""
                                 searchSelectedType = "song"
                                 selectedTab = 11
                             },
+                            // 网易云首页不显示左上角「顺序/心动/一键播放」
+                            showPlayCapsule = mineAccountPlatform != ACCOUNT_PLATFORM_NETEASE,
+                            // 网易云首页左上角标注平台名（原生主题同一逻辑在下方 TopAppBar 分支）
+                            platformLabel = if (mineAccountPlatform == ACCOUNT_PLATFORM_NETEASE) "网易云" else null,
                             backdrop = glassBackdrop,
                             liquidGlass = liquidGlass,
                             hasCustomWallpaper = backgroundImageUri != null,
@@ -1918,7 +1967,8 @@ fun AppScaffold(
                     } else {
                         TopAppBar(
                             title = {
-                                if (currentTab == 0) {
+                                // 网易云首页不显示「顺序/心动/一键播放」胶囊（与现代化主题一致）
+                                if (currentTab == 0 && mineAccountPlatform != ACCOUNT_PLATFORM_NETEASE) {
                                     var homePlayMode by remember { mutableIntStateOf(settingsRepository.homePlayMode) }
                                     var showModeSheet by remember { mutableStateOf(false) }
                                     val modeLabel = when (homePlayMode) { 1 -> "随机"; 2 -> "心动"; else -> "顺序" }
@@ -2097,9 +2147,16 @@ fun AppScaffold(
                                         }
                                     }
                                 } else if (currentTab == 2) {
-                                    // 「我的」标题固定，不随状态变化
+                                    // 「我的」标题固定；平台切换已移到账号卡右侧（见 MinePage）
                                     Text(
                                         text = "我的",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                } else if (currentTab == 0) {
+                                    // 网易云首页（上面那支已在非网易云时返回）：左上角标注平台名
+                                    Text(
+                                        text = "网易云",
                                         style = MaterialTheme.typography.titleLarge,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -2272,12 +2329,31 @@ fun AppScaffold(
                                 homeRecommendIndex = homeRecommendListState.firstVisibleItemIndex
                                 homeRecommendOffset = homeRecommendListState.firstVisibleItemScrollOffset
                             }
-                            HomePage(
+                            // 首页跟随「我的」页的平台切换：酷狗 = 现有首页，网易云 = 全新首页
+                            if (mineAccountPlatform == ACCOUNT_PLATFORM_NETEASE) {
+                                NeteaseHomePage(
+                                    topContentPadding = innerPadding.calculateTopPadding(),
+                                    onPlaySong = { songs, index -> playOnlineSong(songs, index) },
+                                    onTogglePlayPause = { playerViewModel.playPause() },
+                                    onOpenSongs = { songs ->
+                                        neteaseDailyForList = songs
+                                        selectedTab = 4
+                                    },
+                                    roamingController = roamingController,
+                                    currentPlayingPath = currentSong?.filePath,
+                                    isPlaying = isPlaying,
+                                    loginVersion = neteaseVersion,
+                                    hazeState = if (isModernTheme && backgroundImageUri != null) homeTopHazeState else null,
+                                    onLoginClick = { showNeteaseLoginPage = true }
+                                )
+                            } else {
+                                HomePage(
                                 topContentPadding = innerPadding.calculateTopPadding(),
                                 onPlaySong = { songs, index -> playOnlineSong(songs, index) },
                                 onAddToQueueNext = { song -> addToQueueNext(song) },
                                 onRankClick = { showRankDetail = it },
                                 onDailyClick = { songs ->
+                                    neteaseDailyForList = null
                                     dailySongsForList = songs
                                     selectedTab = 4
                                 },
@@ -2311,6 +2387,7 @@ fun AppScaffold(
                                 hazeState = if (isModernTheme && backgroundImageUri != null) homeTopHazeState else null,
                                 loginVersion = loginVersion
                             )
+                            }
                         }
                         1 -> {
                             LaunchedEffect(discoverListState.firstVisibleItemIndex, discoverListState.firstVisibleItemScrollOffset) {
@@ -2386,10 +2463,23 @@ fun AppScaffold(
                         } else MinePage(
                             loginVersion = loginVersion,
                             neteaseVersion = neteaseVersion,
+                            accountTab = mineAccountPlatform,
+                            onAccountPlatformChange = { setMineAccountPlatform(it) },
                             onLocalClick = { selectedTab = 3 },
                             onAvatarClick = { showLoginPage = true },
                             onNeteaseLoginClick = { showNeteaseLoginPage = true },
                             onNeteaseAuthChanged = { neteaseVersion++ },
+                            onNeteasePlaylistClick = { id, name, cover, count, creator ->
+                                // 复用公开歌单详情覆盖层：平台 wy + 登录态下走官方接口（私密歌单也能读）
+                                showPublicPlaylist = PublicPlaylistProviders.PublicPlaylist(
+                                    platform = "wy",
+                                    id = id.toString(),
+                                    name = name,
+                                    coverUrl = cover,
+                                    trackCount = count,
+                                    creator = creator
+                                )
+                            },
                             onManagePlaylists = { selectedTab = 15 },
                             onManageKugouPlaylists = {
                                 previousTab = selectedTab
@@ -2430,7 +2520,8 @@ fun AppScaffold(
                             locatePlayingSong = locatePlayingSong
                         )
                         4 -> {
-                            val songInfos = remember(dailySongsForList) {
+                            // 酷狗映射始终计算，避免 remember 出现在条件分支里破坏组合顺序
+                            val kugouSongInfos = remember(dailySongsForList) {
                                 dailySongsForList.map { song ->
                                     SongInfo(
                                         title = song.title,
@@ -2441,6 +2532,7 @@ fun AppScaffold(
                                     )
                                 }
                             }
+                            val songInfos = neteaseDailyForList ?: kugouSongInfos
                             SongListPage(
                                 title = stringResource(R.string.title_daily_recommend),
                                 songs = songInfos,
@@ -2449,7 +2541,9 @@ fun AppScaffold(
                                 currentPlayingPath = currentSong?.filePath,
                                 isPlaying = isPlaying,
                                 onLocateReady = { playlistLocateAction = it },
-                                onAddToQueueNext = { song -> addToQueueNext(song) }
+                                onAddToQueueNext = { song -> addToQueueNext(song) },
+
+
                             )
                         }
                         5 -> SongListPage(
@@ -2460,7 +2554,9 @@ fun AppScaffold(
                             currentPlayingPath = currentSong?.filePath,
                             isPlaying = isPlaying,
                             onLocateReady = { playlistLocateAction = it },
-                            onAddToQueueNext = { song -> addToQueueNext(song) }
+                            onAddToQueueNext = { song -> addToQueueNext(song) },
+
+
                         )
                         6 -> {
                             val songInfos = remember(historySongsForList) {
@@ -2482,7 +2578,9 @@ fun AppScaffold(
                                 currentPlayingPath = currentSong?.filePath,
                                 isPlaying = isPlaying,
                                 onLocateReady = { playlistLocateAction = it },
-                                onAddToQueueNext = { song -> addToQueueNext(song) }
+                                onAddToQueueNext = { song -> addToQueueNext(song) },
+
+
                             )
                         }
                         7 -> {
@@ -2505,7 +2603,9 @@ fun AppScaffold(
                                 currentPlayingPath = currentSong?.filePath,
                                 isPlaying = isPlaying,
                                 onLocateReady = { playlistLocateAction = it },
-                                onAddToQueueNext = { song -> addToQueueNext(song) }
+                                onAddToQueueNext = { song -> addToQueueNext(song) },
+
+
                             )
                         }
                         13 -> SongListPage(
@@ -2516,7 +2616,9 @@ fun AppScaffold(
                             currentPlayingPath = currentSong?.filePath,
                             isPlaying = isPlaying,
                             onLocateReady = { playlistLocateAction = it },
-                            onAddToQueueNext = { song -> addToQueueNext(song) }
+                            onAddToQueueNext = { song -> addToQueueNext(song) },
+
+
                         )
                         18 -> SongListPage(
                             title = "热歌推荐",
@@ -2526,7 +2628,9 @@ fun AppScaffold(
                             currentPlayingPath = currentSong?.filePath,
                             isPlaying = isPlaying,
                             onLocateReady = { playlistLocateAction = it },
-                            onAddToQueueNext = { song -> addToQueueNext(song) }
+                            onAddToQueueNext = { song -> addToQueueNext(song) },
+
+
                         )
                         8, 9, 10 -> {                            val playlist = when (tab) {
                                 8 -> selectedPlaylist
@@ -3117,19 +3221,6 @@ fun AppScaffold(
     val revealVelocityTracker = remember { VelocityTracker() }
     var miniBarDragAccumulated by remember { mutableFloatStateOf(0f) }
     var playerDragAccumulated by remember { mutableFloatStateOf(0f) }
-    // 跟手协程（UNDISPATCHED 立即执行；取消旧的避免堆积导致判定滞后）
-    var revealSnapJob by remember { mutableStateOf<Job?>(null) }
-    // 统一动画入口：动画期间维持组合（isRevealAnimating），结束后复位
-    suspend fun animateRevealTo(target: Float, spec: androidx.compose.animation.core.AnimationSpec<Float>) {
-        commitDraggedReveal()
-        val token = ++revealAnimToken
-        isRevealAnimating = true
-        try {
-            playerRevealY.animateTo(target, spec)
-        } finally {
-            if (token == revealAnimToken) isRevealAnimating = false
-        }
-    }
 
 
     // 迷你播放条（带滑入动画 + 上滑手势跟随展开）
@@ -3147,7 +3238,7 @@ fun AppScaffold(
             else -> File(s.filePath)
         }
         val request = ImageRequest.Builder(context)
-            .data(model).size(512).allowHardware(false).build()
+            .data(model).size(800).allowHardware(false).build()
         val result = context.imageLoader.execute(request)
         (result as? SuccessResult)?.drawable?.toBitmap()?.asImageBitmap()?.let { flightArtwork = it }
     }
@@ -3191,7 +3282,7 @@ fun AppScaffold(
     }
 
     /** 展开进度：0 = 完全收起，1 = 完全展开。手势与动画共用，供 draw/graphicsLayer 阶段读取 */
-    fun revealProgress(): Float = playerMorph.progress.value
+    fun revealProgress(): Float = playerMorph.value
 
     // 展开起点的顶边（px）：点击展开 / 跟手展开的 snap 目标
     fun playerEntryTop(): Float = playerEntryBounds?.top ?: miniBarTopY
@@ -3204,16 +3295,16 @@ fun AppScaffold(
     val miniCoverBounds: Rect? = if (floatingCapsuleEntry) capsuleCoverBounds else miniBarCoverBounds
     val coverFlightReady = miniCoverBounds != null && playerCoverTarget != null
 
-    // 播放条上拉手势（两套主题共用）：跟手位移直接写入 playerRevealY（1:1 跟手）
-    // 拖到半屏高 = 完全展开（NeriPlayer 的手感：比"拖到条顶"更轻）
-    val openDragDistancePx = with(density) { (configuration.screenHeightDp.dp * 0.5f).toPx() }
+    // 播放条上拉手势（两套主题共用）：卡面顶边 1:1 跟手
+    // 分母用「播放条顶边到视口顶边」的距离（参考项目同款），卡面上边缘与手指严格同步
+    val openDragDistancePx = (playerEntryBounds?.top?.takeIf { it > 1f }
+        ?: with(density) { (configuration.screenHeightDp.dp * 0.5f).toPx() }).coerceAtLeast(1f)
+    // 抓取瞬间的 morph 进度：中途反向/二次抓取不会被重置成 0
     val revealDragStart: () -> Unit = {
-        isMiniBarDragging = true
         miniBarDragAccumulated = 0f
         revealVelocityTracker.resetTracking()
-        revealSnapJob?.cancel()
-        // 手指直接拥有 morph 进度：不碰 Animatable、不开协程
-        coverFlight.dragOpenProgress = 0f
+        // 手指直接拥有 morph 进度：从当前进度续接
+        playerMorph.beginDrag()
     }
     val revealDrag: (Float) -> Unit = { delta ->
         miniBarDragAccumulated += delta
@@ -3221,23 +3312,17 @@ fun AppScaffold(
             SystemClock.uptimeMillis(),
             Offset(0f, miniBarDragAccumulated)
         )
-        coverFlight.dragOpenProgress =
-            (-miniBarDragAccumulated / openDragDistancePx).coerceIn(0f, 1f)
+        playerMorph.drag(-delta / openDragDistancePx)
     }
     val revealDragEnd: () -> Unit = {
         // 速度用 dp/s，屏幕密度不同手感一致
         val velocityDp = revealVelocityTracker.calculateVelocity().y / density.density
-        val open = shouldOpenNowPlayingFromDrag(
-            coverFlight.dragOpenProgress ?: 0f,
-            velocityDp
-        )
-        isMiniBarDragging = false
-        coverFlight.dragOpenProgress = null
+        val open = shouldOpenNowPlayingFromDrag(playerMorph.value, velocityDp)
         if (open) scope.launch { expandPlayer() }
+        playerMorph.finishDrag(open)
     }
     val revealDragCancel: () -> Unit = {
-        isMiniBarDragging = false
-        coverFlight.dragOpenProgress = null
+        playerMorph.finishDrag(open = false)
     }
     // 展开/收起动画进行中（底栏/播放条必须保持组合，才能跟手消失/回来，而不是动画结束才弹出）
     val revealBusy = playerMorph.mounted
@@ -3275,7 +3360,7 @@ fun AppScaffold(
             onCoverBounds = { rect -> if (!revealBusy && !showPlayerPage) miniBarCoverBounds = rect },
             onTitleTextBounds = { rect -> if (!revealBusy && !showPlayerPage) miniTitleBounds = rect },
             onSubtitleTextBounds = { rect -> if (!revealBusy && !showPlayerPage) miniSubtitleBounds = rect },
-            coverAlpha = { if (revealBusy && coverFlightReady) 0f else 1f },
+            coverAlpha = { if (morphFlight != null && revealBusy && coverFlightReady) 0f else 1f },
             bottomPadding = miniPlayerBottomPadding,
             isFloatingBottomBar = floatingBottomBar,
             followThemeColor = followThemeColor,
@@ -3342,10 +3427,17 @@ fun AppScaffold(
         Box(Modifier.fillMaxSize().zIndex(2f)) {
         NowPlayingContainerMorph(
             morph = playerMorph,
-            flight = coverFlight,
+            flight = morphFlight,
             capsuleInWindow = { playerEntryBounds },
             // 播放页是深色 chrome，卡片底色也用深色：p→1 交还给真实背景时不会跳色
-            cardColor = Color(0xFF19191C)
+            cardColor = Color(0xFF19191C),
+            // 卡面圆角直接用播放条真实圆角（原生 20dp / 悬浮胶囊 32dp）
+            entryCornerPx = playerEntryRadiusPx,
+            // 胶囊：不用胶囊玻璃色做起点（会先灰一下）、封面走直线路径保证完整待在卡片内
+            useEntryColor = !capsuleMorphEntry,
+            linearCover = capsuleMorphEntry,
+            // 黑胶/唱片机页面：整页是一张大圆盘，卡片还小时被裁成残缺圆弧很难看 → 延后显影
+            contentFadeStart = if (playerRoundAlbum && (playerVinylStyle || playerVinylPointer || playerVinylBase)) .5f else null
         ) {
         Box(
             modifier = Modifier
@@ -3355,32 +3447,28 @@ fun AppScaffold(
                     detectVerticalDragGestures(
                         onDragStart = {
                             playerDragAccumulated = 0f
-                            isPlayerDownDragging = true
                             revealVelocityTracker.resetTracking()
-                            pageDownDragFraction = 0f
+                            playerMorph.beginDrag()
                         },
                         onVerticalDrag = { change, dragAmount ->
                             change.consume()
                             playerDragAccumulated += dragAmount
                             revealVelocityTracker.addPosition(change.uptimeMillis, change.position)
-                            // 手指往下 = 卡片缩小；不松手也能看到整页形变（预览 40%）
-                            pageDownDragFraction =
-                                (playerDragAccumulated / openDragDistancePx).coerceIn(0f, 1f)
+                            // 手指往下 = 卡片缩小；不松手也能看到整页形变（1:1 跟手）
+                            playerMorph.drag(-dragAmount / openDragDistancePx)
                         },
                         onDragEnd = {
                             val velocityDp =
                                 revealVelocityTracker.calculateVelocity().y / density.density
-                            val shouldCollapse =
-                                pageDownDragFraction > 0.35f || velocityDp > 600f
-                            scope.launch {
-                                pageDownDragFraction = 0f
-                                if (shouldCollapse) collapsePlayer()
-                                isPlayerDownDragging = false
-                            }
+                            // 进度 0..1（1=全屏），下拉 35% 行程或甩够快就收起
+                            val progress = playerMorph.value
+                            val shouldCollapse = progress < 1f - 0.35f || velocityDp > 600f
+                            if (shouldCollapse) scope.launch { collapsePlayer() }
+                            playerMorph.finishDrag(open = !shouldCollapse)
                         },
                         onDragCancel = {
-                            pageDownDragFraction = 0f
-                            isPlayerDownDragging = false
+                            // 没到阈值：交给 morph 用 spring 弹回全屏
+                            playerMorph.finishDrag(open = true)
                         }
                     )
                 }
@@ -3397,6 +3485,8 @@ fun AppScaffold(
                         playerHyperBg = playerHyperBg,
                         playerFluidAmbientBg = playerFluidAmbientBg,
                         playerMeshBg = playerMeshBg,
+                        // 胶囊展开期间先不挂 GL 网格，动画落地后再交叉淡入
+                        heavyEffectsReady = heavyEffectsReady,
                         meshFlowSpeed = meshFlowSpeed,
                         meshRenderScale = meshRenderScale,
                         meshSensitivity = meshSensitivity,
@@ -3418,12 +3508,16 @@ fun AppScaffold(
                     )
 
                     // ===== 播放器单页面（顶栏/进度/控制固定，中间卡片翻页） =====
+                    // 网易云平台：封面页左划一格就是「私人漫游」，再划一格是歌词（原生 pager，跟手/吸附/返回都由它保证）
                     PlayerStage(
                         song = song,
                         isPlaying = isPlaying,
                         progress = playerViewModel.progress,
                         audioFormat = audioFormat,
                         pagerState = playerPagerState,
+                        roamingController = if (mineAccountPlatform == ACCOUNT_PLATFORM_NETEASE) roamingController else null,
+                        roamingLoggedIn = neteaseLoggedIn,
+                        onRoamingLogin = { showNeteaseLoginPage = true },
                         onPlayPause = { playerViewModel.playPause() },
                         onNext = { playNext() },
                         onPrevious = { playPrevious() },
@@ -3612,10 +3706,31 @@ fun AppScaffold(
         }
 
         // ===== 播放器菜单弹出的独立页面（声音设置 / 均衡器）：覆盖播放器，返回键先关页面 =====
-        if (showEqualizerPage) {
+        // ⚠️ 必须比播放器 overlay 的 zIndex(2f) 更高：这两个页面是根 Box 的兄弟节点，
+        // 播放器那层带 zIndex(2f)，同层兄弟按 zIndex 排序绘制 —— 用默认 0 会被播放器整层盖住
+        //（表现为「点了没反应、返回要按两下」：页面其实开着，只是看不见）。
+        // 进场/退场：从下方轻轻推上来 + 淡入（直接闪出整页太生硬）。
+        // AnimatedVisibility 的内容在退场动画期间仍需存在，所以用 page 记住最后一次打开的页面。
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showEqualizerPage || showSoundSettingsPage,
+            modifier = Modifier.fillMaxSize().zIndex(3f),
+            enter = androidx.compose.animation.slideInVertically(
+                animationSpec = tween(280, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                initialOffsetY = { it / 9 }
+            ) + fadeIn(tween(200)),
+            exit = androidx.compose.animation.slideOutVertically(
+                animationSpec = tween(220, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                targetOffsetY = { it / 12 }
+            ) + fadeOut(tween(150))
+        ) {
+            var page by remember { mutableStateOf(if (showEqualizerPage) "eq" else "sound") }
+            if (showEqualizerPage) page = "eq"
+            if (showSoundSettingsPage) page = "sound"
+            Box(Modifier.fillMaxSize()) {
+        if (page == "eq") {
             EqualizerPage(onBack = { showEqualizerPage = false })
         }
-        if (showSoundSettingsPage) {
+        if (page == "sound") {
             SoundSettingsPage(
                 playerViewModel = playerViewModel,
                 audioFormat = audioFormat,
@@ -3639,6 +3754,8 @@ fun AppScaffold(
                 onBack = { showSoundSettingsPage = false }
             )
         }
+            }
+        }
 
         // 播放列表面板
         if (showPlaylistSheet && currentSong != null) {
@@ -3658,6 +3775,25 @@ fun AppScaffold(
                 },
                 onRemoveSong = { filePath ->
                     playerViewModel.removeItem(filePath)
+                },
+                onOpenShelf = {
+                    // 先收起面板再开唱片墙，避免两层弹层叠着
+                    showPlaylistSheet = false
+                    showQueueShelf = true
+                }
+            )
+        }
+
+        // 播放队列的 CD 唱片墙：整条队列摆成唱片架，选中即在该队列里续播
+        if (showQueueShelf && currentSongList.isNotEmpty()) {
+            com.example.lxmusic.ui.shelf.RecordShelfDialog(
+                songs = currentSongList,
+                onPlaySong = { songs, index -> playerViewModel.playOnline(songs, index) },
+                currentPlayingPath = currentSong?.filePath,
+                onDismiss = { showQueueShelf = false },
+                collectionKey = "播放队列",
+                onCommit = { index, startPositionMs ->
+                    playerViewModel.playQueueIndex(index, startPositionMs)
                 }
             )
         }
@@ -3706,11 +3842,12 @@ fun AppScaffold(
                     tabs = bottomTabs,
                     blurEnabled = blurNavBar,
                     isFloating = floatingBottomBar,
-                    // morph 期间退化为实色：液态玻璃会去采样背景层里正在长大的卡片，
-                    // 拖动时底部糊成一片（这就是“拉起时很难看”的原因）
-                    liquidGlass = liquidGlass && !revealBusy,
+                    // 展开/收起期间不再关掉液态玻璃：采样层（layerBackdrop）里只有 Scaffold 内容，
+                    // 播放器 overlay 是它的兄弟节点、根本不参与采样。
+                    // 之前置空 backdrop 会让底栏在点击播放条那一瞬间「换一种材质」再换回来 —— 就是闪烁。
+                    liquidGlass = liquidGlass,
                     hasCustomWallpaper = backgroundImageUri != null,
-                    backdrop = if (revealBusy) null else glassBackdrop,
+                    backdrop = glassBackdrop,
                     navBarOpacity = if (floatingBottomBar) floatingBarOpacity else navBarOpacity,
                     followThemeColor = followThemeColor,
                     playerBarWhiteBlend = playerBarWhiteBlend,

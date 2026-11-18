@@ -17,14 +17,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Person
-import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -49,16 +43,22 @@ import com.example.lxmusic.ui.components.bottombar.FloatingGlassBottomBarIcon
 import com.example.lxmusic.ui.components.bottombar.FloatingGlassBottomBarItem
 import com.example.lxmusic.ui.components.bottombar.FloatingGlassBottomBarLabel
 import com.example.lxmusic.ui.components.bottombar.FloatingGlassPlayerCapsule
+import com.example.lxmusic.ui.icons.NavIcons
 import com.example.lxmusic.ui.theme.ScreenAdapter
 import com.kyant.backdrop.Backdrop
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-/** 底栏条目：index 为 selectedTab 原始值（允许不连续，例如未激活模式 搜索=11） */
+/**
+ * 底栏条目：index 为 selectedTab 原始值（允许不连续，例如未激活模式 搜索=11）
+ *
+ * 双状态：选中用 filledIcon（实心），未选中用 outlinedIcon（空心线稿）。
+ * outlinedIcon 默认与 filledIcon 同形，即「只在有双套图形时才有空心态」。
+ */
 data class BottomBarTab(
     val index: Int,
     val filledIcon: ImageVector,
-    val outlinedIcon: ImageVector,
+    val outlinedIcon: ImageVector = filledIcon,
     val label: String
 )
 
@@ -104,9 +104,9 @@ fun FloatingBottomBar(
     playerCoverAlpha: () -> Float = { 1f }
 ) {
     val resolvedTabs = tabs ?: listOf(
-        BottomBarTab(0, Icons.Filled.Home, Icons.Outlined.Home, stringResource(R.string.nav_home)),
-        BottomBarTab(1, Icons.Filled.Search, Icons.Outlined.Search, stringResource(R.string.nav_discover)),
-        BottomBarTab(2, Icons.Filled.Person, Icons.Outlined.Person, stringResource(R.string.nav_mine))
+        BottomBarTab(0, NavIcons.HomeFilled, NavIcons.HomeOutline, stringResource(R.string.nav_home)),
+        BottomBarTab(1, NavIcons.DiscoverFilled, NavIcons.DiscoverOutline, stringResource(R.string.nav_discover)),
+        BottomBarTab(2, NavIcons.MineFilled, NavIcons.MineOutline, stringResource(R.string.nav_mine))
     )
     if (isFloating) {
         // 液态玻璃只要求「开关开 + 有 backdrop」：没有壁纸（纯色主题）也要有玻璃质感，
@@ -269,7 +269,8 @@ private fun DefaultBottomBar(
                         icon = {
                             Icon(
                                 if (isSelected) tab.filledIcon else tab.outlinedIcon,
-                                contentDescription = null
+                                contentDescription = null,
+                                modifier = Modifier.size(26.dp)
                             )
                         },
                         label = { Text(tab.label) },

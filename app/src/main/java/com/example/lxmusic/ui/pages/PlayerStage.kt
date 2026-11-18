@@ -33,6 +33,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -109,6 +110,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
@@ -253,8 +255,17 @@ fun PlayerStage(
     coverAlpha: () -> Float = { 1f },
     // 顶栏文字落点（歌名 / 歌手）：展开时文字从播放条飞到这里
     onTitleTarget: ((PlayerTextFlightTarget?) -> Unit)? = null,
-    onArtistTarget: ((PlayerTextFlightTarget?) -> Unit)? = null
+    onArtistTarget: ((PlayerTextFlightTarget?) -> Unit)? = null,
+    // 私人漫游（仅网易云平台传入）：作为封面页左侧那一页，封面右划一格就到
+    roamingController: com.example.lxmusic.data.roaming.PersonalRoamingController? = null,
+    roamingLoggedIn: Boolean = false,
+    onRoamingLogin: () -> Unit = {}
 ) {
+    // 页码：封面 0 / 歌词 1。私人漫游不再是 pager 的一页，改成封面页右滑拉出的侧页
+    // （移植参考项目的 PlayerSidePageLayout：跟手拖动 + 前景缩小右移 + 侧页从底下露出）
+    val roamingEnabled = roamingController != null
+    val coverPageIndex = 0
+    val lyricsPageIndex = 1
     val progressState by progress.collectAsState()
     val currentPosition = progressState.positionMs
     val totalDuration = progressState.durationMs
@@ -395,7 +406,7 @@ fun PlayerStage(
         else -> TextAlign.Center
     }
     // 音频参数文本（仅专辑页显示）：采样率 + 位深 + 格式（如 "44.1kHz 16bit FLAC" 或 "44.1kHz 320k MP3"）；
-    val audioInfoText = if (pagerState.currentPage == 0) currentAudioInfo else null
+    val audioInfoText = if (pagerState.currentPage == coverPageIndex) currentAudioInfo else null
 
     // ===== 横屏适配（参考 folia 宽屏双栏）：左栏=信息+封面 | 右栏=进度+歌词+控制 =====
     val isLandscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation ==
@@ -470,6 +481,9 @@ fun PlayerStage(
                     fontWeight = lyricFontWeightValue,
                     textAlign = lyricTextAlign,
                     translationFontSize = (lyricFontSize * 0.7f).sp,
+                    // 景深虚化开关/强度：MeiloX 模式原来写死 useBlurEffect=true，设置无效
+                    lyricBlurEnabled = playerLyricBlur,
+                    lyricBlurAmount = (playerLyricBlurAmount * 0.3f).coerceIn(0f, 8f),
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 20.dp)
@@ -501,8 +515,13 @@ fun PlayerStage(
         }
     }
 
+    // 进度条区域坐标：漫游侧页的手势要避开它（否则拖进度条会被当成「右滑开漫游」）
+    var progressAreaCoordinates by remember { mutableStateOf<androidx.compose.ui.layout.LayoutCoordinates?>(null) }
+    val progressAreaModifier = Modifier.onGloballyPositioned { progressAreaCoordinates = it }
+
     // 进度条区（歌词卡紧凑模式进度条）：竖屏嵌在控制栏顶部、横屏独立在右栏顶部，提到分支外共用
     val compactProgressSection: @Composable () -> Unit = {
+        Box(progressAreaModifier) {
         PlayerProgressSection(
             isSeekingState = isSeekingState,
             sliderPositionState = sliderPositionState,
@@ -524,6 +543,7 @@ fun PlayerStage(
             onSeek = onSeek,
             audioInfo = null
         )
+        }
     }
 
     // ===== 横屏双栏布局（左：信息+封面；右：进度+歌词+控制；参考 folia 宽屏沉浸歌词） =====
@@ -726,6 +746,37 @@ fun PlayerStage(
     }
 
     if (!isLandscape) {
+    // 私人漫游页：封面页右滑整页翻过去（普通翻页，播放器不缩放不变色）
+    val sidePageState = remember { com.example.lxmusic.ui.roaming.PlayerSidePageState(scope) }
+    // 漫游页打开时，返回键先翻回播放器（而不是直接收起整个播放器）
+    androidx.activity.compose.BackHandler(enabled = sidePageState.active) {
+        sidePageState.close()
+    }
+    com.example.lxmusic.ui.roaming.PlayerSidePageLayout(
+        state = sidePageState,
+        enabled = roamingEnabled,
+        openingDirection = {
+            // 用「位置」判断而不是 isScrollInProgress：
+            // pager 即使在边界也会在拖动中报告 scrolling=true，那会把右滑全拦掉。
+            // 只停稳在封面页（offset=0）才允许往右翻出漫游页。
+            if (pagerState.currentPage == coverPageIndex &&
+                kotlin.math.abs(pagerState.currentPageOffsetFraction) <= 0.02f
+            ) 1f else 0f
+        },
+        // 进度条区域排除：从进度条上起手的横向拖动归进度条自己，不能翻到漫游页
+        excludedArea = { progressAreaCoordinates },
+        side = {
+            com.example.lxmusic.ui.roaming.PlayerRoamingPage(
+                controller = roamingController!!,
+                isLoggedIn = roamingLoggedIn,
+                onLogin = onRoamingLogin,
+                onBackToPlayer = { sidePageState.close() },
+                modifier = Modifier.fillMaxSize(),
+                tint = uiTint,
+                tintVariant = uiTintVariant
+            )
+        }
+    ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -733,6 +784,7 @@ fun PlayerStage(
             .navigationBarsPadding()
     ) {
         // ===== 顶栏（固定）：歌名 + 歌手两行（无返回箭头，主页/歌词页共用） =====
+        Column(Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -826,7 +878,7 @@ fun PlayerStage(
                 modifier = Modifier.padding(end = 4.dp),
                 contentAlignment = Alignment.Center
             ) {
-                if (pagerState.currentPage == 0) {
+                if (pagerState.currentPage == coverPageIndex) {
                     IconButton(
                         onClick = onFavoriteClick,
                         modifier = Modifier.size(40.dp)
@@ -839,7 +891,7 @@ fun PlayerStage(
                         )
                     }
                 } else {
-                    val showTopFavorite = pagerState.currentPage == 1 && playerShowTopFavorite
+                    val showTopFavorite = pagerState.currentPage == lyricsPageIndex && playerShowTopFavorite
                     // 用全限定名：Row 作用域内 AnimatedVisibility 会解析到 RowScope 实验版扩展
                     androidx.compose.animation.AnimatedVisibility(
                         visible = showTopFavorite,
@@ -909,6 +961,7 @@ fun PlayerStage(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+        }
 
         // ===== 中间卡片翻页区（唯一可变区域） =====
         HorizontalPager(
@@ -934,7 +987,8 @@ fun PlayerStage(
                     }
             ) {
                 when (cardPage) {
-                    0 -> PlayerCoverCard(
+                    lyricsPageIndex -> lyricsStage()
+                    coverPageIndex -> PlayerCoverCard(
                         song = song,
                         isRoundAlbum = isRoundAlbum,
                         isRotating = isRotating,
@@ -958,7 +1012,7 @@ fun PlayerStage(
                         isSeeking = isSeeking,
                         tapCoverToLyrics = playerTapCoverToLyrics,
                         onSeekTo = onSeek,
-                        onOpenLyrics = { scope.launch { pagerState.animateScrollToPage(1) } },
+                        onOpenLyrics = { scope.launch { pagerState.animateScrollToPage(lyricsPageIndex) } },
                         onCoverTarget = onCoverTarget,
                         coverAlpha = coverAlpha
                     )
@@ -966,9 +1020,11 @@ fun PlayerStage(
                 }
             }
         }
-
         // ===== 底部区域：主页进度条独立在控制栏上方；歌词卡时进度条滑入控制栏顶部紧贴播放键 =====
-        val isLyricsCompact = pagerState.currentPage == 1 && playerCompactControls
+        // 整个底部区域（进度条/时间/控制键）都从漫游侧页手势里排除：
+        // 否则拖进度条、拖时间标签都会被当成「右滑开漫游」
+        Column(Modifier.fillMaxWidth().then(progressAreaModifier)) {
+        val isLyricsCompact = pagerState.currentPage == lyricsPageIndex && playerCompactControls
         // 主页：进度条独立在控制栏上方（歌词卡时淡出让位）
         androidx.compose.animation.AnimatedVisibility(
             visible = !isLyricsCompact,
@@ -1021,12 +1077,14 @@ fun PlayerStage(
             playerMinimalistControls = playerMinimalistControls
         )
         Spacer(modifier = Modifier.height(8.dp))
+        }
+        }
     }
     }
 
     // ===== 播放器菜单（主页菜单 → 封面卡歌词设置；歌词页菜单 → 歌词页歌词设置，两套独立） =====
     if (showPlayerMenu) {
-        val onCoverPage = pagerState.currentPage == 0
+        val onCoverPage = pagerState.currentPage == coverPageIndex
         PlayerMenuSheet(
             onDismiss = { showPlayerMenu = false },
             initialSubPage = playerMenuSubPage,
@@ -1715,10 +1773,10 @@ private fun PlayerCoverCard(
                 interpolatePlaybackPosition = isPlaying && !isSeeking,
                 playbackSessionKey = song.filePath,
                 stableEmbeddedViewport = true,
-                onLyricClick = { entry ->
-                    // 合成占位行（此时 lyricEntries 为空）点击 = 翻歌词卡，与该区域整体语义一致；
-                    // 真歌词行点击 = 跳转到该行
-                    if (lyricEntries.isEmpty()) onOpenLyrics() else onSeekTo(entry.startTimeMs)
+                onLyricClick = {
+                    // 迷你歌词预览：**取消点击跳播放进度**（用户要求）。
+                    // 无歌词时点占位行仍按整块语义翻到歌词页。
+                    if (lyricEntries.isEmpty()) onOpenLyrics()
                 }
             )
             }

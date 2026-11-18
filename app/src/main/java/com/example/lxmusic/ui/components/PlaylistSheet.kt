@@ -5,6 +5,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,8 +21,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -63,7 +67,9 @@ fun PlaylistSheet(
     onSongClick: (Int) -> Unit,
     onDismiss: () -> Unit,
     onReorder: (from: Int, to: Int) -> Unit = { _, _ -> },
-    onRemoveSong: (String) -> Unit = {}
+    onRemoveSong: (String) -> Unit = {},
+    // 顶栏「CD 唱片墙」：点开用整条播放队列摆唱片架
+    onOpenShelf: (() -> Unit)? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     val playingPath = songs.getOrNull(currentIndex)?.filePath
@@ -133,15 +139,33 @@ fun PlaylistSheet(
         Column(
             Modifier.fillMaxWidth()
         ) {
-            // 顶栏
+            // 拖拽把手（dragHandle 置空后自绘，位置和粗细可控）
+            Box(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    Modifier
+                        .width(36.dp)
+                        .height(4.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .35f))
+                )
+            }
+
+            // 标题行
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("播放列表", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("${list.size} 首", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "${list.size} 首",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Spacer(Modifier.width(8.dp))
                     // 固定宽度容器，避免切换时布局跳动
                     Box(modifier = Modifier.width(48.dp), contentAlignment = Alignment.Center) {
@@ -159,6 +183,60 @@ fun PlaylistSheet(
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
+                    }
+                }
+            }
+
+            // CD 唱片墙入口：图标 + 标题 + 一句说明 + 箭头，避免只放一个图标看不出用途
+            if (onOpenShelf != null) {
+                Surface(
+                    onClick = onOpenShelf,
+                    enabled = songs.isNotEmpty() && !deleteMode,
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .55f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = .16f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Album,
+                                contentDescription = null,
+                                modifier = Modifier.size(21.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                            Text(
+                                "CD 唱片墙",
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                "把整条队列摆成唱片架，滑动试听",
+                                fontSize = 11.5.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }

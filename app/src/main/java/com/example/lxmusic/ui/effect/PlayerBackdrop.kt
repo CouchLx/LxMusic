@@ -57,6 +57,12 @@ fun PlayerBackdrop(
     playerHyperBg: Boolean,
     playerFluidAmbientBg: Boolean = false,
     playerMeshBg: Boolean = false,
+    /**
+     * 重背景（GL 网格等）是否已经可以挂载：展开/收起动画期间先不挂，
+     * GL 视图首帧（建 surface + 编译 shader）会堵住动画帧，表现为「点了要等一秒卡片才动」。
+     * false 时用动态渐变兜底，true 后交叉淡入。
+     */
+    heavyEffectsReady: Boolean = true,
     // 频谱律动（Mesh）高级参数（对齐 MeiloX）
     meshFlowSpeed: Float = 0.25f,
     meshRenderScale: Float = 0.75f,
@@ -145,7 +151,10 @@ fun PlayerBackdrop(
                 .background(backgroundColor)
         )
         // MeiloX 网格渐变背景（GL 网格 + 封面取色 + 频谱律动，最高优先级）
-        if (playerMeshBg) {
+        // 重效果由 heavyEffectsReady 控制：展开动画期间先用动态渐变兜底，动画落地后再挂载。
+        // ⚠️ 不要给 GL 层加 alpha：GLSurfaceView 是独立 Surface，不吃 View 的 alpha，
+        // 而内部的占位层会被 alpha 藏掉 —— 结果就是挂载瞬间露出一帧黑面（用户看到的「闪一下」）。
+        if (playerMeshBg && heavyEffectsReady) {
             FluidMeshBackground(
                 coverModel = coverModel,
                 // 「背景动画」关闭后，暂停也持续流动（对齐 MeiloX shouldAnimate）
@@ -201,7 +210,13 @@ fun PlayerBackdrop(
             )
         }
         // 动态渐变背景（与背景图片互斥，随专辑旋转流动）
-        if (!playerMeshBg && !playerHyperBg && !playerCoverBlurBg && !playerFluidAmbientBg && dynamicBackground) {
+        // 网格挂上之前一律用「封面取色的渐变」兜底 —— 不管「动态渐变」开关有没有开。
+        // 否则展开动画期间这一层是空的，会先露出 App 的普通背景色、等网格挂上再跳成动效壁纸
+        //（用户看到的「先露出软件普通背景，闪一下才出壁纸」）。
+        val meshPending = playerMeshBg && !heavyEffectsReady
+        if ((meshPending || (!playerMeshBg && dynamicBackground)) &&
+            !playerHyperBg && !playerCoverBlurBg && !playerFluidAmbientBg
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()

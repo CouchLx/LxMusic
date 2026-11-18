@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
@@ -55,6 +56,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -445,12 +447,15 @@ fun FloatingGlassBottomBarIcon(
     selected: Boolean,
     selectedIcon: ImageVector,
     unselectedIcon: ImageVector,
-    tint: Color = MaterialTheme.colorScheme.onSurface
+    tint: Color = MaterialTheme.colorScheme.onSurface,
+    // 图标视觉尺寸：图形自带留白（Material Symbols 约占视口 67%），24dp 会显得比文字小一圈
+    size: Dp = 26.dp
 ) {
     Icon(
         imageVector = if (selected) selectedIcon else unselectedIcon,
         contentDescription = null,
-        tint = tint
+        tint = tint,
+        modifier = Modifier.size(size)
     )
 }
 

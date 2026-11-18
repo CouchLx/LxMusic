@@ -54,7 +54,9 @@ import com.example.lxmusic.PlaylistSongCrossRef
 import com.example.lxmusic.UserPlaylistEntity
 import com.example.lxmusic.UserPlaylistItem
 import com.example.lxmusic.model.SongInfo
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -277,15 +279,27 @@ fun SongContextMenuActions(
     // 收藏 / 取消收藏（开启收藏到酷狗时走酷狗「喜欢」歌单增删）
     Surface(
         onClick = {
-            scope.launch(Dispatchers.IO) {
-                val fp = getFilePath() ?: return@launch
+            // 点完立刻收起菜单：连续收藏多首时不用每次手动关。
+            //
+            // 注意：onDismiss 之后本组件马上离开组合，rememberCoroutineScope 会被取消，
+            // Room 写入 / 酷狗同步都会半路夭折（表现为「点了收藏但没存上」）。
+            // 所以真正的持久化丢给脱离组合的一次性作用域跑完（同 MusicScanner 的做法）。
+            val target = !isCollected
+            isCollected = target
+            onDismiss()
+            runDetached {
+                val fp = getFilePath()
+                if (fp == null) {
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(context, "无法收藏该歌曲", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    return@runDetached
+                }
                 // 网易云歌曲无官方同步，一律走本地收藏
                 val isNeteaseSong = song.filePath.contains("://")
                 if (favoriteToKugou && !isNeteaseSong) {
                     // 本地先写「喜欢镜像」（立即可见、不消失），酷狗后台慢慢同步；
                     // “同步到本地收藏”开启时再额外复制一份到本地“我的收藏”
-                    val target = !isCollected
-                    isCollected = target
                     if (target) {
                         val e = saveSongEntity()
                         if (e != null) {
@@ -308,9 +322,8 @@ fun SongContextMenuActions(
                         collectionDao.deleteLikedSong(fp)
                         if (syncLocalFavorite) collectionDao.deleteCollectedSong(fp)
                     }
-                    kugouLikeTick++
                     // 维护「我喜欢的」统一数量（官方∪本地）
-                    if (target) KuGouApi.bumpLikedCount(1) else KuGouApi.bumpLikedCount(-1)
+                    KuGouApi.bumpLikedCount(if (target) 1 else -1)
                     val kugouOk = if (KuGouApi.token.isNotBlank() && KuGouApi.userid.isNotBlank()) {
                         if (target) KuGouApi.addToKugouLike(song) else KuGouApi.removeFromKugouLike(song)
                     } else false
@@ -324,20 +337,18 @@ fun SongContextMenuActions(
                     withContext(Dispatchers.Main) {
                         android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
                     }
-                    return@launch
+                    return@runDetached
                 }
-                val entity = saveSongEntity() ?: return@launch
-                if (isCollected) {
-                    collectionDao.deleteCollectedSong(entity.filePath)
-                    withContext(Dispatchers.Main) {
-                        isCollected = false
-                        android.widget.Toast.makeText(context, "已取消收藏", android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                } else {
+                val entity = saveSongEntity() ?: return@runDetached
+                if (target) {
                     collectionDao.insertCollectedSong(entity)
                     withContext(Dispatchers.Main) {
-                        isCollected = true
                         android.widget.Toast.makeText(context, "已添加到收藏", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                } else {
+                    collectionDao.deleteCollectedSong(entity.filePath)
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(context, "已取消收藏", android.widget.Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -659,3 +670,13 @@ fun SongContextMenuActions(
 /** 酷狗在线歌曲：hash|albumAudioId（本地文件以 / 开头，其他平台带 scheme://） */
 private fun isKugouOnlinePath(path: String): Boolean =
     !path.contains("://") && !path.startsWith("/")
+
+/**
+ * 一次性脱离组合的作用域（与 MusicScanner 同款）。
+ *
+ * 用在「点完就关菜单」的动作上：菜单关闭后本组件离开组合，rememberCoroutineScope 会被取消，
+ * 里面挂着的 Room 写入 / 网络同步会半路夭折。这个作用域不随组件销毁，写完自己结束。
+ */
+private fun runDetached(block: suspend CoroutineScope.() -> Unit) {
+    CoroutineScope(SupervisorJob() + Dispatchers.IO).launch(block = block)
+}

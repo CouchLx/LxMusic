@@ -36,6 +36,8 @@ class SettingsRepository(context: Context) {
         const val PLAYER_VINYL_STYLE = "player_vinyl_style"
         const val PLAYER_VINYL_POINTER = "player_vinyl_pointer"
         const val PLAYER_VINYL_BASE = "player_vinyl_base"
+        const val RECORD_SHELF_FULL_PREVIEW = "record_shelf_full_preview"
+        const val RECORD_SHELF_PREVIEW_MODE = "record_shelf_preview_mode"
         const val PLAYER_BG_ENHANCE = "player_bg_enhance"
         const val PLAYER_HYPER_BG = "player_hyper_bg"
         const val PLAYER_FLUID_AMBIENT_BG = "player_fluid_ambient_bg"
@@ -124,6 +126,8 @@ class SettingsRepository(context: Context) {
         const val SETTINGS_DEFAULT_V4 = "settings_default_v4"
         // 2026-11-06 默认换代标记（歌词默认居左 / 黑胶唱机默认关闭）
         const val SETTINGS_DEFAULT_V5 = "settings_default_v5"
+        // 2026-11-18 默认换代标记（歌词特效默认 → MeiloX 液态歌词）
+        const val SETTINGS_DEFAULT_V6 = "settings_default_v6"
     }
 
     // ==================== 主题 ====================
@@ -329,6 +333,28 @@ class SettingsRepository(context: Context) {
         prefs.getBoolean(Keys.PLAYER_VINYL_BASE, false)
     )
 
+    /** CD 唱片架：整首试听（false = 从 35% 处试听 45 秒片段） */
+    var recordShelfFullPreview: Boolean
+        get() = _recordShelfFullPreview
+        set(value) {
+            _recordShelfFullPreview = value
+            prefs.edit().putBoolean(Keys.RECORD_SHELF_FULL_PREVIEW, value).apply()
+        }
+    private var _recordShelfFullPreview: Boolean by mutableStateOf(
+        prefs.getBoolean(Keys.RECORD_SHELF_FULL_PREVIEW, false)
+    )
+
+    /** CD 唱片架：once / loop / next / random */
+    var recordShelfPreviewMode: String
+        get() = _recordShelfPreviewMode
+        set(value) {
+            _recordShelfPreviewMode = value
+            prefs.edit().putString(Keys.RECORD_SHELF_PREVIEW_MODE, value).apply()
+        }
+    private var _recordShelfPreviewMode: String by mutableStateOf(
+        prefs.getString(Keys.RECORD_SHELF_PREVIEW_MODE, "once") ?: "once"
+    )
+
     var playerBgEnhance: Boolean
         get() = _playerBgEnhance
         set(value) {
@@ -458,7 +484,8 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PLAYER_LYRICS_WORD_EFFECT, value).apply()
         }
     private var _playerLyricsWordEffect: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_LYRICS_WORD_EFFECT, true)
+        // 2026-11-18 起「逐字点亮」不再是默认：默认特效是 MeiloX 液态歌词
+        prefs.getBoolean(Keys.PLAYER_LYRICS_WORD_EFFECT, false)
     )
 
     var playerMeiloxLyrics: Boolean
@@ -468,7 +495,8 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PLAYER_MEILOX_LYRICS, value).apply()
         }
     private var _playerMeiloxLyrics: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_MEILOX_LYRICS, false)
+        // 2026-11-18 起默认开启（老用户由 SETTINGS_DEFAULT_V6 迁移覆盖一次）
+        prefs.getBoolean(Keys.PLAYER_MEILOX_LYRICS, true)
     )
 
     var playerLyricsSeekPreview: Boolean
@@ -835,6 +863,16 @@ class SettingsRepository(context: Context) {
             playerLyricAlignment = "left"
             playerVinylStyle = false
             prefs.edit().putBoolean(Keys.SETTINGS_DEFAULT_V5, true).apply()
+        }
+
+        // 2026-11-18 歌词特效默认换代（SETTINGS_DEFAULT_V6 一次性强制，老用户也覆盖一次）：
+        // 「逐字点亮」→「MeiloX 液态歌词」。V4 只在 2026-10-09 那一版覆盖过；
+        // 之后新装/更新过的用户存的是「逐字点亮 = true」，光靠改代码默认值对他们无效，
+        // 所以这里再强制统一一次（覆盖用户手选值一次，之后 V6 标记写掉不再跑）。
+        if (!prefs.getBoolean(Keys.SETTINGS_DEFAULT_V6, false)) {
+            playerMeiloxLyrics = true
+            if (playerLyricsWordEffect) playerLyricsWordEffect = false
+            prefs.edit().putBoolean(Keys.SETTINGS_DEFAULT_V6, true).apply()
         }
     }
 

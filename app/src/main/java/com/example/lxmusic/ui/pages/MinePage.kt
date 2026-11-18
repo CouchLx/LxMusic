@@ -10,7 +10,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
@@ -29,13 +28,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
@@ -79,6 +76,7 @@ import androidx.compose.ui.unit.Dp
 import coil.compose.AsyncImage
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
+import com.example.lxmusic.ui.components.AccountPlatformSwitcher
 import com.example.lxmusic.ui.components.IOLoadingIndicator
 import com.example.lxmusic.R
 import androidx.compose.ui.res.stringResource
@@ -107,10 +105,16 @@ private val NeteaseBrand = Color(0xFFE60026)
 fun MinePage(
     loginVersion: Int = 0,
     neteaseVersion: Int = 0,
+    // 账号卡当前平台（kugou / netease），状态提升到 MainActivity
+    accountTab: String = "kugou",
+    // 平台切换：右滑账号卡上的切换器触发（原来放在顶栏，会跟标题抢层级）
+    onAccountPlatformChange: (String) -> Unit = {},
     onLocalClick: () -> Unit,
     onAvatarClick: () -> Unit,
     onNeteaseLoginClick: () -> Unit = {},
     onNeteaseAuthChanged: () -> Unit = {},
+    // 网易云歌单点击：id / 名称 / 封面 / 曲目数 / 创建者
+    onNeteasePlaylistClick: (Long, String, String, Int, String) -> Unit = { _, _, _, _, _ -> },
     onPlaylistDetailClick: (UserPlaylistItem) -> Unit = {},
     onCollectionDetailClick: (String, Long) -> Unit = { _, _ -> },
     onManagePlaylists: () -> Unit = {},
@@ -132,11 +136,8 @@ fun MinePage(
 
     val gson = remember { Gson() }
     val minePrefs = remember { context.getSharedPreferences("mine_state", Context.MODE_PRIVATE) }
-    // 账号卡：酷狗 / 网易云 分段切换（选中平台持久化，默认酷狗）
+    // 账号卡：平台由顶栏切换器控制（状态在 MainActivity），这里只读登录态
     val neteaseAccount = remember(neteaseVersion) { NeteaseAuth.load(context) }
-    var accountTab by remember {
-        mutableStateOf(minePrefs.getString("account_card_selected", "kugou") ?: "kugou")
-    }
     var showNeteaseAccountDialog by remember { mutableStateOf(false) }
     // 官方收藏模式：歌单区把“喜欢镜像”歌单（本地先写）持久置顶显示
     val mineSettingsPrefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
@@ -161,6 +162,72 @@ fun MinePage(
     var playlistLoading by remember { mutableStateOf(false) }
     var playlistError by remember { mutableStateOf<String?>(null) }
     var playlistExpanded by remember { mutableStateOf(minePrefs.getBoolean("playlist_expanded", false)) }
+
+    // ===== 网易云歌单（跟随顶栏平台切换，和账号卡同一套原理）=====
+    fun loadCachedNeteasePlaylists(): List<UserPlaylistItem> {
+        val uid = neteaseAccount.uid
+        if (!neteaseAccount.loggedIn || uid == 0L) return emptyList()
+        val cached = minePrefs.getString("netease_playlists_json", null)
+        if (!cached.isNullOrBlank() && minePrefs.getLong("netease_playlists_json_uid", 0L) == uid) {
+            try {
+                val type = TypeToken.getParameterized(List::class.java, UserPlaylistItem::class.java).type
+                return gson.fromJson(cached, type)
+            } catch (_: Exception) {}
+        }
+        return emptyList()
+    }
+    var neteasePlaylists by remember(neteaseVersion) { mutableStateOf(loadCachedNeteasePlaylists()) }
+    var neteasePlaylistLoading by remember { mutableStateOf(false) }
+    var neteasePlaylistError by remember { mutableStateOf<String?>(null) }
+    // 歌单创建者（详情页头部展示；不落盘，冷启动后首次刷新即补上）
+    var neteasePlaylistCreators by remember(neteaseVersion) { mutableStateOf<Map<Long, String>>(emptyMap()) }
+
+    fun loadNeteasePlaylists() {
+        val uid = neteaseAccount.uid
+        if (!neteaseAccount.loggedIn || uid == 0L || neteasePlaylistLoading) return
+        neteasePlaylistLoading = true
+        neteasePlaylistError = null
+        scope.launch(Dispatchers.IO) {
+            try {
+                val resp = NeteaseApi.service.userPlaylists(
+                    uid = uid,
+                    limit = 100,
+                    offset = 0,
+                    timestamp = System.currentTimeMillis()
+                )
+                if (resp.code == 200) {
+                    val items = resp.playlist.orEmpty()
+                    val mapped = items.map { pl ->
+                        UserPlaylistItem(
+                            listid = pl.id,
+                            listname = pl.name ?: "未命名歌单",
+                            pic = pl.coverImgUrl,
+                            songcount = pl.trackCount
+                        )
+                    }
+                    neteasePlaylistCreators = items.associate { it.id to (it.creator?.nickname ?: "") }
+                    neteasePlaylists = mapped
+                    minePrefs.edit()
+                        .putString("netease_playlists_json", gson.toJson(mapped))
+                        .putLong("netease_playlists_json_uid", uid)
+                        .apply()
+                } else {
+                    neteasePlaylistError = "获取歌单失败（${resp.code}）"
+                }
+            } catch (e: Exception) {
+                neteasePlaylistError = e.message ?: "网络错误"
+            } finally {
+                neteasePlaylistLoading = false
+            }
+        }
+    }
+
+    // 切到网易云平台（或刚登录）时刷新一次；酷狗平台不触发
+    LaunchedEffect(accountTab, neteaseAccount.loggedIn, neteaseAccount.uid) {
+        if (accountTab == "netease" && neteaseAccount.loggedIn) {
+            loadNeteasePlaylists()
+        }
+    }
 
     // 收藏功能状态
     var collectionExpanded by remember { mutableStateOf(minePrefs.getBoolean("collection_expanded", false)) }
@@ -332,19 +399,7 @@ fun MinePage(
                 .padding(16.dp)
                 .padding(bottom = 120.dp + navBarDp)
         ) {
-        // 账号卡：分段胶囊切换 酷狗 / 网易云，卡片内容随选中平台切换
-        AccountPlatformSwitch(
-            selected = accountTab,
-            kugouLoggedIn = isLoggedIn,
-            neteaseLoggedIn = neteaseAccount.loggedIn,
-            onSelect = { tab ->
-                accountTab = tab
-                minePrefs.edit().putString("account_card_selected", tab).apply()
-            }
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
+        // 账号卡：右侧切换器切换平台（酷狗 ⇄ 网易云），卡片内容随之切换
         if (accountTab == "netease") {
             AccountCard(
                 icon = Icons.Default.Cloud,
@@ -358,6 +413,12 @@ fun MinePage(
                 iconTint = NeteaseBrand,
                 onClick = {
                     if (neteaseAccount.loggedIn) showNeteaseAccountDialog = true else onNeteaseLoginClick()
+                },
+                trailing = {
+                    AccountPlatformSwitcher(
+                        platform = accountTab,
+                        onPlatformChange = onAccountPlatformChange
+                    )
                 }
             )
         } else {
@@ -369,7 +430,13 @@ fun MinePage(
                 subtitle = if (isLoggedIn) "已登录 · 酷狗音乐" else "登录后享受更多功能",
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                onClick = if (isLoggedIn) null else onAvatarClick
+                onClick = if (isLoggedIn) null else onAvatarClick,
+                trailing = {
+                    AccountPlatformSwitcher(
+                        platform = accountTab,
+                        onPlatformChange = onAccountPlatformChange
+                    )
+                }
             )
         }
 
@@ -414,6 +481,11 @@ fun MinePage(
                                 }
                             } finally {
                                 NeteaseAuth.clear(context)
+                                // 顺带清掉该账号的歌单缓存，避免换号后串数据
+                                minePrefs.edit()
+                                    .remove("netease_playlists_json")
+                                    .remove("netease_playlists_json_uid")
+                                    .apply()
                                 onNeteaseAuthChanged()
                             }
                         }
@@ -699,7 +771,12 @@ fun MinePage(
             )
         }
 
-        // 歌单列表（可折叠）
+        // 歌单列表（可折叠）：内容跟随顶栏平台切换（酷狗 / 网易云）
+        val neteaseMode = accountTab == "netease"
+        val shownPlaylists = if (neteaseMode) neteasePlaylists else playlists
+        val shownLoading = if (neteaseMode) neteasePlaylistLoading else playlistLoading
+        val shownError = if (neteaseMode) neteasePlaylistError else playlistError
+        val retryShown: () -> Unit = { if (neteaseMode) loadNeteasePlaylists() else loadPlaylists() }
         AnimatedVisibility(
             visible = playlistExpanded,
             enter = expandVertically(tween(300)) + fadeIn(tween(300)),
@@ -722,28 +799,31 @@ fun MinePage(
                     )
                     // 刷新状态显示在标题行内（不额外占行高，列表不会上下跳动）
                     when {
-                        playlistLoading -> Text(
+                        shownLoading -> Text(
                             text = "刷新中…",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(end = 4.dp)
                         )
-                        playlistError != null -> Text(
+                        shownError != null -> Text(
                             text = "刷新失败 · 重试",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
-                                .clickable { loadPlaylists() }
+                                .clickable { retryShown() }
                                 .padding(horizontal = 4.dp, vertical = 2.dp)
                         )
                     }
-                    IconButton(onClick = onManageKugouPlaylists) {
-                        Icon(
-                            Icons.Default.Checklist,
-                            contentDescription = "管理歌单",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                    // 歌单管理只有酷狗有对应页面；网易云暂不提供
+                    if (!neteaseMode) {
+                        IconButton(onClick = onManageKugouPlaylists) {
+                            Icon(
+                                Icons.Default.Checklist,
+                                contentDescription = "管理歌单",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                     IconButton(onClick = {
                         playlistExpanded = false
@@ -758,7 +838,24 @@ fun MinePage(
                 }
 
                 when {
-                    playlistLoading && playlists.isEmpty() -> {
+                    // 网易云未登录：给登录入口，而不是一个空列表
+                    neteaseMode && !neteaseAccount.loggedIn -> {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "登录网易云音乐后可同步歌单",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "去登录",
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.clickable { onNeteaseLoginClick() }
+                            )
+                        }
+                    }
+                    shownLoading && shownPlaylists.isEmpty() -> {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -768,10 +865,10 @@ fun MinePage(
                             IOLoadingIndicator(modifier = Modifier.size(24.dp))
                         }
                     }
-                    playlists.isEmpty() && playlistError != null -> {
+                    shownPlaylists.isEmpty() && shownError != null -> {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                text = playlistError!!,
+                                text = shownError!!,
                                 color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodyMedium
                             )
@@ -780,11 +877,11 @@ fun MinePage(
                                 text = "点击重试",
                                 color = MaterialTheme.colorScheme.primary,
                                 style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.clickable(enabled = !playlistLoading) { loadPlaylists() }
+                                modifier = Modifier.clickable(enabled = !shownLoading) { retryShown() }
                             )
                         }
                     }
-                    playlists.isEmpty() -> {
+                    shownPlaylists.isEmpty() -> {
                         Text(
                             text = "暂无歌单",
                             modifier = Modifier.padding(16.dp),
@@ -796,18 +893,33 @@ fun MinePage(
                         Column(
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            playlists.forEach { playlist ->
-                                PlaylistCard(
-                                    playlist = playlist,
-                                    onClick = { onPlaylistDetailClick(playlist) },
-                                    countOverride = if (kugouFavOn && playlist.listname == "我喜欢") {
-                                        // 「我喜欢的」：用官方∪本地的合并数量（进页面后记录），未记录时用官方缓存数
-                                        KuGouApi.likedCount() ?: playlist.songcount
-                                    } else {
-                                        KuGouApi.playlistRealCount(playlist.listid) ?: playlist.songcount
-                                    },
-                                    countLabel = if (playlist.listid in likedMirrorIds && playlist.songcount <= 0) "已收藏" else null
-                                )
+                            shownPlaylists.forEach { playlist ->
+                                if (neteaseMode) {
+                                    PlaylistCard(
+                                        playlist = playlist,
+                                        onClick = {
+                                            onNeteasePlaylistClick(
+                                                playlist.listid,
+                                                playlist.listname ?: "",
+                                                playlist.pic ?: "",
+                                                playlist.songcount,
+                                                neteasePlaylistCreators[playlist.listid] ?: ""
+                                            )
+                                        }
+                                    )
+                                } else {
+                                    PlaylistCard(
+                                        playlist = playlist,
+                                        onClick = { onPlaylistDetailClick(playlist) },
+                                        countOverride = if (kugouFavOn && playlist.listname == "我喜欢") {
+                                            // 「我喜欢的」：用官方∪本地的合并数量（进页面后记录），未记录时用官方缓存数
+                                            KuGouApi.likedCount() ?: playlist.songcount
+                                        } else {
+                                            KuGouApi.playlistRealCount(playlist.listid) ?: playlist.songcount
+                                        },
+                                        countLabel = if (playlist.listid in likedMirrorIds && playlist.songcount <= 0) "已收藏" else null
+                                    )
+                                }
                             }
                         }
                     }
@@ -857,87 +969,10 @@ fun FunctionButton(
     }
 }
 
-/** 账号平台切换：两段式胶囊，圆点表示各自登录状态（实心=已登录） */
-@Composable
-private fun AccountPlatformSwitch(
-    selected: String,
-    kugouLoggedIn: Boolean,
-    neteaseLoggedIn: Boolean,
-    onSelect: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(36.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
-            .padding(3.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        AccountPlatformSegment(
-            label = "酷狗音乐",
-            loggedIn = kugouLoggedIn,
-            selected = selected == "kugou",
-            modifier = Modifier.weight(1f)
-        ) { onSelect("kugou") }
-        AccountPlatformSegment(
-            label = "网易云音乐",
-            loggedIn = neteaseLoggedIn,
-            selected = selected == "netease",
-            modifier = Modifier.weight(1f)
-        ) { onSelect("netease") }
-    }
-}
-
-@Composable
-private fun AccountPlatformSegment(
-    label: String,
-    loggedIn: Boolean,
-    selected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    val dotColor = if (loggedIn) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
-    }
-    Row(
-        modifier = modifier
-            .fillMaxHeight()
-            .clip(RoundedCornerShape(15.dp))
-            .background(
-                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else Color.Transparent
-            )
-            .clickable { onClick() },
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(if (loggedIn) dotColor else Color.Transparent)
-                .then(if (loggedIn) Modifier else Modifier.border(1.dp, dotColor, CircleShape))
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            color = if (selected) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-/** 账号卡：未登录可点击去登录；已登录且传了 onClick 时可点（网易云=账号操作） */
+/**
+ * 账号卡：点「头像」去登录 / 看账号信息（整卡不再可点，也没有右侧箭头——
+ * 箭头容易和右侧平台切换器抢注意力，点头像更符合「点头像 = 看这个账号」的直觉）。
+ */
 @Composable
 private fun AccountCard(
     icon: ImageVector,
@@ -948,13 +983,14 @@ private fun AccountCard(
     containerColor: Color,
     iconTint: Color,
     onClick: (() -> Unit)?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // 卡片右侧的附加控件（目前放平台切换：账号身份的一部分，比顶栏更自然）
+    trailing: @Composable (() -> Unit)? = null
 ) {
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .height(120.dp)
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
+            .height(120.dp),
         shape = RoundedCornerShape(16.dp),
         color = Color.Transparent
     ) {
@@ -965,7 +1001,10 @@ private fun AccountCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                modifier = Modifier.size(80.dp),
+                modifier = Modifier
+                    .size(80.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
                 shape = RoundedCornerShape(12.dp),
                 color = containerColor
             ) {
@@ -996,14 +1035,22 @@ private fun AccountCard(
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                // 第一行：昵称 + 贴右的平台切换（和名字同一行，不再浮在卡片中间）
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (trailing != null) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        trailing()
+                    }
+                }
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = subtitle,
@@ -1011,13 +1058,6 @@ private fun AccountCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
-                )
-            }
-            if (onClick != null) {
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

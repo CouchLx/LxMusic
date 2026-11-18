@@ -98,14 +98,16 @@ fun ModernHomeTopBar(
     isThisPlaying: Boolean,
     hasSongs: Boolean,
     onPlayAll: () -> Unit,
-    onRefresh: () -> Unit,
-    isRefreshing: Boolean,
     onSearch: () -> Unit,
     backdrop: Backdrop? = null,
     liquidGlass: Boolean = false,
     hasCustomWallpaper: Boolean = false,
     hazeState: HazeState? = null,
     scrollProgress: Float = 0f,
+    // 网易云首页：左边那组「顺序/心动/一键播放」不显示
+    showPlayCapsule: Boolean = true,
+    // 播放胶囊隐藏时左侧显示的标题（网易云首页用来标注当前平台，和右侧搜索键同一行）
+    platformLabel: String? = null,
     modifier: Modifier = Modifier
 ) {
     var showModeSheet by remember { mutableStateOf(false) }
@@ -174,22 +176,33 @@ fun ModernHomeTopBar(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 左侧：一体化一键播放模式悬浮胶囊
-            ModernPlayModeCapsule(
-                homePlayMode = homePlayMode,
-                isThisPlaying = isThisPlaying,
-                hasSongs = hasSongs,
-                onPlayAll = onPlayAll,
-                onShowModeSheet = { showModeSheet = true },
-                backdrop = backdrop,
-                liquidGlass = liquidGlass,
-                hasCustomWallpaper = hasCustomWallpaper
-            )
+            // 左侧：一体化一键播放模式悬浮胶囊（网易云首页不显示）
+            if (showPlayCapsule) {
+                ModernPlayModeCapsule(
+                    homePlayMode = homePlayMode,
+                    isThisPlaying = isThisPlaying,
+                    hasSongs = hasSongs,
+                    onPlayAll = onPlayAll,
+                    onShowModeSheet = { showModeSheet = true },
+                    backdrop = backdrop,
+                    liquidGlass = liquidGlass,
+                    hasCustomWallpaper = hasCustomWallpaper
+                )
+            } else if (platformLabel != null) {
+                // 网易云首页：左上角平台标识，和右侧圆形搜索键在同一行、垂直居中
+                Text(
+                    text = platformLabel,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(start = 4.dp)
+                )
+            } else {
+                Spacer(modifier = Modifier.width(1.dp))
+            }
 
-            // 右侧：刷新 + 搜索 双功能一体化悬浮胶囊
-            ModernActionCapsule(
-                isRefreshing = isRefreshing,
-                onRefresh = onRefresh,
+            // 右侧：单个圆形搜索键（刷新已改为下拉手势）
+            ModernSearchCapsule(
                 onSearch = onSearch,
                 backdrop = backdrop,
                 liquidGlass = liquidGlass,
@@ -348,7 +361,9 @@ fun ModernMineTopBar(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // 左侧固定标题「我的」：直接压在顶栏模糊层上，不再包胶囊底
+            // 左侧固定标题「我的」：直接压在顶栏模糊层上，不再包胶囊底。
+            // 平台切换（酷狗 ⇄ 网易云）已移到账号卡右侧——平台属于「账号身份」，
+            // 放在顶栏会和页面标题抢层级，也多出一个没有承托的彩色徽标。
             Text(
                 text = "我的",
                 style = MaterialTheme.typography.titleLarge,
@@ -519,94 +534,38 @@ private fun ModernPlayModeCapsule(
 }
 
 /**
- * 右侧对称双按键胶囊（刷新 + 搜索）
+ * 右侧单个圆形「搜索」键（和「我的」页右上角的设置键同款：42dp 胶囊底 + 22dp 图标）
  */
 @Composable
-private fun ModernActionCapsule(
-    isRefreshing: Boolean,
-    onRefresh: () -> Unit,
+private fun ModernSearchCapsule(
     onSearch: () -> Unit,
     backdrop: Backdrop?,
     liquidGlass: Boolean,
     hasCustomWallpaper: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    // 刷新时的优雅旋转动画
-    val infiniteTransition = rememberInfiniteTransition(label = "refresh_spin")
-    val spinAngle by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 900, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "refresh_rotation"
-    )
-
-    val capsuleContent = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-    val capsuleAccent = MaterialTheme.colorScheme.primary
-    val capsuleDivider = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)
-
     ModernCapsuleContainer(
-        modifier = modifier.height(42.dp),
+        modifier = modifier.size(42.dp),
         backdrop = backdrop,
         liquidGlass = liquidGlass,
         hasCustomWallpaper = hasCustomWallpaper
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 4.dp)
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(CircleShape)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onSearch() }
         ) {
-            // 刷新按钮
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .clickable(
-                        enabled = !isRefreshing,
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { onRefresh() }
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = stringResource(R.string.action_refresh),
-                    modifier = Modifier
-                        .size(19.dp)
-                        .graphicsLayer {
-                            if (isRefreshing) rotationZ = spinAngle
-                        },
-                    tint = if (isRefreshing) capsuleAccent else capsuleContent
-                )
-            }
-
-            // 细微半透明竖分割线
-            Box(
-                modifier = Modifier
-                    .width(0.8.dp)
-                    .height(15.dp)
-                    .background(capsuleDivider)
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = stringResource(R.string.title_search),
+                modifier = Modifier.size(22.dp),
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
             )
-
-            // 搜索按钮
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) { onSearch() }
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = stringResource(R.string.title_search),
-                    modifier = Modifier.size(19.dp),
-                    tint = capsuleContent
-                )
-            }
         }
     }
 }
@@ -723,7 +682,7 @@ private fun verticalFadeBrush(
  * 统一毛玻璃磨砂悬浮胶囊基座容器
  */
 @Composable
-private fun ModernCapsuleContainer(
+internal fun ModernCapsuleContainer(
     modifier: Modifier = Modifier,
     backdrop: Backdrop? = null,
     liquidGlass: Boolean = false,

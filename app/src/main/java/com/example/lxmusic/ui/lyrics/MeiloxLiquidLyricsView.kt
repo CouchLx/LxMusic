@@ -53,6 +53,9 @@ fun MeiloxLiquidLyricsView(
     fontWeight: FontWeight = FontWeight.Bold,
     textAlign: TextAlign = TextAlign.Center,
     translationFontSize: TextUnit = 16.sp,
+    // 歌词景深虚化（设置 → 播放界面动效 → 歌词设置）：关闭时非当前行完全不虚化
+    lyricBlurEnabled: Boolean = true,
+    lyricBlurAmount: Float = 3f,
     offset: Dp = 48.dp,
     keepAliveZone: Dp = 120.dp,
     modifier: Modifier = Modifier
@@ -153,7 +156,9 @@ fun MeiloxLiquidLyricsView(
                 margin = 10.dp
             ),
             blendMode = BlendMode.Plus,
-            useBlurEffect = true,
+            useBlurEffect = lyricBlurEnabled,
+            // 景深强度：设置里的滑杆值直接映射到非当前行的最大模糊半径（px）
+            blurDelta = lyricBlurAmount.coerceIn(0f, 8f),
             showTranslation = showLyricTranslation,
             showPhonetic = false,
             animateViewportScroll = true,

@@ -116,6 +116,7 @@ import coil.request.ImageRequest
 import com.example.lxmusic.MusicDatabase
 import com.example.lxmusic.SongDao
 import com.example.lxmusic.model.SongInfo
+import com.example.lxmusic.ui.shelf.RecordShelfEntry
 import com.example.lxmusic.ui.components.IOLoadingIndicator
 import com.example.lxmusic.ui.components.SongContextMenuActions
 import com.example.lxmusic.ui.components.SortBottomSheet
@@ -371,7 +372,11 @@ fun LocalMusicPage(
                     LocalMusicStatsBar(
                         songCount = songs.size,
                         onShufflePlay = { if (songs.isNotEmpty()) onPlaySong(songs.shuffled(), 0) },
-                        onSortClick = { showSortSheet = true }
+                        onSortClick = { showSortSheet = true },
+                        shelfSongs = songs,
+                        onPlaySong = onPlaySong,
+                        currentPlayingPath = currentPlayingPath,
+                        isPlaying = isPlaying
                     )
                     Box(modifier = Modifier.fillMaxSize()) {
                         when {
@@ -516,7 +521,11 @@ fun LocalMusicPage(
 private fun LocalMusicStatsBar(
     songCount: Int,
     onShufflePlay: () -> Unit,
-    onSortClick: () -> Unit
+    onSortClick: () -> Unit,
+    shelfSongs: List<SongInfo> = emptyList(),
+    onPlaySong: ((List<SongInfo>, Int) -> Unit)? = null,
+    currentPlayingPath: String? = null,
+    isPlaying: Boolean = false
 ) {
     Row(
         modifier = Modifier
@@ -551,6 +560,19 @@ private fun LocalMusicStatsBar(
         }
 
         Spacer(modifier = Modifier.weight(1f))
+
+        // 唱片架入口（与列表页同款）
+        if (shelfSongs.isNotEmpty() && onPlaySong != null) {
+            RecordShelfEntry(
+                songs = shelfSongs,
+                onPlaySong = onPlaySong,
+                currentPlayingPath = currentPlayingPath,
+                isPlaying = isPlaying,
+                collectionKey = "本地音乐",
+                compact = true
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+        }
 
         // 右侧：排序按钮
         Surface(

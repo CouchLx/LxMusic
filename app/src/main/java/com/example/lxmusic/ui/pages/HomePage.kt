@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -60,14 +61,20 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.CircularWavyProgressIndicator
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -119,6 +126,7 @@ import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 // 首页各区块翻页状态（内存级，退出应用后重置）
 private val homePagerStates = mutableMapOf<String, Int>()
@@ -1450,6 +1458,15 @@ fun HomePage(
     )
 
     Box(modifier = Modifier.fillMaxSize()) {
+        // 下拉刷新：内容整体下移，顶栏下方留出空白 + 「松手刷新」提示；
+        // 刷新中的反馈沿用原来的居中波纹转圈（内容淡出），不用内置小圈压在卡片上。
+        val pullRefreshState = rememberPullToRefreshState()
+        val pullDensity = LocalDensity.current
+        val pullShiftPx = with(pullDensity) { 56.dp.toPx() }
+        val pullArmed = remember {
+            derivedStateOf { pullRefreshState.distanceFraction >= 1f }
+        }
+
         if (isRefreshing) {
             CircularWavyProgressIndicator(
                 color = MaterialTheme.colorScheme.primary,
@@ -1459,10 +1476,23 @@ fun HomePage(
             )
         }
 
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = { performRefresh(isAuto = false) },
+            state = pullRefreshState,
+            modifier = Modifier.fillMaxSize(),
+            indicator = {}   // 内置指示器会压在卡片下面，这里不用
+        ) {
         LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
+                // 下拉时整块内容跟着手指下移，露出上方空白（读取放在布局阶段，不触发重组）
+                .offset {
+                    // 刷新中不再位移（内容淡出，交给居中的转圈），松手回落也回到原位
+                    val fraction = if (isRefreshing) 0f else pullRefreshState.distanceFraction
+                    IntOffset(0, (pullShiftPx * fraction).roundToInt())
+                }
                 .alpha(contentAlpha)
                 .then(
                     if (hazeState != null) Modifier.hazeSource(hazeState, zIndex = 1f)
@@ -1620,6 +1650,36 @@ fun HomePage(
                     currentPlayingPath = currentPlayingPath, isPlaying = isPlaying
                 )
             }
+        }
+        }
+
+        // 下拉提示：浮在内容之上、胶囊顶栏下方；松手阈值到了就换成「松手刷新」
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = topContentPadding + 14.dp)
+                .graphicsLayer {
+                    alpha = if (isRefreshing) 0f
+                    else (pullRefreshState.distanceFraction * 1.8f).coerceIn(0f, 1f)
+                },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.Refresh,
+                contentDescription = null,
+                modifier = Modifier
+                    .size(16.dp)
+                    .graphicsLayer {
+                        rotationZ = pullRefreshState.distanceFraction.coerceIn(0f, 1f) * 180f
+                    },
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = if (pullArmed.value) "松手刷新" else "下拉刷新",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

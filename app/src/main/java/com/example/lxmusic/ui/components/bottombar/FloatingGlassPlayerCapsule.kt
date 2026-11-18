@@ -139,7 +139,7 @@ fun FloatingGlassPlayerCapsule(
     var flightBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(albumModel) {
         val request = ImageRequest.Builder(capsuleContext)
-            .data(albumModel).size(512).allowHardware(false).build()
+            .data(albumModel).size(800).allowHardware(false).build()
         val result = capsuleContext.imageLoader.execute(request)
         flightBitmap = (result as? SuccessResult)?.drawable?.toBitmap()?.asImageBitmap()
     }
