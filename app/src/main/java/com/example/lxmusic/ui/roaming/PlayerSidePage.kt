@@ -254,13 +254,17 @@ fun PlayerSidePageLayout(
         // **常驻组合**：这一页有 40+ 个场景图标，如果等 active 才挂进组合，
         // 手指开始拖的那一帧要付一次很重的首次组合，观感就是「拖完卡一下才展开」。
         // 关闭时整页被平移到屏幕左外，绘制被裁剪、也不参与命中测试。
-        Box(
-            Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    translationX = -state.direction * size.width * (1f - state.progress)
-                }
-        ) { side() }
+        // enabled=false（如酷狗平台没有私人漫游）时不组合侧页：
+        // 侧页内容按设计是常驻组合的，但那样会在没有数据源时也构造页面（NPE）。
+        if (enabled) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationX = -state.direction * size.width * (1f - state.progress)
+                    }
+            ) { side() }
+        }
         // 播放器页：整体右移一格。不缩放、不压暗、不投影，背景层完全不动。
         Box(
             Modifier

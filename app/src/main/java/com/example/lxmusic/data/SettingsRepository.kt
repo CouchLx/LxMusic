@@ -223,7 +223,10 @@ class SettingsRepository(context: Context) {
             _floatingBottomBar = value
             prefs.edit().putBoolean(Keys.FLOATING_BOTTOM_BAR, value).apply()
         }
-    private var _floatingBottomBar: Boolean by mutableStateOf(prefs.getBoolean(Keys.FLOATING_BOTTOM_BAR, false))
+    private var _floatingBottomBar: Boolean by mutableStateOf(
+        // 2026-11-19 起默认开启（与「现代化主题」配套，否则底栏仍是原生 M3 全宽样式）
+        prefs.getBoolean(Keys.FLOATING_BOTTOM_BAR, true)
+    )
 
     var navBarOpacity: Float
         get() = _navBarOpacity
@@ -898,6 +901,8 @@ class SettingsRepository(context: Context) {
             followThemeColor = true
             playerRoundAlbum = false
             playerVinylStyle = false
+            // 悬浮底栏与现代化主题配套：只改主题不改底栏会出现「顶栏是现代、底栏还是原生」的错位
+            floatingBottomBar = true
             // liquidGlass 的后备属性声明在本 init 之后，这里直接写 prefs（同 V4 的底栏高度处理），
             // 之后执行到该属性声明时 getBoolean 就能读到 true。
             // 运行时状态读的是液态玻璃自己的 prefs 文件，两处都必须写，否则开关显示"开"但不生效。

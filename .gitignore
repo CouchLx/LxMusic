@@ -50,3 +50,6 @@ keystore.properties
 /node_modules/
 /np-submodule/
 
+
+# 根目录临时截图
+/fresh-*.png

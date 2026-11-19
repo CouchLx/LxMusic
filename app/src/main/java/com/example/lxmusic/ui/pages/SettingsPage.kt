@@ -503,6 +503,8 @@ fun SettingsPage(
     onDynamicColorChange: (Boolean) -> Unit = {},
     onThemeColorChange: (String) -> Unit = {},
     onBackgroundImageChange: (String?) -> Unit = {},
+    // 主题风格切换：必须回到 MainActivity 改 SettingsRepository 状态，只写 prefs 界面不会立刻变
+    onThemeModeChange: (String) -> Unit = {},
     floatingBottomBar: Boolean = true,
     onFloatingBottomBarChange: (Boolean) -> Unit = {},
     liquidGlass: Boolean = false,
@@ -691,7 +693,7 @@ fun SettingsPage(
                             "light" -> "浅色"
                             else -> "跟随系统"
                         }
-                        val appearanceThemeText = if (settingsPrefs.getString("theme_mode", "dynamic") == "modern") "现代化" else "原生"
+                        val appearanceThemeText = if (settingsPrefs.getString("theme_mode", "modern") == "modern") "现代化" else "原生"
                         val appearanceBadge = "$appearanceModeText · $appearanceThemeText"
 
                         val playerStageBadge = when {
@@ -885,6 +887,7 @@ fun SettingsPage(
                         themeColorAnimation = themeColorAnimation,
                         onThemeColorAnimationChange = onThemeColorAnimationChange,
                         onDynamicColorChange = onDynamicColorChange,
+                        onThemeModeChange = onThemeModeChange,
                         floatingBottomBar = floatingBottomBar,
                         onFloatingBottomBarChange = onFloatingBottomBarChange,
                         liquidGlass = liquidGlass,
@@ -1104,6 +1107,7 @@ internal fun SettingsAppearanceContent(
     themeColorAnimation: Boolean = true,
     onThemeColorAnimationChange: (Boolean) -> Unit = {},
     onDynamicColorChange: (Boolean) -> Unit = {},
+    onThemeModeChange: (String) -> Unit = {},
     floatingBottomBar: Boolean = false,
     onFloatingBottomBarChange: (Boolean) -> Unit = {},
     liquidGlass: Boolean = false,
@@ -1125,7 +1129,7 @@ internal fun SettingsAppearanceContent(
     onBackgroundImageChange: (String?) -> Unit = {},
     onRegisterPickAction: (((() -> Unit) -> Unit))? = null
 ) {
-    var themeMode by remember { mutableStateOf(settingsPrefs.getString("theme_mode", "dynamic") ?: "dynamic") }
+    var themeMode by remember { mutableStateOf(settingsPrefs.getString("theme_mode", "modern") ?: "modern") }
 
     // 自定义色板（存 prefs，逗号分隔）
     var customPalette by remember {
@@ -1186,7 +1190,9 @@ internal fun SettingsAppearanceContent(
                     Surface(
                         onClick = {
                             themeMode = "dynamic"
-                            settingsPrefs.edit().putString("theme_mode", "dynamic").apply()
+                            // 走回调而不是只写 prefs：MainActivity 的界面状态读的是
+                            // SettingsRepository.themeMode，只写 prefs 会导致「选项变了、页面没变」
+                            onThemeModeChange("dynamic")
                             onFloatingBottomBarChange(false)
                         },
                         shape = RoundedCornerShape(14.dp),
@@ -1207,7 +1213,7 @@ internal fun SettingsAppearanceContent(
                     Surface(
                         onClick = {
                             themeMode = "modern"
-                            settingsPrefs.edit().putString("theme_mode", "modern").apply()
+                            onThemeModeChange("modern")
                             onFloatingBottomBarChange(true)
                         },
                         shape = RoundedCornerShape(14.dp),

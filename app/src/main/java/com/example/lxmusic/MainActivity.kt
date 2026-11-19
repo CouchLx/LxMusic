@@ -412,14 +412,11 @@ class MainActivity : ComponentActivity() {
                 val ctx = LocalContext.current
                 val settingsRepository = remember { SettingsRepository(ctx) }
 
-                // 首次启动初始化：确保默认主题为原生主题，导航栏完全等于背景色
-                LaunchedEffect(Unit) {
-                    if (!settingsRepository.contains(SettingsRepository.Keys.THEME_MODE)) {
-                        settingsRepository.themeMode = "dynamic"
-                        settingsRepository.dynamicColor = true
-                        settingsRepository.floatingBottomBar = false
-                    }
-                }
+                // 原先这里有一段「首次启动强制原生主题 + 关悬浮底栏」的初始化，
+                // 与 2026-11-19 的新默认（现代化主题 / 悬浮底栏 / 液态玻璃）冲突：
+                // 新装用户会被它按回原生主题，出现「设置里显示现代化、界面还是原生」的错位。
+                // 默认值统一由 SettingsRepository 的 key 默认值 + SETTINGS_DEFAULT_V7 迁移负责，
+                // 这里不再覆盖。
 
                 var dynamicColor by remember { mutableStateOf(settingsRepository.dynamicColor) }
                 var themeColorHex by remember { mutableStateOf(settingsRepository.themeColorHex) }
@@ -2730,6 +2727,9 @@ fun AppScaffold(
                             onLogout = { selectedTab = 2 },
                             onDynamicColorChange = onDynamicColorChange,
                             onThemeColorChange = onThemeColorChange,
+                            // 主题风格切换即时生效：改 SettingsRepository 的 state（它同时写 prefs），
+                            // 界面读的就是这个 state，不需要重启 App
+                            onThemeModeChange = { mode -> settingsRepository.themeMode = mode },
                             onBackgroundImageChange = { presetImageUri ->
                                 if (presetImageUri != null) {
                                     // 应用预设的背景图片

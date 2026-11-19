@@ -766,15 +766,20 @@ fun PlayerStage(
         // 进度条区域排除：从进度条上起手的横向拖动归进度条自己，不能翻到漫游页
         excludedArea = { progressAreaCoordinates },
         side = {
-            com.example.lxmusic.ui.roaming.PlayerRoamingPage(
-                controller = roamingController!!,
-                isLoggedIn = roamingLoggedIn,
-                onLogin = onRoamingLogin,
-                onBackToPlayer = { sidePageState.close() },
-                modifier = Modifier.fillMaxSize(),
-                tint = uiTint,
-                tintVariant = uiTintVariant
-            )
+            // 酷狗平台没有私人漫游（roamingController = null）：这里必须判空，
+            // 否则侧页一旦被组合（常驻组合）就会 NPE 闪退
+            val controller = roamingController
+            if (controller != null) {
+                com.example.lxmusic.ui.roaming.PlayerRoamingPage(
+                    controller = controller,
+                    isLoggedIn = roamingLoggedIn,
+                    onLogin = onRoamingLogin,
+                    onBackToPlayer = { sidePageState.close() },
+                    modifier = Modifier.fillMaxSize(),
+                    tint = uiTint,
+                    tintVariant = uiTintVariant
+                )
+            }
         }
     ) {
     Column(
