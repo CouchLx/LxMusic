@@ -3293,7 +3293,9 @@ fun AppScaffold(
 
     // 飞行端点：优先用当前主题真正显示的那个播放条上的封面
     val miniCoverBounds: Rect? = if (floatingCapsuleEntry) capsuleCoverBounds else miniBarCoverBounds
-    val coverFlightReady = miniCoverBounds != null && playerCoverTarget != null
+    // 黑胶盘走 VinylDisc 自己的 sharedCoverTarget（不经过 PlayerStage.onCoverTarget），
+    // 所以这里也要认 flight 的目标，否则形变期间播放条的封面不会被藏起来 → 两份封面叠着。
+    val coverFlightReady = miniCoverBounds != null && (playerCoverTarget != null || coverFlight.hasTarget)
 
     // 播放条上拉手势（两套主题共用）：卡面顶边 1:1 跟手
     // 分母用「播放条顶边到视口顶边」的距离（参考项目同款），卡面上边缘与手指严格同步
@@ -3438,8 +3440,8 @@ fun AppScaffold(
             // 胶囊：不用胶囊玻璃色做起点（会先灰一下）、封面走直线路径保证完整待在卡片内
             useEntryColor = !capsuleMorphEntry,
             linearCover = capsuleMorphEntry,
-            // 黑胶/唱片机页面：整页是一张大圆盘，卡片还小时被裁成残缺圆弧很难看 → 延后显影
-            contentFadeStart = if (playerRoundAlbum && (playerVinylStyle || playerVinylPointer || playerVinylBase)) .5f else null
+            // 圆形 / 黑胶 / 唱片机页面：整页是一张大圆盘，卡片还小时被裁成残缺圆弧很难看 → 延后显影
+            contentFadeStart = if (playerRoundAlbum) .5f else null
         ) {
         Box(
             modifier = Modifier

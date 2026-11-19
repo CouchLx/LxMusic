@@ -133,14 +133,21 @@ class SharedCoverFlightState {
         flightBitmap = null
     }
 
-    internal fun reportTarget(bounds: Rect, cornerPx: Float) {
+    internal fun reportTarget(bounds: Rect, cornerPx: Float, layoutWidth: Int = 0, layoutHeight: Int = 0) {
         if (bounds.isEmpty) return
-        // 传 999dp 之类表示"圆形"：钳到短边一半，避免超大圆角在插值时失真
-        val corner = cornerPx.coerceAtMost(minOf(bounds.width, bounds.height) / 2f)
+        // 传 999dp 之类表示"圆形"：钳到短边一半，避免超大圆角在插值时失真。
+        // ⚠️ 必须用「未裁剪的布局尺寸」算：形变过程中封面的窗口 bounds 会被卡片裁掉一大块，
+        // 拿它当基准会让圆角随进度变大 → 飞行封面从方圆形慢慢变成正圆（用户看到的异常图形）。
+        val base = if (layoutWidth > 0 && layoutHeight > 0) minOf(layoutWidth, layoutHeight).toFloat()
+        else minOf(bounds.width, bounds.height)
+        val corner = cornerPx.coerceAtMost(base / 2f)
         targetBounds = bounds
         targetCornerPx = corner
         targetAttached = true
     }
+
+    /** 播放页是否已上报封面落点（黑胶盘这种不经过 onCoverTarget 的布局也能有目标） */
+    val hasTarget: Boolean get() = targetAttached
 
     internal fun detachTarget() {
         targetAttached = false
@@ -408,7 +415,37 @@ fun Modifier.sharedCoverSource(
 }
 
 /** Marks the Now Playing cover as the flight destination and hides it while a flight runs. */
-fun Modifier.sharedCoverTarget(cornerRadius: Dp): Modifier = composed {
+/**
+ * 只上报「封面目标」（不参与显隐）。
+ *
+ * 用于「上报节点必须和绘制节点分开」的场合：旋转中的圆盘/圆形封面，
+ * 若上报节点本身在旋转层里，`boundsInWindow` 会变成旋转后的外接矩形（最多 1.41 倍），
+ * 飞行封面就会按错误的大小落点（播放中圆盘在转 → 动画时好时坏）。
+ */
+fun Modifier.coverFlightTarget(cornerRadius: Dp): Modifier = composed {
+    val state = LocalSharedCoverFlight.current ?: return@composed this
+    val cornerPx = with(LocalDensity.current) { cornerRadius.toPx() }
+    DisposableEffect(state) {
+        onDispose { state.detachTarget() }
+    }
+    this.onGloballyPositioned { coordinates ->
+        state.targetCoordinates = coordinates
+        state.reportTarget(
+            coordinates.boundsInWindow(),
+            cornerPx,
+            coordinates.size.width,
+            coordinates.size.height
+        )
+    }
+}
+
+/** 只在共享封面飞行期间隐藏自己（用于旋转层里的真实封面） */
+fun Modifier.hideWhileCoverFlying(): Modifier = composed {
+    val state = LocalSharedCoverFlight.current ?: return@composed this
+    this.graphicsLayer { alpha = if (state.hidesCovers) 0f else 1f }
+}
+
+fun Modifier.sharedCoverTarget(cornerRadius: Dp, hideWhileFlying: Boolean = true): Modifier = composed {
     val state = LocalSharedCoverFlight.current
     if (state == null) return@composed this
     val cornerPx = with(LocalDensity.current) { cornerRadius.toPx() }
@@ -418,9 +455,16 @@ fun Modifier.sharedCoverTarget(cornerRadius: Dp): Modifier = composed {
     this
         .onGloballyPositioned { coordinates ->
             state.targetCoordinates = coordinates
-            state.reportTarget(coordinates.boundsInWindow(), cornerPx)
+            state.reportTarget(
+                coordinates.boundsInWindow(),
+                cornerPx,
+                coordinates.size.width,
+                coordinates.size.height
+            )
         }
-        .graphicsLayer { alpha = if (state.hidesCovers) 0f else 1f }
+        // hideWhileFlying=false：由调用方自己控制显隐（黑胶盘按形变进度整体淡入，
+        // 这里再硬切一次 alpha 就会让封面+黑边在动画结束那一帧「啪」地冒出来）
+        .graphicsLayer { if (hideWhileFlying) alpha = if (state.hidesCovers) 0f else 1f }
 }
 
 @Composable

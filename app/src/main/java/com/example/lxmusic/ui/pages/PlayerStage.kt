@@ -1656,8 +1656,16 @@ private fun PlayerCoverCard(
                                         .clip(
                                             if (isRoundAlbum) CircleShape else RoundedCornerShape(16.dp)
                                         )
+                                        .graphicsLayer { alpha = coverAlpha() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                // 旋转只放在内层：外层节点负责上报飞行目标，
+                                // 它一旦跟着转，boundsInWindow 就变成旋转外接矩形（最多 1.41 倍），
+                                // 播放中圆封面在转 → 飞行封面按错误大小落点，动画时好时坏。
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
                                         .graphicsLayer {
-                                            alpha = coverAlpha()
                                             if (isRoundAlbum && isRotating) {
                                                 rotationZ = rotationAngle
                                             }
@@ -1694,6 +1702,7 @@ private fun PlayerCoverCard(
                                             tint = uiTintVariant.copy(alpha = 0.5f)
                                         )
                                     }
+                                }
                                 }
                             }
                         }

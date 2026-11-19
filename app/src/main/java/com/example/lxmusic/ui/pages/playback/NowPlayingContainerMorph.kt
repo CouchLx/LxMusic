@@ -290,14 +290,20 @@ internal fun NowPlayingContainerMorph(
             val to = flight.targetFrameIn(host) ?: return@Canvas
             // 参考项目的共享元素轨迹：横向先快后慢（ease-out），纵向与尺寸先慢后快（ease-in），
             // 观感是「先往里收一点，再抬起来」，不是简单的直线插值。
-            // 悬浮胶囊例外：走直线插值，保证封面矩形始终在卡片矩形内（完整缩放、不被裁掉）。
-            val rect = if (linearCover) lerp(from, to.bounds, p) else sheetElementArc(from, to.bounds, p)
-            if (rect.width <= 1f || rect.height <= 1f) return@Canvas
-            // 目标端是圆（圆盘盘芯 / 圆形专辑）：全程按圆画，别让中间阶段是个圆角方块
+            // 例外走直线：
+            // - 悬浮胶囊：保证封面矩形始终在卡片矩形内（完整缩放、不被裁掉）；
+            // - 圆形目标（圆盘盘芯 / 圆形专辑）：圆形不该「先甩个方向再落」，直线放大最自然，
+            //   也避免和旋转的圆盘对不上。
+            // 目标端是圆（圆盘盘芯 / 圆形专辑）：全程按圆画 + 直线放大，别让中间阶段是圆角方块
             val targetCircular = to.cornerPx >= minOf(to.bounds.width, to.bounds.height) / 2f - 1f
+            val rect = if (linearCover || targetCircular) lerp(from, to.bounds, p)
+            else sheetElementArc(from, to.bounds, p)
+            if (rect.width <= 1f || rect.height <= 1f) return@Canvas
             val corner = if (targetCircular) minOf(rect.width, rect.height) / 2f
             else lerp(flight.miniCoverCornerPx, to.cornerPx, p)
-            val smoothing = if (targetCircular) 1f
+            // ⚠️ 圆形目标必须 smoothing=0：continuous corner（平滑圆角）在 corner=短边一半时
+            // 画出来是「超椭圆/方圆形」，不是正圆 —— 圆盘盘芯里会看到一块方圆形的封面。
+            val smoothing = if (targetCircular) 0f
             else lerp(flight.miniCoverCornerSmoothing, to.cornerSmoothing, p)
             coverPath.reset()
             coverPath.addSmoothedRoundRect(rect.width, rect.height, corner, smoothing)

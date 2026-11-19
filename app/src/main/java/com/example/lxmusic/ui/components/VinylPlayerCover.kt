@@ -56,6 +56,7 @@ import coil.compose.AsyncImagePainter
 import coil.compose.rememberAsyncImagePainter
 import com.example.lxmusic.model.SongInfo
 import com.example.lxmusic.ui.animation.LocalSharedCoverFlight
+import com.example.lxmusic.ui.animation.coverFlightTarget
 import java.io.File
 
 /**
@@ -257,20 +258,41 @@ fun VinylDisc(
     Box(
         modifier = modifier
             .aspectRatio(1f)
+            // 最外层：形变过程中整盘（含阴影）让位，只留卡片 + 飞行封面；
+            // 用「形变进度」而不是 hidesCovers 控制显隐 —— hidesCovers 要等 spring 完全落定
+            // 才 endLinked，圆盘会晚一截才出现（用户看到的就是「打开后过一秒才显示黑胶」）。
+            .graphicsLayer {
+                // 形变进度 p：0=收起、1=展开。黑胶盘在最后一段「淡入 + 轻微放大」出现，
+                // 范围给足（0.84→0.98）+ smoothstep，否则是一帧蹦出黑圈（用户看到的闪烁）。
+                val p = coverFlight?.nowPlayingMorphProgressState?.value ?: 1f
+                // 区间给足（0.72→0.95，约展开动画的最后四分之一）：黑胶圈是「长出来」的，
+                // 不是最后一帧蹦出来；此时飞行封面已经接近落点，圈套在外面也不违和。
+                val t = ((p - .80f) / .17f).coerceIn(0f, 1f)
+                val eased = t * t * (3f - 2f * t)
+                alpha = eased
+                if (eased < 1f) {
+                    val s = .94f + .06f * eased
+                    scaleX = s
+                    scaleY = s
+                }
+            }
             .shadow(
                 elevation = if (showDiscTexture) 14.dp else 8.dp,
                 shape = CircleShape,
                 ambientColor = Color.Black.copy(alpha = if (showDiscTexture) 0.45f else 0.25f),
                 spotColor = Color.Black.copy(alpha = if (showDiscTexture) 0.55f else 0.35f)
-            )
-            .graphicsLayer {
-                rotationZ = rotationAngle
-                // 共享封面飞行/形变期间整盘让位：否则会出现「圆盘不动 + 封面在上面飘」的双影，
-                // 圆盘盘芯和飞行封面永远不同心，看着就是异常图形
-                if (coverFlight?.hidesCovers == true) alpha = 0f
-            },
+            ),
         contentAlignment = Alignment.Center
     ) {
+        // 旋转层：盘面 + 盘芯封面。旋转只放在这一层，
+        // 外面留一个**不旋转**的锚点上报飞行目标（否则 boundsInWindow 变成旋转外接矩形，
+        // 播放中圆盘在转 → 飞行封面按错误大小落点，动画时好时坏）。
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { rotationZ = rotationAngle },
+            contentAlignment = Alignment.Center
+        ) {
         if (showDiscTexture) {
             // 黑胶外盘 Canvas 绘制：深邃纯黑底色 + 24 圈精密微音轨 + 柔顺扇形高光 + 防露白遮罩
             Canvas(modifier = Modifier.fillMaxSize()) {
@@ -357,17 +379,12 @@ fun VinylDisc(
                     style = Stroke(width = 0.8f)
                 )
 
-                // 6. 纯黑防露白遮罩层（彻底抹除中心扇形高光残留）
+                // 6. 盘芯垫底（只比封面大一点点，防止高光残留/接缝露白；
+                //    原来 +4dp 再叠 4dp 粗描边 → 封面外侧一圈厚黑边，观感很差）
                 drawCircle(
                     color = Color(0xFF0A0A0D),
-                    radius = innerRadius + 4.dp.toPx(),
+                    radius = innerRadius + 1.5.dp.toPx(),
                     center = center
-                )
-                drawCircle(
-                    color = Color.Black,
-                    radius = innerRadius + 2.dp.toPx(),
-                    center = center,
-                    style = Stroke(width = 4.dp.toPx())
                 )
             }
         }
@@ -376,8 +393,6 @@ fun VinylDisc(
         Box(
             modifier = Modifier
                 .fillMaxSize(coverFraction)
-                // 共享封面飞行的目标端（黑胶风格）：离开/回来时真实盘芯让位给位图飞行
-                .sharedCoverTarget(cornerRadius = 999.dp)
                 .clip(CircleShape)
                 .background(Color(0xFF0A0A0D)),
             contentAlignment = Alignment.Center
@@ -400,15 +415,21 @@ fun VinylDisc(
             }
 
             if (showDiscTexture) {
-                // 封面外边缘黑边过渡环（消除接缝露白）
+                // 只留极淡的一圈收边（原来 2.5dp+1dp 黑边在封面外面形成一圈厚黑圈，很难看）
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .border(2.5.dp, Color.Black.copy(alpha = 0.85f), CircleShape)
-                        .border(1.dp, Color(0xFF0A0A0D), CircleShape)
+                        .border(0.8.dp, Color.Black.copy(alpha = 0.28f), CircleShape)
                 )
             }
         }
+        }
+        // 不旋转的「飞行目标」锚点：位置/大小与盘芯封面完全一致，只上报不绘制
+        Box(
+            modifier = Modifier
+                .fillMaxSize(coverFraction)
+                .coverFlightTarget(cornerRadius = 999.dp)
+        )
     }
 }
 

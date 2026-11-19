@@ -77,11 +77,15 @@ class PlayerSidePageState(private val scope: CoroutineScope) {
     fun end(velocity: Float, flingThreshold: Float, cancelled: Boolean = false) {
         if (dragged == null) return
         pagerDragging = false
+        // 位置判定按「露出多少」算：
+        //  关→开：要拖到接近一半（45% 屏宽）才确认，慢慢滑不会一碰就翻；
+        //  开→关：往回收 40% 左右（progress ≤ 0.60）才确认，避免关得太黏。
+        // 原来是 14% 屏宽（≈56dp）就翻页，太灵敏了。
+        val commitByPosition = if (targetOpen) progress <= .60f else progress >= .45f
         settle(
             if (cancelled) targetOpen
             else if (abs(velocity) > flingThreshold) velocity * direction > 0
-            // 对齐 Compose pager 的手感：位移约 56dp（≈14% 屏宽）或轻甩就翻页
-            else progress >= .14f
+            else commitByPosition
         )
     }
 
@@ -138,7 +142,9 @@ fun PlayerSidePageLayout(
     // 否则把进度条拖到头继续拖，剩余量会被当成「右滑开漫游」。
     val gestureFromExcluded = remember { mutableStateOf(false) }
     // 甩手阈值：对齐 pager（标准 pager 125dp/s 就翻），这里留一点防误触
-    val fling = with(androidx.compose.ui.platform.LocalDensity.current) { 250.dp.toPx() }
+    // 轻甩阈值：原来 250dp/s 太容易触发（随手一划就翻页），提到 900dp/s
+    //（对齐参考项目 DragOpenFlingVelocity = 900dp/s），只认可明确用力的甩动
+    val fling = with(androidx.compose.ui.platform.LocalDensity.current) { 900.dp.toPx() }
     val flingThreshold by androidx.compose.runtime.rememberUpdatedState(fling)
 
     val edgeScroll = remember(state) {

@@ -16,11 +16,13 @@ import com.example.lxmusic.ui.effect.LiquidGlassPreset
  * 液态玻璃设置管理器
  */
 class LiquidGlassSettings(context: Context) {
-    private val prefs: SharedPreferences = context.getSharedPreferences("liquid_glass_settings", Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
     
     // 设置键
     companion object {
-        private const val KEY_ENABLED = "liquid_glass_enabled"
+        // 迁移（SettingsRepository）也要写这两项，所以公开
+        const val PREF_NAME = "liquid_glass_settings"
+        const val KEY_ENABLED = "liquid_glass_enabled"
         private const val KEY_INTENSITY = "liquid_glass_intensity"
         private const val KEY_REFRACT_INTENSITY = "refract_intensity"
         private const val KEY_CHROMATIC_ABERRATION = "chromatic_aberration"
@@ -43,7 +45,7 @@ class LiquidGlassSettings(context: Context) {
     var _preset: LiquidGlassPreset = getPreset()
     
     // 获取设置值
-    fun getEnabled(): Boolean = prefs.getBoolean(KEY_ENABLED, false)
+    fun getEnabled(): Boolean = prefs.getBoolean(KEY_ENABLED, true)
     fun getIntensity(): LiquidGlassIntensity = 
         LiquidGlassIntensity.values().find { it.name == prefs.getString(KEY_INTENSITY, LiquidGlassIntensity.MEDIUM.name) }
             ?: LiquidGlassIntensity.MEDIUM

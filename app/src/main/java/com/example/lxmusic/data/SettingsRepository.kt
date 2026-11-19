@@ -16,6 +16,10 @@ class SettingsRepository(context: Context) {
 
     private val prefs: SharedPreferences =
         context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    // 液态玻璃的开关有独立存储（运行时的 liquidGlass 状态读的是这个文件，不是 settings），
+    // 迁移时必须两处一起写，否则设置页显示"开"但实际不生效。
+    private val liquidGlassPrefs: SharedPreferences =
+        context.getSharedPreferences(LiquidGlassSettings.PREF_NAME, Context.MODE_PRIVATE)
 
     object Keys {
         const val THEME_MODE = "theme_mode"
@@ -128,6 +132,8 @@ class SettingsRepository(context: Context) {
         const val SETTINGS_DEFAULT_V5 = "settings_default_v5"
         // 2026-11-18 默认换代标记（歌词特效默认 → MeiloX 液态歌词）
         const val SETTINGS_DEFAULT_V6 = "settings_default_v6"
+        // 2026-11-19 默认换代标记（主题 → 现代化 / 液态玻璃+随主题取色 → 开 / 封面 → 矩形）
+        const val SETTINGS_DEFAULT_V7 = "settings_default_v7"
     }
 
     // ==================== 主题 ====================
@@ -138,7 +144,10 @@ class SettingsRepository(context: Context) {
             _themeMode = value
             prefs.edit().putString(Keys.THEME_MODE, value).apply()
         }
-    private var _themeMode: String by mutableStateOf(prefs.getString(Keys.THEME_MODE, "dynamic") ?: "dynamic")
+    private var _themeMode: String by mutableStateOf(
+        // 2026-11-19 起默认「现代化主题」（老用户由 SETTINGS_DEFAULT_V7 迁移覆盖一次）
+        prefs.getString(Keys.THEME_MODE, "modern") ?: "modern"
+    )
 
     var dynamicColor: Boolean
         get() = _dynamicColor
@@ -238,7 +247,10 @@ class SettingsRepository(context: Context) {
             _followThemeColor = value
             prefs.edit().putBoolean(Keys.FOLLOW_THEME_COLOR, value).apply()
         }
-    private var _followThemeColor: Boolean by mutableStateOf(prefs.getBoolean(Keys.FOLLOW_THEME_COLOR, false))
+    private var _followThemeColor: Boolean by mutableStateOf(
+        // 2026-11-19 起默认开启（随主题颜色变化）
+        prefs.getBoolean(Keys.FOLLOW_THEME_COLOR, true)
+    )
 
     var playerBarWhiteBlend: Float
         get() = _playerBarWhiteBlend
@@ -291,7 +303,8 @@ class SettingsRepository(context: Context) {
             prefs.edit().putBoolean(Keys.PLAYER_ROUND_ALBUM, value).apply()
         }
     private var _playerRoundAlbum: Boolean by mutableStateOf(
-        prefs.getBoolean(Keys.PLAYER_ROUND_ALBUM, true)
+        // 2026-11-19 起默认「矩形封面」（圆形/黑胶都关）
+        prefs.getBoolean(Keys.PLAYER_ROUND_ALBUM, false)
     )
 
     var playerRotate: Boolean
@@ -824,7 +837,8 @@ class SettingsRepository(context: Context) {
         // 新版默认配置迁移：圆形封面 / 旋转 / 黑胶唱片 / 指针默认开启。
         // 只补写用户从未动过的项（无 key 才写 true），用户明确关过的保持不动；
         // 新装用户 key 本来就不存在，读默认值即 true，老用户升级同样生效。
-        if (!prefs.contains(Keys.PLAYER_ROUND_ALBUM)) playerRoundAlbum = true
+        // 2026-11-19 起默认矩形封面：无 key 的补写 false（V7 还会再统一一次）
+        if (!prefs.contains(Keys.PLAYER_ROUND_ALBUM)) playerRoundAlbum = false
         if (!prefs.contains(Keys.PLAYER_ROTATE)) playerRotate = true
         // 黑胶唱机 2026-11 起默认关闭
         if (!prefs.contains(Keys.PLAYER_VINYL_STYLE)) playerVinylStyle = false
@@ -874,6 +888,23 @@ class SettingsRepository(context: Context) {
             if (playerLyricsWordEffect) playerLyricsWordEffect = false
             prefs.edit().putBoolean(Keys.SETTINGS_DEFAULT_V6, true).apply()
         }
+
+        // 2026-11-19 视觉默认换代（SETTINGS_DEFAULT_V7 一次性强制，老用户也覆盖一次）：
+        // 主题 → 现代化；液态玻璃 → 开；随主题颜色变化 → 开；
+        // 封面 → 矩形（圆形封面 / 黑胶唱机都关）。
+        // 与 V4/V5/V6 同一语义：无条件覆盖一次，之后用户自己改了不会再被拽回来。
+        if (!prefs.getBoolean(Keys.SETTINGS_DEFAULT_V7, false)) {
+            themeMode = "modern"
+            followThemeColor = true
+            playerRoundAlbum = false
+            playerVinylStyle = false
+            // liquidGlass 的后备属性声明在本 init 之后，这里直接写 prefs（同 V4 的底栏高度处理），
+            // 之后执行到该属性声明时 getBoolean 就能读到 true。
+            // 运行时状态读的是液态玻璃自己的 prefs 文件，两处都必须写，否则开关显示"开"但不生效。
+            prefs.edit().putBoolean(Keys.LIQUID_GLASS, true).apply()
+            liquidGlassPrefs.edit().putBoolean(LiquidGlassSettings.KEY_ENABLED, true).apply()
+            prefs.edit().putBoolean(Keys.SETTINGS_DEFAULT_V7, true).apply()
+        }
     }
 
     /** 请求一次首页自动刷新（首页进入时消费一次，刷新后清除）。
@@ -906,7 +937,10 @@ class SettingsRepository(context: Context) {
             _liquidGlass = value
             prefs.edit().putBoolean(Keys.LIQUID_GLASS, value).apply()
         }
-    private var _liquidGlass: Boolean by mutableStateOf(prefs.getBoolean(Keys.LIQUID_GLASS, false))
+    private var _liquidGlass: Boolean by mutableStateOf(
+        // 2026-11-19 起默认开启
+        prefs.getBoolean(Keys.LIQUID_GLASS, true)
+    )
 
     var homePlayMode: Int
         get() = _homePlayMode
