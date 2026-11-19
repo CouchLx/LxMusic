@@ -3366,10 +3366,12 @@ fun AppScaffold(
             followThemeColor = followThemeColor,
             playerBarOpacity = playerBarOpacity,
             playerBarWhiteBlend = playerBarWhiteBlend,
-            // 原生主题下液态玻璃播放条有显示 bug：降级成毛玻璃（只模糊、不折射）；
-            // 现代主题维持液态玻璃。只影响播放条本身，底栏/顶栏/主题布局都不动。
-            liquidGlass = liquidGlass && settingsRepository.themeMode == "modern",
-            frostedGlass = liquidGlass && settingsRepository.themeMode != "modern",
+            // 液态/毛玻璃按「是否悬浮底栏」这套布局来分，而不是 theme_mode：
+            // theme_mode 和悬浮底栏是两个独立开关，用户只开悬浮底栏时
+            // theme_mode 仍是 dynamic → 原来会落到毛玻璃分支，二级页面的胶囊就变成毛玻璃。
+            // 悬浮布局（现代化观感）→ 液态玻璃；原生贴底布局 → 毛玻璃（历史降级）。
+            liquidGlass = liquidGlass && floatingBottomBar,
+            frostedGlass = liquidGlass && !floatingBottomBar,
             hasCustomWallpaper = backgroundImageUri != null,
             backdrop = glassBackdrop,
             // 不再淡出：收起态下播放条就是页面的“收起形态”，展开时被页面盖住、

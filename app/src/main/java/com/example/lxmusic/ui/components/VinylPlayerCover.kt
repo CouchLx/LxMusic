@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImagePainter
 import coil.compose.rememberAsyncImagePainter
 import com.example.lxmusic.model.SongInfo
+import com.example.lxmusic.ui.animation.LocalSharedCoverFlight
 import java.io.File
 
 /**
@@ -251,6 +252,7 @@ fun VinylDisc(
     showDiscTexture: Boolean = true
 ) {
     val coverFraction = if (showDiscTexture) 0.64f else 1.0f
+    val coverFlight = LocalSharedCoverFlight.current
 
     Box(
         modifier = modifier
@@ -261,7 +263,12 @@ fun VinylDisc(
                 ambientColor = Color.Black.copy(alpha = if (showDiscTexture) 0.45f else 0.25f),
                 spotColor = Color.Black.copy(alpha = if (showDiscTexture) 0.55f else 0.35f)
             )
-            .graphicsLayer { rotationZ = rotationAngle },
+            .graphicsLayer {
+                rotationZ = rotationAngle
+                // 共享封面飞行/形变期间整盘让位：否则会出现「圆盘不动 + 封面在上面飘」的双影，
+                // 圆盘盘芯和飞行封面永远不同心，看着就是异常图形
+                if (coverFlight?.hidesCovers == true) alpha = 0f
+            },
         contentAlignment = Alignment.Center
     ) {
         if (showDiscTexture) {
